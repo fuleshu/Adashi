@@ -50,7 +50,9 @@ impl Default for WindowSettings {
 
 pub fn settings_path() -> PathBuf {
     if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
-        return PathBuf::from(local_app_data).join("Adashi").join("settings.json");
+        return PathBuf::from(local_app_data)
+            .join("Adashi")
+            .join("settings.json");
     }
 
     PathBuf::from(".").join("Adashi").join("settings.json")
@@ -119,7 +121,8 @@ fn normalize(mut settings: AppSettings) -> AppSettings {
         .unwrap_or(false);
 
     if !last_id_is_valid {
-        settings.last_active_project_id = settings.projects.first().map(|project| project.id.clone());
+        settings.last_active_project_id =
+            settings.projects.first().map(|project| project.id.clone());
     }
 
     settings

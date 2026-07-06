@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
+import EasyMDE from "easymde";
 import {
   Activity,
   Bot,
@@ -14,11 +15,13 @@ import {
   Network,
   PlayCircle,
   Plus,
+  ScrollText,
   Settings,
   ServerCog,
   Trash2,
 } from "lucide-react";
 import mermaid from "mermaid";
+import "easymde/dist/easymde.min.css";
 import "./styles.css";
 
 type DiagramKind = "mermaid" | "structurizr";
@@ -34,6 +37,7 @@ type DesignDiagram = {
 type Task = {
   id: number;
   title: string;
+  body: string;
   status: string;
   priority: number;
 };
@@ -58,6 +62,24 @@ type QaCheck = {
   required: boolean;
 };
 
+type RuleIntend = "general" | "design" | "implementation";
+type RuleHook = "run.start" | "task.start" | "task.end" | "run.end";
+
+type Rule = {
+  id: number;
+  name: string;
+  enabled: boolean;
+  intend: RuleIntend;
+  hook: RuleHook;
+  prompt: string;
+};
+
+type ProjectMemory = {
+  rule: string;
+  memory: string;
+  updatedAt: string;
+};
+
 type ProjectSettings = {
   id: string;
   name: string;
@@ -79,6 +101,7 @@ type DashboardPayload = {
   projectId: string;
   projectName: string;
   projectFolder: string;
+  revision: number;
   workspaceName: string;
   workspaceDescription: string;
   structurizrWorkspace: string;
@@ -88,6 +111,14 @@ type DashboardPayload = {
   guidelines: Guideline[];
   postTaskCommands: Command[];
   qaChecks: QaCheck[];
+  rules: Rule[];
+  memory: ProjectMemory;
+};
+
+type ProjectRevision = {
+  projectId: string;
+  revision: number;
+  updatedAt: string;
 };
 
 mermaid.initialize({
@@ -109,13 +140,28 @@ function App() {
   const [settings, setSettings] = React.useState<AppSettings | null>(null);
   const [payload, setPayload] = React.useState<DashboardPayload | null>(null);
   const [activeDiagram, setActiveDiagram] = React.useState<DiagramKind>("structurizr");
-  const [activeView, setActiveView] = React.useState<"design" | "settings">("design");
+  const [activeView, setActiveView] = React.useState<"design" | "tasks" | "rules" | "memory" | "qa" | "settings">("design");
   const [error, setError] = React.useState<string | null>(null);
+  const payloadRef = React.useRef<DashboardPayload | null>(null);
+  const refreshInFlightRef = React.useRef(false);
 
-  const loadDashboard = React.useCallback((projectId?: string | null) => {
-    setPayload(null);
-    invoke<DashboardPayload>("get_dashboard", { projectId })
-      .then(setPayload)
+  React.useEffect(() => {
+    payloadRef.current = payload;
+  }, [payload]);
+
+  const loadDashboard = React.useCallback((projectId?: string | null, mode: "replace" | "merge" = "replace") => {
+    if (mode === "replace") {
+      setPayload(null);
+    }
+
+    return invoke<DashboardPayload>("get_dashboard", { projectId })
+      .then((loadedPayload) => {
+        setPayload((currentPayload) =>
+          mode === "merge" && currentPayload?.projectId === loadedPayload.projectId
+            ? mergeDashboardPayload(currentPayload, loadedPayload)
+            : loadedPayload,
+        );
+      })
       .catch((reason) => setError(String(reason)));
   }, []);
 
@@ -126,6 +172,38 @@ function App() {
         loadDashboard(loadedSettings.lastActiveProjectId);
       })
       .catch((reason) => setError(String(reason)));
+  }, [loadDashboard]);
+
+  React.useEffect(() => {
+    const interval = window.setInterval(() => {
+      const currentPayload = payloadRef.current;
+
+      if (!currentPayload || refreshInFlightRef.current) {
+        return;
+      }
+
+      invoke<ProjectRevision>("get_project_revision", { projectId: currentPayload.projectId })
+        .then((revision) => {
+          const latestPayload = payloadRef.current;
+
+          if (
+            !latestPayload ||
+            latestPayload.projectId !== revision.projectId ||
+            revision.revision <= latestPayload.revision ||
+            refreshInFlightRef.current
+          ) {
+            return;
+          }
+
+          refreshInFlightRef.current = true;
+          loadDashboard(latestPayload.projectId, "merge").finally(() => {
+            refreshInFlightRef.current = false;
+          });
+        })
+        .catch((reason) => setError(String(reason)));
+    }, 1500);
+
+    return () => window.clearInterval(interval);
   }, [loadDashboard]);
 
   const switchProject = React.useCallback(
@@ -190,15 +268,23 @@ function App() {
             <Network size={18} />
             Design
           </button>
-          <button className={activeView === "design" ? "active" : ""} onClick={() => setActiveView("design")} type="button">
+          <button className={activeView === "tasks" ? "active" : ""} onClick={() => setActiveView("tasks")} type="button">
             <ListChecks size={18} />
             Tasks
+          </button>
+          <button className={activeView === "rules" ? "active" : ""} onClick={() => setActiveView("rules")} type="button">
+            <ScrollText size={18} />
+            Rules
+          </button>
+          <button className={activeView === "memory" ? "active" : ""} onClick={() => setActiveView("memory")} type="button">
+            <Database size={18} />
+            Memory
           </button>
           <button className={activeView === "settings" ? "active" : ""} onClick={() => setActiveView("settings")} type="button">
             <Settings size={18} />
             Settings
           </button>
-          <button className={activeView === "design" ? "active" : ""} onClick={() => setActiveView("design")} type="button">
+          <button className={activeView === "qa" ? "active" : ""} onClick={() => setActiveView("qa")} type="button">
             <CheckCircle2 size={18} />
             QA
           </button>
@@ -223,7 +309,10 @@ function App() {
             <p className="eyebrow">{payload.projectName}</p>
             <h2>{payload.workspaceName}</h2>
             <p>{payload.workspaceDescription}</p>
-            <p className="path-line">{payload.projectFolder}</p>
+            <div className="project-path-line">
+              <span>Project Path</span>
+              <code>{payload.projectFolder}</code>
+            </div>
           </div>
           <div className="status-strip">
             <span>Architecture as Code</span>
@@ -247,8 +336,33 @@ function App() {
             }}
             onError={setError}
           />
+        ) : activeView === "rules" ? (
+          <RulesView
+            projectId={payload.projectId}
+            rules={payload.rules}
+            onChange={(updatedPayload) => {
+              setPayload((currentPayload) =>
+                currentPayload ? mergeDashboardPayload(currentPayload, updatedPayload) : updatedPayload,
+              );
+            }}
+            onError={setError}
+          />
+        ) : activeView === "memory" ? (
+          <MemoryView
+            projectId={payload.projectId}
+            memory={payload.memory}
+            onChange={(updatedPayload) => {
+              setPayload((currentPayload) =>
+                currentPayload ? mergeDashboardPayload(currentPayload, updatedPayload) : updatedPayload,
+              );
+            }}
+            onError={setError}
+          />
+        ) : activeView === "tasks" ? (
+          <TasksView tasks={payload.tasks} postTaskCommands={payload.postTaskCommands} />
+        ) : activeView === "qa" ? (
+          <QaView qaChecks={payload.qaChecks} />
         ) : (
-          <>
         <section id="design" className="workspace-grid">
           <div className="viewer-panel">
             <div className="panel-heading">
@@ -301,47 +415,58 @@ function App() {
             </div>
           </div>
         </section>
-
-        <section id="tasks" className="lower-grid">
-          <Panel title="Task Queue">
-            {payload.tasks.map((task) => (
-              <div className="row-item" key={task.id}>
-                <span className={`pill ${task.status}`}>{task.status}</span>
-                <span>{task.title}</span>
-                <strong>P{task.priority}</strong>
-              </div>
-            ))}
-          </Panel>
-
-          <Panel title="Post-Task Commands">
-            {payload.postTaskCommands.map((command) => (
-              <div className="command-row" key={command.id}>
-                <PlayCircle size={17} />
-                <div>
-                  <span>{command.label}</span>
-                  <code>{command.command}</code>
-                </div>
-              </div>
-            ))}
-          </Panel>
-
-          <Panel title="QA Gates">
-            {payload.qaChecks.map((check) => (
-              <div className="command-row" key={check.id}>
-                <CheckCircle2 size={17} />
-                <div>
-                  <span>{check.label}</span>
-                  <code>{check.command}</code>
-                </div>
-              </div>
-            ))}
-          </Panel>
-        </section>
-          </>
         )}
       </section>
     </main>
   );
+}
+
+function mergeDashboardPayload(current: DashboardPayload, next: DashboardPayload): DashboardPayload {
+  return {
+    ...current,
+    ...next,
+    diagrams: reconcileById(current.diagrams, next.diagrams),
+    tasks: reconcileById(current.tasks, next.tasks),
+    guidelines: reconcileById(current.guidelines, next.guidelines),
+    postTaskCommands: reconcileById(current.postTaskCommands, next.postTaskCommands),
+    qaChecks: reconcileById(current.qaChecks, next.qaChecks),
+    rules: reconcileById(current.rules, next.rules),
+  };
+}
+
+function reconcileById<T extends { id: number }>(current: T[], next: T[]): T[] {
+  const currentById = new Map(current.map((item) => [item.id, item]));
+  let changed = current.length !== next.length;
+
+  const merged = next.map((nextItem, index) => {
+    const currentItem = currentById.get(nextItem.id);
+
+    if (current[index]?.id !== nextItem.id) {
+      changed = true;
+    }
+
+    if (currentItem && shallowEqualRecord(currentItem, nextItem)) {
+      return currentItem;
+    }
+
+    changed = true;
+    return nextItem;
+  });
+
+  return changed ? merged : current;
+}
+
+function shallowEqualRecord(left: object, right: object): boolean {
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+
+  if (leftKeys.length !== rightKeys.length) {
+    return false;
+  }
+
+  return leftKeys.every((key) => leftRecord[key] === rightRecord[key]);
 }
 
 function SettingsView({
@@ -423,6 +548,411 @@ function SettingsView({
         </form>
       </section>
     </section>
+  );
+}
+
+function TasksView({ tasks, postTaskCommands }: { tasks: Task[]; postTaskCommands: Command[] }) {
+  return (
+    <section className="tasks-grid">
+      <Panel title="Task Queue">
+        {tasks.map((task) => (
+          <div className="row-item" key={task.id}>
+            <span className={`pill ${task.status}`}>{task.status}</span>
+            <span>{task.title}</span>
+            <strong>P{task.priority}</strong>
+          </div>
+        ))}
+      </Panel>
+
+      <Panel title="Post-Task Commands">
+        {postTaskCommands.map((command) => (
+          <div className="command-row" key={command.id}>
+            <PlayCircle size={17} />
+            <div>
+              <span>{command.label}</span>
+              <code>{command.command}</code>
+            </div>
+          </div>
+        ))}
+      </Panel>
+    </section>
+  );
+}
+
+function QaView({ qaChecks }: { qaChecks: QaCheck[] }) {
+  return (
+    <section className="qa-grid">
+      <Panel title="QA Gates">
+        {qaChecks.map((check) => (
+          <div className="command-row" key={check.id}>
+            <CheckCircle2 size={17} />
+            <div>
+              <span>{check.label}</span>
+              <code>{check.command}</code>
+            </div>
+          </div>
+        ))}
+      </Panel>
+    </section>
+  );
+}
+
+function RulesView({
+  projectId,
+  rules,
+  onChange,
+  onError,
+}: {
+  projectId: string;
+  rules: Rule[];
+  onChange: (payload: DashboardPayload) => void;
+  onError: (message: string) => void;
+}) {
+  const [selectedRuleId, setSelectedRuleId] = React.useState<number | null>(rules[0]?.id ?? null);
+
+  React.useEffect(() => {
+    if (rules.length === 0) {
+      setSelectedRuleId(null);
+      return;
+    }
+
+    if (!selectedRuleId || !rules.some((rule) => rule.id === selectedRuleId)) {
+      setSelectedRuleId(rules[0].id);
+    }
+  }, [rules, selectedRuleId]);
+
+  const selectedRule = rules.find((rule) => rule.id === selectedRuleId) ?? null;
+
+  function addRule() {
+    invoke<DashboardPayload>("create_rule", {
+      input: {
+        projectId,
+        name: "New Rule",
+        enabled: true,
+        intend: "implementation",
+        hook: "task.start",
+        prompt: "",
+      },
+    })
+      .then((updatedPayload) => {
+        const newestRule = updatedPayload.rules.reduce<Rule | null>(
+          (newest, rule) => (!newest || rule.id > newest.id ? rule : newest),
+          null,
+        );
+        setSelectedRuleId(newestRule?.id ?? null);
+        onChange(updatedPayload);
+      })
+      .catch((reason) => onError(String(reason)));
+  }
+
+  function updateRule(rule: Rule, changes: Partial<Rule>) {
+    const updatedRule = {
+      ...rule,
+      ...changes,
+    };
+
+    invoke<DashboardPayload>("update_rule", {
+      input: {
+        projectId,
+        id: updatedRule.id,
+        name: updatedRule.name.trim() || "New Rule",
+        enabled: updatedRule.enabled,
+        intend: updatedRule.intend,
+        hook: updatedRule.hook,
+        prompt: updatedRule.prompt,
+      },
+    })
+      .then((updatedPayload) => {
+        setSelectedRuleId(updatedRule.id);
+        onChange(updatedPayload);
+      })
+      .catch((reason) => onError(String(reason)));
+  }
+
+  function remove(ruleId: number) {
+    invoke<DashboardPayload>("delete_rule", { projectId, ruleId })
+      .then((updatedPayload) => {
+        setSelectedRuleId(updatedPayload.rules[0]?.id ?? null);
+        onChange(updatedPayload);
+      })
+      .catch((reason) => onError(String(reason)));
+  }
+
+  return (
+    <section className="rules-grid">
+      <section className="rules-list-panel">
+        <div className="rules-panel-heading">
+          <h3>Rules</h3>
+          <button onClick={addRule} type="button">
+            <Plus size={17} />
+            Add
+          </button>
+        </div>
+        <div className="rule-list">
+          {rules.length === 0 ? (
+            <div className="empty-state">No rules configured</div>
+          ) : (
+            rules.map((rule) => (
+              <button
+                className={rule.id === selectedRuleId ? "rule-list-item active" : "rule-list-item"}
+                key={rule.id}
+                onClick={() => setSelectedRuleId(rule.id)}
+                type="button"
+              >
+                <strong>{rule.name || "Unnamed rule"}</strong>
+                <div>
+                  <span>{rule.intend}</span>
+                  <code>{rule.hook}</code>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      </section>
+
+      <section className="rules-editor-panel">
+        {selectedRule ? (
+          <>
+            <div className="rules-panel-heading">
+              <h3>Edit Rule</h3>
+              <button
+                aria-label={`Delete ${selectedRule.name}`}
+                className="danger-icon-button"
+                onClick={() => remove(selectedRule.id)}
+                title="Delete rule"
+                type="button"
+              >
+                <Trash2 size={17} />
+              </button>
+            </div>
+
+            <div className="rule-editor-form">
+              <label>
+                <span>Name</span>
+                <input
+                  defaultValue={selectedRule.name}
+                  key={`name-${selectedRule.id}`}
+                  onBlur={(event) => updateRule(selectedRule, { name: event.target.value })}
+                  placeholder="Rule name"
+                />
+              </label>
+
+              <label className="checkbox-row">
+                <span>Enabled</span>
+                <input
+                  checked={selectedRule.enabled}
+                  onChange={(event) => updateRule(selectedRule, { enabled: event.target.checked })}
+                  type="checkbox"
+                />
+              </label>
+
+              <label>
+                <span>Intend</span>
+                <select
+                  value={selectedRule.intend}
+                  onChange={(event) => updateRule(selectedRule, { intend: event.target.value as RuleIntend })}
+                >
+                  <option value="general">general</option>
+                  <option value="design">design</option>
+                  <option value="implementation">implementation</option>
+                </select>
+              </label>
+
+              <label>
+                <span>Hook</span>
+                <select
+                  value={selectedRule.hook}
+                  onChange={(event) => updateRule(selectedRule, { hook: event.target.value as RuleHook })}
+                >
+                  <option value="run.start">run.start</option>
+                  <option value="task.start">task.start</option>
+                  <option value="task.end">task.end</option>
+                  <option value="run.end">run.end</option>
+                </select>
+              </label>
+
+              <label className="prompt-editor-label">
+                <span>Prompt</span>
+                <MarkdownEditor
+                  key={selectedRule.id}
+                  value={selectedRule.prompt}
+                  onBlur={(value) => updateRule(selectedRule, { prompt: value })}
+                />
+              </label>
+            </div>
+          </>
+        ) : (
+          <div className="empty-state">Add a rule to start editing</div>
+        )}
+      </section>
+    </section>
+  );
+}
+
+function MemoryView({
+  projectId,
+  memory,
+  onChange,
+  onError,
+}: {
+  projectId: string;
+  memory: ProjectMemory;
+  onChange: (payload: DashboardPayload) => void;
+  onError: (message: string) => void;
+}) {
+  function saveRule(rule: string) {
+    invoke<DashboardPayload>("update_memory_rule", {
+      input: {
+        projectId,
+        rule,
+      },
+    })
+      .then(onChange)
+      .catch((reason) => onError(String(reason)));
+  }
+
+  function saveMemory(nextMemory: string) {
+    invoke<DashboardPayload>("update_memory", {
+      input: {
+        projectId,
+        memory: nextMemory,
+      },
+    })
+      .then(onChange)
+      .catch((reason) => onError(String(reason)));
+  }
+
+  return (
+    <section className="memory-grid">
+      <section className="memory-panel">
+        <div className="rules-panel-heading">
+          <h3>Memory Rule</h3>
+        </div>
+        <MarkdownEditor
+          key={`memory-rule-${memory.updatedAt}`}
+          value={memory.rule}
+          onBlur={saveRule}
+          placeholder="Write the long-term memory protocol in Markdown..."
+          minHeight="360px"
+          maxHeight="460px"
+          height="460px"
+        />
+      </section>
+
+      <section className="memory-panel">
+        <div className="rules-panel-heading">
+          <h3>Current Memory</h3>
+        </div>
+        <MarkdownEditor
+          key={`memory-body-${memory.updatedAt}`}
+          value={memory.memory}
+          onBlur={saveMemory}
+          placeholder="Current project memory..."
+          minHeight="360px"
+          maxHeight="460px"
+          height="460px"
+        />
+      </section>
+    </section>
+  );
+}
+
+function MarkdownEditor({
+  value,
+  onBlur,
+  placeholder = "Write the injected agent instruction in Markdown...",
+  minHeight = "440px",
+  maxHeight = "620px",
+  height = "560px",
+}: {
+  value: string;
+  onBlur: (value: string) => void;
+  placeholder?: string;
+  minHeight?: string;
+  maxHeight?: string;
+  height?: string;
+}) {
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const editorRef = React.useRef<EasyMDE | null>(null);
+  const savedValueRef = React.useRef(value);
+  const onBlurRef = React.useRef(onBlur);
+
+  React.useEffect(() => {
+    onBlurRef.current = onBlur;
+  }, [onBlur]);
+
+  React.useEffect(() => {
+    if (!textareaRef.current) {
+      return;
+    }
+
+    const editor = new EasyMDE({
+      autoDownloadFontAwesome: false,
+      autofocus: false,
+      autoRefresh: { delay: 300 },
+      autosave: {
+        enabled: false,
+        uniqueId: "adashi-rule-editor-disabled",
+      },
+      element: textareaRef.current,
+      forceSync: true,
+      initialValue: value,
+      lineNumbers: false,
+      lineWrapping: true,
+      maxHeight,
+      minHeight,
+      nativeSpellcheck: true,
+      placeholder,
+      previewImagesInEditor: false,
+      promptURLs: false,
+      sideBySideFullscreen: false,
+      spellChecker: false,
+      status: false,
+      styleSelectedText: false,
+      toolbar: ([
+        { name: "heading-1", action: EasyMDE.toggleHeading1, className: "adashi-mde-heading", title: "Heading", text: "H1" },
+        { name: "bold", action: EasyMDE.toggleBold, className: "adashi-mde-bold", title: "Bold", text: "B" },
+        { name: "italic", action: EasyMDE.toggleItalic, className: "adashi-mde-italic", title: "Italic", text: "I" },
+        "|",
+        { name: "quote", action: EasyMDE.toggleBlockquote, className: "adashi-mde-quote", title: "Quote", text: ">" },
+        { name: "unordered-list", action: EasyMDE.toggleUnorderedList, className: "adashi-mde-list", title: "Bullet list", text: "- list" },
+        { name: "ordered-list", action: EasyMDE.toggleOrderedList, className: "adashi-mde-ordered", title: "Numbered list", text: "1. list" },
+        "|",
+        { name: "code", action: EasyMDE.toggleCodeBlock, className: "adashi-mde-code", title: "Code block", text: "{ }" },
+        { name: "link", action: EasyMDE.drawLink, className: "adashi-mde-link", title: "Link", text: "link" },
+        "|",
+        { name: "preview", action: EasyMDE.togglePreview, className: "adashi-mde-preview no-disable", title: "Preview", text: "Preview", noDisable: true },
+      ] as EasyMDE.Options["toolbar"]),
+      toolbarTips: true,
+      uploadImage: false,
+    });
+
+    function commit() {
+      const nextValue = editor.value();
+
+      if (nextValue !== savedValueRef.current) {
+        savedValueRef.current = nextValue;
+        onBlurRef.current(nextValue);
+      }
+    }
+
+    editor.codemirror.on("blur", commit);
+    editorRef.current = editor;
+
+    window.requestAnimationFrame(() => editor.codemirror.refresh());
+
+    return () => {
+      commit();
+      editor.codemirror.off("blur", commit);
+      editor.toTextArea();
+      editorRef.current = null;
+    };
+  }, []);
+
+  return (
+    <div className="markdown-editor-host" style={{ height, minHeight }}>
+      <textarea className="markdown-editor-source" ref={textareaRef} defaultValue={value} />
+    </div>
   );
 }
 

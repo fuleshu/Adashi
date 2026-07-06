@@ -1,15 +1,24 @@
+mod mcp;
+mod memory;
+mod rules;
 mod schema;
 mod seed;
 mod settings;
+mod state;
+mod tasks;
 
 use rusqlite::{Connection, OptionalExtension};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::{Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow, WindowEvent};
 
+use crate::memory::ProjectMemory;
+use crate::rules::{NewRule, Rule, UpdateRule};
 use crate::settings::{AppSettings, ProjectSettings, WindowSettings};
+use crate::state as project_state;
+use crate::tasks::Task;
 
 struct AppState {
     settings_path: PathBuf,
@@ -22,6 +31,7 @@ struct DashboardPayload {
     project_id: String,
     project_name: String,
     project_folder: String,
+    revision: i64,
     workspace_name: String,
     workspace_description: String,
     structurizr_workspace: String,
@@ -31,6 +41,8 @@ struct DashboardPayload {
     guidelines: Vec<Guideline>,
     post_task_commands: Vec<PostTaskCommand>,
     qa_checks: Vec<QaCheck>,
+    rules: Vec<Rule>,
+    memory: ProjectMemory,
 }
 
 #[derive(Serialize)]
@@ -40,14 +52,6 @@ struct DesignDiagram {
     key: String,
     title: String,
     source: String,
-}
-
-#[derive(Serialize)]
-struct Task {
-    id: i64,
-    title: String,
-    status: String,
-    priority: i64,
 }
 
 #[derive(Serialize)]
@@ -83,10 +87,19 @@ fn get_app_settings(state: State<'_, AppState>) -> Result<AppSettings, String> {
 }
 
 #[tauri::command]
-fn get_dashboard(project_id: Option<String>, state: State<'_, AppState>) -> Result<DashboardPayload, String> {
+fn get_dashboard(
+    project_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<DashboardPayload, String> {
     let project = resolve_project(&state, project_id.as_deref())?;
     let db = open_project_database(&project).map_err(|err| err.to_string())?;
+    load_dashboard_payload(project, &db)
+}
 
+fn load_dashboard_payload(
+    project: ProjectSettings,
+    db: &Connection,
+) -> Result<DashboardPayload, String> {
     let workspace = db
         .query_row(
             "SELECT w.name, w.description, w.structurizr_json
@@ -106,30 +119,67 @@ fn get_dashboard(project_id: Option<String>, state: State<'_, AppState>) -> Resu
         .map_err(|err| err.to_string())?
         .ok_or_else(|| "No design workspace has been seeded".to_string())?;
 
+    let project_row_id = load_project_row_id(db)?;
+    let revision = project_state::load_project_revision(db, project_row_id)?.revision;
+
     Ok(DashboardPayload {
         project_id: project.id,
         project_name: project.name,
         project_folder: project.folder,
+        revision,
         workspace_name: workspace.0,
         workspace_description: workspace.1,
         structurizr_workspace: workspace.2,
         structurizr_view_key: "AdashiContainers".to_string(),
         diagrams: load_diagrams(&db)?,
-        tasks: load_tasks(&db)?,
+        tasks: tasks::load_tasks(db)?,
         guidelines: load_guidelines(&db)?,
         post_task_commands: load_post_task_commands(&db)?,
         qa_checks: load_qa_checks(&db)?,
+        rules: rules::load_rules(db)?,
+        memory: memory::load_memory(db, project_row_id)?,
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectRevisionPayload {
+    project_id: String,
+    revision: i64,
+    updated_at: String,
+}
+
+#[tauri::command]
+fn get_project_revision(
+    project_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<ProjectRevisionPayload, String> {
+    let project = resolve_project(&state, project_id.as_deref())?;
+    let db = open_project_database(&project).map_err(|err| err.to_string())?;
+    let revision = project_state::load_project_revision(&db, load_project_row_id(&db)?)?;
+
+    Ok(ProjectRevisionPayload {
+        project_id: project.id,
+        revision: revision.revision,
+        updated_at: revision.updated_at,
     })
 }
 
 #[tauri::command]
-fn set_active_project(project_id: String, state: State<'_, AppState>) -> Result<AppSettings, String> {
+fn set_active_project(
+    project_id: String,
+    state: State<'_, AppState>,
+) -> Result<AppSettings, String> {
     let mut settings = state
         .settings
         .lock()
         .map_err(|_| "Settings lock was poisoned".to_string())?;
 
-    if !settings.projects.iter().any(|project| project.id == project_id) {
+    if !settings
+        .projects
+        .iter()
+        .any(|project| project.id == project_id)
+    {
         return Err(format!("Unknown project id: {project_id}"));
     }
 
@@ -139,7 +189,11 @@ fn set_active_project(project_id: String, state: State<'_, AppState>) -> Result<
 }
 
 #[tauri::command]
-fn add_project(name: String, folder: String, state: State<'_, AppState>) -> Result<AppSettings, String> {
+fn add_project(
+    name: String,
+    folder: String,
+    state: State<'_, AppState>,
+) -> Result<AppSettings, String> {
     let trimmed_name = name.trim();
     let trimmed_folder = folder.trim();
 
@@ -197,11 +251,142 @@ fn delete_project(project_id: String, state: State<'_, AppState>) -> Result<AppS
     }
 
     if settings.last_active_project_id.as_deref() == Some(project_id.as_str()) {
-        settings.last_active_project_id = settings.projects.first().map(|project| project.id.clone());
+        settings.last_active_project_id =
+            settings.projects.first().map(|project| project.id.clone());
     }
 
     settings::save(&state.settings_path, &settings).map_err(|err| err.to_string())?;
     Ok(settings.clone())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateRuleRequest {
+    project_id: Option<String>,
+    name: String,
+    enabled: bool,
+    intend: String,
+    hook: String,
+    prompt: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateRuleRequest {
+    project_id: Option<String>,
+    id: i64,
+    name: String,
+    enabled: bool,
+    intend: String,
+    hook: String,
+    prompt: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateMemoryRuleRequest {
+    project_id: Option<String>,
+    rule: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateMemoryRequest {
+    project_id: Option<String>,
+    memory: String,
+}
+
+#[tauri::command]
+fn create_rule(
+    input: CreateRuleRequest,
+    state: State<'_, AppState>,
+) -> Result<DashboardPayload, String> {
+    let project = resolve_project(&state, input.project_id.as_deref())?;
+    let db = open_project_database(&project).map_err(|err| err.to_string())?;
+    let project_row_id = load_project_row_id(&db)?;
+
+    rules::create_rule(
+        &db,
+        project_row_id,
+        NewRule {
+            name: input.name,
+            enabled: input.enabled,
+            intend: input.intend,
+            hook: input.hook,
+            prompt: input.prompt,
+        },
+    )?;
+    project_state::bump_project_revision(&db, project_row_id)?;
+
+    load_dashboard_payload(project, &db)
+}
+
+#[tauri::command]
+fn update_rule(
+    input: UpdateRuleRequest,
+    state: State<'_, AppState>,
+) -> Result<DashboardPayload, String> {
+    let project = resolve_project(&state, input.project_id.as_deref())?;
+    let db = open_project_database(&project).map_err(|err| err.to_string())?;
+
+    rules::update_rule(
+        &db,
+        UpdateRule {
+            id: input.id,
+            name: input.name,
+            enabled: input.enabled,
+            intend: input.intend,
+            hook: input.hook,
+            prompt: input.prompt,
+        },
+    )?;
+    project_state::bump_project_revision(&db, load_project_row_id(&db)?)?;
+
+    load_dashboard_payload(project, &db)
+}
+
+#[tauri::command]
+fn delete_rule(
+    project_id: Option<String>,
+    rule_id: i64,
+    state: State<'_, AppState>,
+) -> Result<DashboardPayload, String> {
+    let project = resolve_project(&state, project_id.as_deref())?;
+    let db = open_project_database(&project).map_err(|err| err.to_string())?;
+    let project_row_id = load_project_row_id(&db)?;
+    rules::delete_rule(&db, rule_id)?;
+    project_state::bump_project_revision(&db, project_row_id)?;
+    load_dashboard_payload(project, &db)
+}
+
+#[tauri::command]
+fn update_memory_rule(
+    input: UpdateMemoryRuleRequest,
+    state: State<'_, AppState>,
+) -> Result<DashboardPayload, String> {
+    let project = resolve_project(&state, input.project_id.as_deref())?;
+    let db = open_project_database(&project).map_err(|err| err.to_string())?;
+    let project_row_id = load_project_row_id(&db)?;
+    memory::update_memory_rule(&db, project_row_id, input.rule)?;
+    project_state::bump_project_revision(&db, project_row_id)?;
+    load_dashboard_payload(project, &db)
+}
+
+#[tauri::command]
+fn update_memory(
+    input: UpdateMemoryRequest,
+    state: State<'_, AppState>,
+) -> Result<DashboardPayload, String> {
+    let project = resolve_project(&state, input.project_id.as_deref())?;
+    let db = open_project_database(&project).map_err(|err| err.to_string())?;
+    let project_row_id = load_project_row_id(&db)?;
+    memory::update_memory(&db, project_row_id, input.memory)?;
+    project_state::bump_project_revision(&db, project_row_id)?;
+    load_dashboard_payload(project, &db)
+}
+
+pub fn run_mcp() -> Result<(), Box<dyn std::error::Error>> {
+    mcp::run_stdio_server()
 }
 
 pub fn run() {
@@ -226,23 +411,42 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             add_project,
+            create_rule,
+            delete_rule,
             delete_project,
             get_app_settings,
             get_dashboard,
-            set_active_project
+            get_project_revision,
+            set_active_project,
+            update_memory,
+            update_memory_rule,
+            update_rule
         ])
         .run(tauri::generate_context!())
         .expect("error while running Adashi");
 }
 
-fn resolve_project(state: &State<'_, AppState>, project_id: Option<&str>) -> Result<ProjectSettings, String> {
+fn resolve_project(
+    state: &State<'_, AppState>,
+    project_id: Option<&str>,
+) -> Result<ProjectSettings, String> {
     let settings = state
         .settings
         .lock()
         .map_err(|_| "Settings lock was poisoned".to_string())?;
 
+    resolve_project_from_settings(&settings, project_id)
+}
+
+pub(crate) fn resolve_project_from_settings(
+    settings: &AppSettings,
+    project_id: Option<&str>,
+) -> Result<ProjectSettings, String> {
     let project = if let Some(project_id) = project_id {
-        settings.projects.iter().find(|project| project.id == project_id)
+        settings
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
     } else {
         settings.active_project()
     };
@@ -252,7 +456,9 @@ fn resolve_project(state: &State<'_, AppState>, project_id: Option<&str>) -> Res
         .ok_or_else(|| "No active project is configured".to_string())
 }
 
-fn open_project_database(project: &ProjectSettings) -> Result<Connection, Box<dyn std::error::Error>> {
+pub(crate) fn open_project_database(
+    project: &ProjectSettings,
+) -> Result<Connection, Box<dyn std::error::Error>> {
     let data_dir = settings::project_data_dir(project);
     fs::create_dir_all(&data_dir)?;
 
@@ -260,6 +466,13 @@ fn open_project_database(project: &ProjectSettings) -> Result<Connection, Box<dy
     schema::migrate(&mut db)?;
     seed::seed_initial_data(&mut db, project)?;
     Ok(db)
+}
+
+fn load_project_row_id(db: &Connection) -> Result<i64, String> {
+    db.query_row("SELECT id FROM projects ORDER BY id LIMIT 1", [], |row| {
+        row.get(0)
+    })
+    .map_err(|err| err.to_string())
 }
 
 fn restore_window(
@@ -272,7 +485,10 @@ fn restore_window(
         .window
         .clone();
 
-    window.set_size(PhysicalSize::new(window_settings.width, window_settings.height))?;
+    window.set_size(PhysicalSize::new(
+        window_settings.width,
+        window_settings.height,
+    ))?;
 
     if let (Some(x), Some(y)) = (window_settings.x, window_settings.y) {
         window.set_position(PhysicalPosition::new(x, y))?;
@@ -326,25 +542,6 @@ fn load_diagrams(db: &Connection) -> Result<Vec<DesignDiagram>, String> {
                 key: row.get(2)?,
                 title: row.get(3)?,
                 source: row.get(4)?,
-            })
-        })
-        .map_err(|err| err.to_string())?;
-
-    rows.collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|err| err.to_string())
-}
-
-fn load_tasks(db: &Connection) -> Result<Vec<Task>, String> {
-    let mut statement = db
-        .prepare("SELECT id, title, status, priority FROM agent_tasks ORDER BY priority, id")
-        .map_err(|err| err.to_string())?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok(Task {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                status: row.get(2)?,
-                priority: row.get(3)?,
             })
         })
         .map_err(|err| err.to_string())?;

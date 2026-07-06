@@ -15,6 +15,16 @@ pub fn seed_initial_data(db: &mut Connection, project: &ProjectSettings) -> rusq
     let project_id = tx.last_insert_rowid();
 
     tx.execute(
+        "INSERT INTO project_state(project_id) VALUES (?1)",
+        params![project_id],
+    )?;
+
+    tx.execute(
+        "INSERT INTO project_memory(project_id, protocol_rule, memory_body) VALUES (?1, ?2, '')",
+        params![project_id, crate::memory::DEFAULT_MEMORY_RULE],
+    )?;
+
+    tx.execute(
         "INSERT INTO design_workspaces(project_id, name, description, structurizr_dsl, structurizr_json)
          VALUES (?1, ?2, ?3, ?4, ?5)",
         params![
@@ -116,7 +126,11 @@ pub fn seed_initial_data(db: &mut Connection, project: &ProjectSettings) -> rusq
 
     tx.execute(
         "INSERT INTO qa_checks(project_id, label, command, required) VALUES (?1, ?2, ?3, 1)",
-        params![project_id, "Tauri compile check", "cargo check --manifest-path src-tauri/Cargo.toml"],
+        params![
+            project_id,
+            "Tauri compile check",
+            "cargo check --manifest-path src-tauri/Cargo.toml"
+        ],
     )?;
     tx.execute(
         "INSERT INTO qa_checks(project_id, label, command, required) VALUES (?1, ?2, ?3, 1)",
@@ -160,7 +174,8 @@ const C4_ELEMENTS: &[ElementSeed] = &[
         parent_external_id: None,
         element_type: "Software System",
         name: "Adashi",
-        description: "Senior agent dashboard for architecture, task injection, and QA orchestration.",
+        description:
+            "Senior agent dashboard for architecture, task injection, and QA orchestration.",
         technology: "",
         tags: "Element,Software System",
     },
@@ -196,7 +211,8 @@ const C4_ELEMENTS: &[ElementSeed] = &[
         parent_external_id: Some("2"),
         element_type: "Container",
         name: "Design Store",
-        description: "Local SQL store for projects, workspaces, diagrams, tasks, commands, and QA checks.",
+        description:
+            "Local SQL store for projects, workspaces, diagrams, tasks, commands, and QA checks.",
         technology: "SQLite",
         tags: "Element,Container,Database",
     },
