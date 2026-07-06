@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./js/jquery-3.6.3.min.js"></script>
+    <script src="./js/lodash-4.17.21.js"></script>
+    <script src="./js/backbone-1.4.1.js"></script>
+    <script src="./js/joint-3.6.5.js"></script>
+    <script src="./js/structurizr.js"></script>
+    <script src="./js/structurizr-util.js"></script>
+    <script src="./js/structurizr-ui.js"></script>
+    <script src="./js/structurizr-workspace.js"></script>
+    <script src="./js/structurizr-diagram.js"></script>
+    <link href="./css/joint-3.6.5.css" rel="stylesheet" />
+    <link href="./css/structurizr.css" rel="stylesheet" />
+    <style>
+      html,
+      body,
+      #diagram {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #f7f7f2;
+      }
+
+      body {
+        font-family: Arial, sans-serif;
+      }
+
+      .empty {
+        align-items: center;
+        color: #4b5563;
+        display: flex;
+        height: 100%;
+        justify-content: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="diagram" class="empty">Waiting for Structurizr workspace...</div>
+    <script>
+      let currentDiagram;
+
+      function renderWorkspace(payload) {
+        const workspace = typeof payload.workspace === "string" ? JSON.parse(payload.workspace) : payload.workspace;
+        const viewKey = payload.viewKey || workspace?.views?.configuration?.defaultView;
+        const host = document.getElementById("diagram");
+
+        host.className = "";
+        host.innerHTML = "";
+        structurizr.workspace = new structurizr.Workspace(workspace);
+        currentDiagram = new structurizr.ui.Diagram("diagram", false, function () {
+          currentDiagram.changeView(viewKey);
+          currentDiagram.resize();
+          currentDiagram.zoomFitContent();
+        });
+      }
+
+      window.addEventListener("message", function (event) {
+        if (event.data && event.data.type === "adashi:structurizr-workspace") {
+          renderWorkspace(event.data);
+        }
+      });
+    </script>
+  </body>
+</html>
