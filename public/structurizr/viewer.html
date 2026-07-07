@@ -42,6 +42,19 @@
     <div id="diagram" class="empty">Waiting for Structurizr workspace...</div>
     <script>
       let currentDiagram;
+      let fitTimer;
+
+      function fitDiagram() {
+        if (!currentDiagram) {
+          return;
+        }
+
+        window.clearTimeout(fitTimer);
+        fitTimer = window.setTimeout(function () {
+          currentDiagram.resize();
+          currentDiagram.zoomFitContent();
+        }, 40);
+      }
 
       function renderWorkspace(payload) {
         const workspace = typeof payload.workspace === "string" ? JSON.parse(payload.workspace) : payload.workspace;
@@ -83,10 +96,16 @@
             );
           });
           currentDiagram.changeView(viewKey);
-          currentDiagram.resize();
-          currentDiagram.zoomFitContent();
+          fitDiagram();
         });
       }
+
+      if ("ResizeObserver" in window) {
+        const observer = new ResizeObserver(fitDiagram);
+        observer.observe(document.getElementById("diagram"));
+      }
+
+      window.addEventListener("resize", fitDiagram);
 
       window.addEventListener("message", function (event) {
         if (event.data && event.data.type === "adashi:structurizr-workspace") {

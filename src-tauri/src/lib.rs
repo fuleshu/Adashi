@@ -52,12 +52,15 @@ struct DashboardPayload {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct DesignDiagram {
     id: i64,
     kind: String,
     key: String,
     title: String,
     source: String,
+    diagram_type: String,
+    attached_to_external_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -770,7 +773,11 @@ fn save_window_state(
 
 fn load_diagrams(db: &Connection) -> Result<Vec<DesignDiagram>, String> {
     let mut statement = db
-        .prepare("SELECT id, kind, key, title, source FROM diagrams ORDER BY sort_order, id")
+        .prepare(
+            "SELECT id, kind, key, title, source, diagram_type, attached_to_external_id
+             FROM diagrams
+             ORDER BY sort_order, id",
+        )
         .map_err(|err| err.to_string())?;
     let rows = statement
         .query_map([], |row| {
@@ -780,6 +787,8 @@ fn load_diagrams(db: &Connection) -> Result<Vec<DesignDiagram>, String> {
                 key: row.get(2)?,
                 title: row.get(3)?,
                 source: row.get(4)?,
+                diagram_type: row.get(5)?,
+                attached_to_external_id: row.get(6)?,
             })
         })
         .map_err(|err| err.to_string())?;

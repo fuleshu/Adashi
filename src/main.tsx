@@ -37,6 +37,8 @@ type DesignDiagram = {
   key: string;
   title: string;
   source: string;
+  diagramType: string;
+  attachedToExternalId?: string | null;
 };
 
 type DesignElement = {
@@ -58,6 +60,77 @@ type DesignRelationship = {
   description: string;
   technology: string;
   tags: string;
+};
+
+type StructurizrRelationshipJson = {
+  id: string;
+  sourceId: string;
+  destinationId: string;
+  description: string;
+  technology: string;
+  tags: string;
+};
+
+type StructurizrElementJson = {
+  id: string;
+  canonicalName: string;
+  description: string;
+  location: "Internal" | "External";
+  name: string;
+  parentId: string | null;
+  relationships: StructurizrRelationshipJson[];
+  tags: string;
+  technology: string;
+  type: string;
+  containers?: StructurizrElementJson[];
+  components?: StructurizrElementJson[];
+};
+
+type StructurizrViewElementJson = {
+  id: string;
+  relationships: string[];
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type StructurizrWorkspaceJson = {
+  id: number;
+  name: string;
+  description: string;
+  model: {
+    people: StructurizrElementJson[];
+    softwareSystems: StructurizrElementJson[];
+  };
+  views: {
+    systemContextViews?: StructurizrViewJson[];
+    containerViews?: StructurizrViewJson[];
+    componentViews?: StructurizrViewJson[];
+    configuration: {
+      defaultView: string;
+      styles: {
+        elements: Array<Record<string, string | number>>;
+        relationships: Array<Record<string, string | number>>;
+      };
+    };
+  };
+};
+
+type StructurizrViewJson = {
+  key: string;
+  description: string;
+  softwareSystemId?: string;
+  containerId?: string;
+  elements: StructurizrViewElementJson[];
+  automaticLayout?: {
+    implementation: "Dagre";
+    rankDirection: "LeftRight";
+    rankSeparation: number;
+    nodeSeparation: number;
+    edgeSeparation: number;
+    vertices: boolean;
+  };
 };
 
 type Task = {
@@ -270,8 +343,6 @@ function App() {
     );
   }
 
-  const mermaidDiagram = payload.diagrams.find((diagram) => diagram.kind === "mermaid");
-
   return (
     <main className="shell">
       <aside className="sidebar">
@@ -404,7 +475,6 @@ function App() {
         ) : (
           <DesignBrowser
             activeLevel={activeDesignLevel}
-            mermaidDiagram={mermaidDiagram}
             payload={payload}
             selectedEntity={selectedDesignEntity}
             onChange={(updatedPayload) => {
@@ -485,7 +555,6 @@ function shallowEqualRecord(left: object, right: object): boolean {
 
 function DesignBrowser({
   activeLevel,
-  mermaidDiagram,
   payload,
   selectedEntity,
   onChange,
@@ -494,7 +563,6 @@ function DesignBrowser({
   onSelect,
 }: {
   activeLevel: DesignLevel;
-  mermaidDiagram?: DesignDiagram;
   payload: DashboardPayload;
   selectedEntity: { type: DesignEntityType; externalId: string } | null;
   onChange: (payload: DashboardPayload) => void;
@@ -503,6 +571,9 @@ function DesignBrowser({
   onSelect: (entity: { type: DesignEntityType; externalId: string } | null) => void;
 }) {
   const [query, setQuery] = React.useState("");
+  const [isResizingSource, setIsResizingSource] = React.useState(false);
+  const [sourcePanelHeight, setSourcePanelHeight] = React.useState(200);
+  const designMainRef = React.useRef<HTMLElement | null>(null);
   const designTree = React.useMemo(() => buildDesignTree(payload.designElements), [payload.designElements]);
   const rootElement =
     payload.designElements.find(
@@ -518,7 +589,7 @@ function DesignBrowser({
     selectedEntity?.type === "relationship"
       ? payload.designRelationships.find((relationship) => relationship.externalId === selectedEntity.externalId) ?? null
       : null;
-  const activeBranchElement = selectedElement ?? rootElement;
+  const activeBranchElement = activeLevel === "context" ? rootElement : selectedElement ?? rootElement;
   const branchChildren = activeBranchElement
     ? payload.designElements.filter((element) => element.parentExternalId === activeBranchElement.externalId)
     : [];
@@ -533,7 +604,27 @@ function DesignBrowser({
           ),
       )
     : [];
-  const sourceDiagram = activeLevel === "features" ? mermaidDiagram : payload.diagrams.find((diagram) => diagram.kind === "structurizr");
+  const activeMermaidDiagram = selectMermaidDiagram(
+    payload.diagrams,
+    selectedRelationship?.externalId ?? activeBranchElement?.externalId ?? null,
+    activeBranchElement,
+    payload.designElements,
+  );
+  const branchStructurizr = React.useMemo(
+    () =>
+      buildBranchStructurizrWorkspace(
+        payload,
+        activeLevel,
+        activeBranchElement,
+        rootElement,
+        payload.structurizrViewKey,
+      ),
+    [activeBranchElement, activeLevel, payload, rootElement],
+  );
+  const sourceDiagram =
+    activeLevel === "features"
+      ? activeMermaidDiagram
+      : payload.diagrams.find((diagram) => diagram.kind === "structurizr");
 
   function selectLevel(level: DesignLevel) {
     onLevelChange(level);
@@ -542,7 +633,11 @@ function DesignBrowser({
       onSelect({ type: "element", externalId: rootElement.externalId });
     }
 
-    if ((level === "components" || level === "features") && !selectedEntity && rootElement) {
+    if (level === "components" && rootElement && (!selectedElement || !hasChildElements(selectedElement, payload.designElements))) {
+      onSelect({ type: "element", externalId: rootElement.externalId });
+    }
+
+    if (level === "features" && !selectedEntity && rootElement) {
       onSelect({ type: "element", externalId: rootElement.externalId });
     }
   }
@@ -556,6 +651,18 @@ function DesignBrowser({
     }
 
     onLevelChange(element.parentExternalId ? "features" : "context");
+  }
+
+  function resizeSourcePanel(clientY: number) {
+    const bounds = designMainRef.current?.getBoundingClientRect();
+
+    if (!bounds) {
+      return;
+    }
+
+    const maximumHeight = Math.max(140, bounds.height - 220);
+    const nextHeight = Math.min(Math.max(bounds.bottom - clientY, 120), maximumHeight);
+    setSourcePanelHeight(nextHeight);
   }
 
   const breadcrumbElements = buildBreadcrumb(activeBranchElement, payload.designElements);
@@ -606,7 +713,11 @@ function DesignBrowser({
         />
       </aside>
 
-      <section className="design-main">
+      <section
+        className={isResizingSource ? "design-main resizing-source" : "design-main"}
+        ref={designMainRef}
+        style={{ "--design-source-height": `${sourcePanelHeight}px` } as React.CSSProperties}
+      >
         <div className="design-breadcrumbs" aria-label="Design breadcrumbs">
           <button onClick={() => selectLevel("context")} type="button">System Context</button>
           {breadcrumbElements.map((element) => (
@@ -631,16 +742,16 @@ function DesignBrowser({
             </div>
             <div className="status-strip compact">
               <span>{activeLevel === "features" ? "feature flow" : "branch view"}</span>
-              <span>{activeLevel === "features" ? mermaidDiagram?.key ?? "Mermaid" : payload.structurizrViewKey}</span>
+              <span>{activeLevel === "features" ? activeMermaidDiagram?.key ?? "No attached UML" : branchStructurizr.viewKey}</span>
             </div>
           </div>
 
           {activeLevel === "features" ? (
-            <MermaidPanel diagram={mermaidDiagram?.source ?? ""} />
+            <MermaidPanel diagram={activeMermaidDiagram?.source ?? ""} />
           ) : (
             <StructurizrFrame
-              workspace={payload.structurizrWorkspace}
-              viewKey={payload.structurizrViewKey}
+              workspace={branchStructurizr.workspace}
+              viewKey={branchStructurizr.viewKey}
               onOpen={(entity) => {
                 onSelect(entity);
 
@@ -655,6 +766,28 @@ function DesignBrowser({
             />
           )}
         </div>
+
+        <button
+          aria-label="Resize source view"
+          className="panel-resizer"
+          onLostPointerCapture={() => setIsResizingSource(false)}
+          onPointerDown={(event) => {
+            event.currentTarget.setPointerCapture(event.pointerId);
+            setIsResizingSource(true);
+            resizeSourcePanel(event.clientY);
+          }}
+          onPointerMove={(event) => {
+            if (isResizingSource) {
+              resizeSourcePanel(event.clientY);
+            }
+          }}
+          onPointerUp={(event) => {
+            resizeSourcePanel(event.clientY);
+            event.currentTarget.releasePointerCapture(event.pointerId);
+            setIsResizingSource(false);
+          }}
+          type="button"
+        />
 
         <SourcePanel
           diagram={sourceDiagram}
@@ -718,6 +851,7 @@ function DesignTree({
   onSelectRelationship: (relationship: DesignRelationship) => void;
 }) {
   const normalizedQuery = query.trim().toLowerCase();
+  const [expandedIds, setExpandedIds] = React.useState<Set<string>>(() => new Set());
   const branchRelationships = branchElement
     ? relationships.filter(
         (relationship) =>
@@ -725,6 +859,20 @@ function DesignTree({
           relationship.destinationExternalId === branchElement.externalId,
       )
     : [];
+
+  function toggleBranch(externalId: string) {
+    setExpandedIds((current) => {
+      const next = new Set(current);
+
+      if (next.has(externalId)) {
+        next.delete(externalId);
+      } else {
+        next.add(externalId);
+      }
+
+      return next;
+    });
+  }
 
   return (
     <div className="design-list">
@@ -740,6 +888,8 @@ function DesignTree({
           normalizedQuery={normalizedQuery}
           selectedEntity={selectedEntity}
           activeBranchExternalId={branchElement?.externalId ?? null}
+          expandedIds={expandedIds}
+          onToggleBranch={toggleBranch}
           onSelectElement={onSelectElement}
         />
       ))}
@@ -791,12 +941,16 @@ function DesignTreeItem({
   normalizedQuery,
   selectedEntity,
   activeBranchExternalId,
+  expandedIds,
+  onToggleBranch,
   onSelectElement,
 }: {
   node: DesignTreeNode;
   normalizedQuery: string;
   selectedEntity: { type: DesignEntityType; externalId: string } | null;
   activeBranchExternalId: string | null;
+  expandedIds: Set<string>;
+  onToggleBranch: (externalId: string) => void;
   onSelectElement: (element: DesignElement) => void;
 }) {
   const matches =
@@ -805,6 +959,9 @@ function DesignTreeItem({
       .toLowerCase()
       .includes(normalizedQuery);
   const visibleChildren = node.children.filter((child) => treeNodeMatches(child, normalizedQuery));
+  const hasChildren = visibleChildren.length > 0;
+  const isSearching = normalizedQuery.length > 0;
+  const isExpanded = isSearching || expandedIds.has(node.element.externalId);
 
   if (!matches && visibleChildren.length === 0) {
     return null;
@@ -812,29 +969,46 @@ function DesignTreeItem({
 
   return (
     <div className="design-tree-node">
-      <button
-        className={[
-          "design-list-item",
-          selectedEntity?.type === "element" && selectedEntity.externalId === node.element.externalId ? "active" : "",
-          activeBranchExternalId === node.element.externalId ? "branch-active" : "",
-        ]
-          .filter(Boolean)
-          .join(" ")}
-        onClick={() => onSelectElement(node.element)}
-        type="button"
-      >
-        <strong>{node.element.name}</strong>
-        <span>{node.element.elementType}</span>
-      </button>
-      {visibleChildren.length > 0 ? (
+      <div className="design-tree-row">
+        {hasChildren ? (
+          <button
+            aria-expanded={isExpanded}
+            aria-label={`${isExpanded ? "Collapse" : "Expand"} ${node.element.name}`}
+            className="design-tree-toggle"
+            onClick={() => onToggleBranch(node.element.externalId)}
+            type="button"
+          >
+            <ChevronRight className={isExpanded ? "expanded" : ""} size={16} />
+          </button>
+        ) : (
+          <span className="design-tree-toggle-placeholder" />
+        )}
+        <button
+          className={[
+            "design-list-item",
+            selectedEntity?.type === "element" && selectedEntity.externalId === node.element.externalId ? "active" : "",
+            activeBranchExternalId === node.element.externalId ? "branch-active" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          onClick={() => onSelectElement(node.element)}
+          type="button"
+        >
+          <strong>{node.element.name}</strong>
+          <span>{node.element.elementType}</span>
+        </button>
+      </div>
+      {hasChildren && isExpanded ? (
         <div className="design-tree-children">
           {visibleChildren.map((child) => (
             <DesignTreeItem
               activeBranchExternalId={activeBranchExternalId}
+              expandedIds={expandedIds}
               key={child.element.externalId}
               node={child}
               normalizedQuery={normalizedQuery}
               selectedEntity={selectedEntity}
+              onToggleBranch={onToggleBranch}
               onSelectElement={onSelectElement}
             />
           ))}
@@ -902,6 +1076,298 @@ function buildBreadcrumb(element: DesignElement | null, elements: DesignElement[
   }
 
   return path;
+}
+
+function selectMermaidDiagram(
+  diagrams: DesignDiagram[],
+  preferredExternalId: string | null,
+  activeBranchElement: DesignElement | null,
+  elements: DesignElement[],
+): DesignDiagram | undefined {
+  const mermaidDiagrams = diagrams.filter((diagram) => diagram.kind === "mermaid");
+  const candidateIds = new Set<string>();
+
+  if (preferredExternalId) {
+    candidateIds.add(preferredExternalId);
+  }
+
+  for (const element of buildBreadcrumb(activeBranchElement, elements).reverse()) {
+    candidateIds.add(element.externalId);
+  }
+
+  for (const candidateId of candidateIds) {
+    const exact = mermaidDiagrams.find((diagram) => diagram.attachedToExternalId === candidateId);
+
+    if (exact) {
+      return exact;
+    }
+  }
+
+  return undefined;
+}
+
+function buildBranchStructurizrWorkspace(
+  payload: DashboardPayload,
+  activeLevel: DesignLevel,
+  activeBranchElement: DesignElement | null,
+  rootElement: DesignElement | null,
+  fallbackViewKey: string,
+): { workspace: string; viewKey: string } {
+  const viewKey = `AdashiBranch-${activeLevel}-${sanitizeViewKey(activeBranchElement?.externalId ?? "root")}`;
+  const visibleIds = selectStructurizrViewElementIds(payload.designElements, activeLevel, activeBranchElement, rootElement);
+  const visibleElements = payload.designElements.filter((element) => visibleIds.has(element.externalId));
+  const visibleRelationships = payload.designRelationships.filter(
+    (relationship) => visibleIds.has(relationship.sourceExternalId) && visibleIds.has(relationship.destinationExternalId),
+  );
+  const viewElements = buildViewLayout(visibleElements, activeLevel, activeBranchElement).map((layout) => ({
+    id: layout.element.externalId,
+    relationships: visibleRelationships
+      .filter((relationship) => relationship.sourceExternalId === layout.element.externalId)
+      .map((relationship) => relationship.externalId),
+    x: layout.x,
+    y: layout.y,
+    width: layout.width,
+    height: layout.height,
+  }));
+  const view = buildStructurizrView(
+    viewKey || fallbackViewKey,
+    activeLevel,
+    activeBranchElement,
+    rootElement,
+    viewElements,
+  );
+  const workspace: StructurizrWorkspaceJson = {
+    id: 1,
+    name: payload.workspaceName,
+    description: payload.workspaceDescription,
+    model: buildStructurizrDisplayModel(
+      payload.designElements
+        .filter((element) => element.elementType.toLowerCase() === "person" && !element.parentExternalId)
+        .concat(
+          payload.designElements.filter(
+            (element) => element.elementType.toLowerCase() === "software system" && !element.parentExternalId,
+          ),
+        ),
+      payload.designElements,
+      payload.designRelationships,
+    ),
+    views: {
+      configuration: {
+        defaultView: view.key,
+        styles: {
+          elements: [
+            { tag: "Element", fontSize: 16 },
+            { tag: "Person", shape: "Person", background: "#2f6f6d", color: "#ffffff", fontSize: 16 },
+            { tag: "Software System", background: "#335c67", color: "#ffffff", fontSize: 16 },
+            { tag: "Container", background: "#fffaf0", color: "#1f2933", stroke: "#2f6f6d", fontSize: 16 },
+            { tag: "Component", background: "#f8faf7", color: "#1f2933", stroke: "#7fb6ad", fontSize: 16 },
+            { tag: "Database", shape: "Cylinder", background: "#e4b363", color: "#1f2933", fontSize: 16 },
+            { tag: "Placeholder", background: "#f7efe3", color: "#1f2933", stroke: "#c89f5d", fontSize: 16 },
+          ],
+          relationships: [{ tag: "Relationship", color: "#47615f", fontSize: 14, thickness: 3 }],
+        },
+      },
+    },
+  };
+
+  if (activeLevel === "context") {
+    workspace.views.systemContextViews = [view];
+  } else if (activeBranchElement?.elementType.toLowerCase() === "container") {
+    workspace.views.componentViews = [view];
+  } else {
+    workspace.views.containerViews = [view];
+  }
+
+  return { workspace: JSON.stringify(workspace), viewKey: view.key };
+}
+
+function buildStructurizrDisplayModel(
+  topLevelElements: DesignElement[],
+  allElements: DesignElement[],
+  allRelationships: DesignRelationship[],
+): StructurizrWorkspaceJson["model"] {
+  const people = topLevelElements
+    .filter((element) => element.elementType.toLowerCase() === "person")
+    .map((element) => elementToStructurizrJson(element, allElements, allRelationships));
+  const softwareSystems = topLevelElements
+    .filter((element) => element.elementType.toLowerCase() === "software system" && !element.parentExternalId)
+    .map((element) => elementToStructurizrJson(element, allElements, allRelationships));
+
+  return { people, softwareSystems };
+}
+
+function selectStructurizrViewElementIds(
+  elements: DesignElement[],
+  activeLevel: DesignLevel,
+  activeBranchElement: DesignElement | null,
+  rootElement: DesignElement | null,
+): Set<string> {
+  const visibleIds = new Set<string>();
+
+  if (activeLevel === "context") {
+    elements
+      .filter((element) => !element.parentExternalId && ["person", "software system"].includes(element.elementType.toLowerCase()))
+      .forEach((element) => visibleIds.add(element.externalId));
+    return visibleIds;
+  }
+
+  if (!activeBranchElement) {
+    return visibleIds;
+  }
+
+  const children = elements.filter((element) => element.parentExternalId === activeBranchElement.externalId);
+
+  if (activeBranchElement.externalId === rootElement?.externalId) {
+    elements
+      .filter((element) => element.elementType.toLowerCase() === "person" && !element.parentExternalId)
+      .forEach((element) => visibleIds.add(element.externalId));
+  }
+
+  if (children.length === 0) {
+    visibleIds.add(activeBranchElement.externalId);
+    return visibleIds;
+  }
+
+  children.forEach((element) => visibleIds.add(element.externalId));
+  return visibleIds;
+}
+
+function buildStructurizrView(
+  viewKey: string,
+  activeLevel: DesignLevel,
+  activeBranchElement: DesignElement | null,
+  rootElement: DesignElement | null,
+  elements: StructurizrViewElementJson[],
+): StructurizrViewJson {
+  const view: StructurizrViewJson = {
+    key: viewKey,
+    description: activeBranchElement
+      ? `${activeBranchElement.name} ${activeLevel} branch view`
+      : "Adashi branch view",
+    softwareSystemId: rootElement?.externalId,
+    elements,
+  };
+
+  if (activeBranchElement?.elementType.toLowerCase() === "container") {
+    view.containerId = activeBranchElement.externalId;
+    delete view.softwareSystemId;
+  }
+
+  return view;
+}
+
+function buildViewLayout(
+  elements: DesignElement[],
+  activeLevel: DesignLevel,
+  activeBranchElement: DesignElement | null,
+): Array<{
+  element: DesignElement;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}> {
+  const people = elements.filter((element) => element.elementType.toLowerCase() === "person");
+  const nonPeople = elements.filter((element) => element.elementType.toLowerCase() !== "person");
+  const orderedElements = activeLevel === "context" ? [...people, ...nonPeople] : elements;
+  const elementWidth = activeLevel === "context" ? 340 : 420;
+  const elementHeight = activeLevel === "context" ? 190 : 230;
+  const gapX = 120;
+  const gapY = 130;
+  const margin = 80;
+  const maxColumns = activeLevel === "context" ? Math.max(orderedElements.length, 1) : 3;
+
+  return orderedElements.map((element, index) => {
+    const column = activeLevel === "context" ? index : index % maxColumns;
+    const row = activeLevel === "context" ? 0 : Math.floor(index / maxColumns);
+    const branchInset = activeBranchElement?.elementType.toLowerCase() === "container" ? 20 : 0;
+
+    return {
+      element,
+      x: margin + branchInset + column * (elementWidth + gapX),
+      y: margin + row * (elementHeight + gapY),
+      width: elementWidth,
+      height: elementHeight,
+    };
+  });
+}
+
+function elementToStructurizrJson(
+  element: DesignElement,
+  elements: DesignElement[],
+  relationships: DesignRelationship[],
+): StructurizrElementJson {
+  const children = elements.filter((candidate) => candidate.parentExternalId === element.externalId);
+  const value: StructurizrElementJson = {
+    id: element.externalId,
+    canonicalName: buildCanonicalName(element, elements),
+    description: summarizeDiagramDescription(element.description),
+    location: hasTag(element.tags, "External") ? "External" : "Internal",
+    name: element.name,
+    parentId: element.parentExternalId ?? null,
+    relationships: relationships
+      .filter((relationship) => relationship.sourceExternalId === element.externalId)
+      .map((relationship) => ({
+        id: relationship.externalId,
+        sourceId: relationship.sourceExternalId,
+        destinationId: relationship.destinationExternalId,
+        description: summarizeDiagramDescription(relationship.description),
+        technology: relationship.technology,
+        tags: relationship.tags,
+      })),
+    tags: element.tags,
+    technology: element.technology,
+    type: element.elementType,
+  };
+
+  if (children.length > 0) {
+    const childValues = children.map((child) => elementToStructurizrJson(child, elements, relationships));
+
+    if (element.elementType.toLowerCase() === "software system") {
+      value.containers = childValues;
+    } else {
+      value.components = childValues;
+    }
+  }
+
+  return value;
+}
+
+function buildCanonicalName(element: DesignElement, elements: DesignElement[]): string {
+  return `/${buildBreadcrumb(element, elements)
+    .map((part) => part.name)
+    .join("/")}`;
+}
+
+function summarizeDiagramDescription(description: string): string {
+  const normalized = description.replace(/\s+/g, " ").trim();
+
+  if (normalized.length <= 110) {
+    return normalized;
+  }
+
+  const sentenceEnd = normalized.search(/[.!?]\s/);
+
+  if (sentenceEnd > 48 && sentenceEnd <= 110) {
+    return normalized.slice(0, sentenceEnd + 1);
+  }
+
+  const clipped = normalized.slice(0, 108);
+  const wordBoundary = clipped.lastIndexOf(" ");
+
+  return `${clipped.slice(0, wordBoundary > 64 ? wordBoundary : clipped.length).trim()}...`;
+}
+
+function hasTag(tags: string, tag: string): boolean {
+  return tags
+    .split(",")
+    .map((part) => part.trim().toLowerCase())
+    .includes(tag.toLowerCase());
+}
+
+function sanitizeViewKey(value: string): string {
+  const sanitized = value.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return sanitized || "root";
 }
 
 function DesignInspector({
@@ -1937,7 +2403,12 @@ function MermaidPanel({ diagram }: { diagram: string }) {
     let cancelled = false;
 
     async function render() {
-      if (!ref.current || !diagram) {
+      if (!ref.current) {
+        return;
+      }
+
+      if (!diagram) {
+        ref.current.textContent = "No UML artifact is attached to this design branch.";
         return;
       }
 
