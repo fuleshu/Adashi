@@ -5,6 +5,7 @@ pub fn migrate(db: &mut Connection) -> rusqlite::Result<()> {
     ensure_rules_name_column(db)?;
     ensure_diagram_attachment_columns(db)?;
     ensure_design_bindings_table(db)?;
+    ensure_fixed_hook_prompts_table(db)?;
     crate::state::ensure_project_state(db)?;
     ensure_project_memory_rows(db)?;
     Ok(())
@@ -101,6 +102,27 @@ fn ensure_design_bindings_table(db: &Connection) -> rusqlite::Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_design_bindings_target
             ON design_bindings(workspace_id, target_type, target);",
+    )?;
+    Ok(())
+}
+
+fn ensure_fixed_hook_prompts_table(db: &Connection) -> rusqlite::Result<()> {
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS fixed_hook_prompts (
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            key TEXT NOT NULL,
+            title TEXT NOT NULL,
+            intend TEXT NOT NULL CHECK(intend IN ('general', 'design', 'implementation')),
+            hook TEXT NOT NULL CHECK(hook IN ('run.start', 'task.start', 'task.end', 'run.end')),
+            prompt TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY(project_id, key)
+        );",
+    )?;
+    db.execute(
+        "INSERT OR IGNORE INTO schema_migrations(version) VALUES (7)",
+        [],
     )?;
     Ok(())
 }

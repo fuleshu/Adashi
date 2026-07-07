@@ -38,7 +38,21 @@ type DesignDiagram = {
   title: string;
   source: string;
   diagramType: string;
+  artifactRole: string;
+  artifactLabel: string;
+  artifactRank: number;
   attachedToExternalId?: string | null;
+  attachedToTargetType?: DesignEntityType | null;
+  sortOrder: number;
+};
+
+type UmlArtifactType = {
+  diagramType: string;
+  artifactRole: string;
+  artifactLabel: string;
+  artifactRank: number;
+  mermaidHeader: string;
+  description: string;
 };
 
 type DesignElement = {
@@ -173,6 +187,15 @@ type Rule = {
   prompt: string;
 };
 
+type FixedHookPrompt = {
+  key: string;
+  title: string;
+  intend: RuleIntend;
+  hook: RuleHook;
+  prompt: string;
+  updatedAt: string;
+};
+
 type ProjectMemory = {
   rule: string;
   memory: string;
@@ -208,12 +231,14 @@ type DashboardPayload = {
   structurizrViewKey: string;
   designElements: DesignElement[];
   designRelationships: DesignRelationship[];
+  umlArtifactTypes: UmlArtifactType[];
   diagrams: DesignDiagram[];
   tasks: Task[];
   guidelines: Guideline[];
   postTaskCommands: Command[];
   qaChecks: QaCheck[];
   rules: Rule[];
+  fixedHookPrompts: FixedHookPrompt[];
   memory: ProjectMemory;
 };
 
@@ -428,7 +453,7 @@ function App() {
         {activeView === "settings" ? (
           <SettingsView
             activeProjectId={payload.projectId}
-            designProtocolRule={findDesignProtocolRule(payload.rules)}
+            fixedHookPrompts={payload.fixedHookPrompts}
             settings={settings}
             onAdd={(updatedSettings, projectId) => {
               setSettings(updatedSettings);
@@ -504,6 +529,7 @@ function mergeDashboardPayload(current: DashboardPayload, next: DashboardPayload
     postTaskCommands: reconcileById(current.postTaskCommands, next.postTaskCommands),
     qaChecks: reconcileById(current.qaChecks, next.qaChecks),
     rules: reconcileById(current.rules, next.rules),
+    fixedHookPrompts: reconcileByKey(current.fixedHookPrompts, next.fixedHookPrompts),
   };
 }
 
@@ -529,15 +555,26 @@ function reconcileById<T extends { id: number }>(current: T[], next: T[]): T[] {
   return changed ? merged : current;
 }
 
-function findDesignProtocolRule(rules: Rule[]): Rule | null {
-  return (
-    rules.find(
-      (rule) =>
-        rule.name === "Design MCP API Protocol" &&
-        rule.intend === "design" &&
-        rule.hook === "run.start",
-    ) ?? null
-  );
+function reconcileByKey<T extends { key: string }>(current: T[], next: T[]): T[] {
+  const currentByKey = new Map(current.map((item) => [item.key, item]));
+  let changed = current.length !== next.length;
+
+  const merged = next.map((nextItem, index) => {
+    const currentItem = currentByKey.get(nextItem.key);
+
+    if (current[index]?.key !== nextItem.key) {
+      changed = true;
+    }
+
+    if (currentItem && shallowEqualRecord(currentItem, nextItem)) {
+      return currentItem;
+    }
+
+    changed = true;
+    return nextItem;
+  });
+
+  return changed ? merged : current;
 }
 
 function shallowEqualRecord(left: object, right: object): boolean {
@@ -573,6 +610,7 @@ function DesignBrowser({
   const [query, setQuery] = React.useState("");
   const [isResizingSource, setIsResizingSource] = React.useState(false);
   const [sourcePanelHeight, setSourcePanelHeight] = React.useState(200);
+  const [activeArtifactKey, setActiveArtifactKey] = React.useState<string | null>(null);
   const designMainRef = React.useRef<HTMLElement | null>(null);
   const designTree = React.useMemo(() => buildDesignTree(payload.designElements), [payload.designElements]);
   const rootElement =
@@ -604,12 +642,16 @@ function DesignBrowser({
           ),
       )
     : [];
-  const activeMermaidDiagram = selectMermaidDiagram(
-    payload.diagrams,
-    selectedRelationship?.externalId ?? activeBranchElement?.externalId ?? null,
-    activeBranchElement,
-    payload.designElements,
+  const artifactTarget = selectedRelationship
+    ? { type: "relationship" as const, externalId: selectedRelationship.externalId, name: selectedRelationship.description }
+    : activeBranchElement
+      ? { type: "element" as const, externalId: activeBranchElement.externalId, name: activeBranchElement.name }
+      : null;
+  const umlArtifacts = React.useMemo(
+    () => selectUmlArtifacts(payload.diagrams, artifactTarget),
+    [artifactTarget?.externalId, artifactTarget?.type, payload.diagrams],
   );
+  const activeUmlArtifact = umlArtifacts.find((diagram) => diagram.key === activeArtifactKey) ?? umlArtifacts[0];
   const branchStructurizr = React.useMemo(
     () =>
       buildBranchStructurizrWorkspace(
@@ -623,8 +665,16 @@ function DesignBrowser({
   );
   const sourceDiagram =
     activeLevel === "features"
-      ? activeMermaidDiagram
+      ? activeUmlArtifact
       : payload.diagrams.find((diagram) => diagram.kind === "structurizr");
+
+  React.useEffect(() => {
+    if (activeArtifactKey && umlArtifacts.some((diagram) => diagram.key === activeArtifactKey)) {
+      return;
+    }
+
+    setActiveArtifactKey(umlArtifacts[0]?.key ?? null);
+  }, [activeArtifactKey, umlArtifacts]);
 
   function selectLevel(level: DesignLevel) {
     onLevelChange(level);
@@ -671,7 +721,7 @@ function DesignBrowser({
       ? "Level 1: System Context"
       : activeLevel === "components"
         ? `Level 2: ${activeBranchElement?.name ?? "Components"}`
-        : `Level 3: ${activeBranchElement?.name ?? "Feature Flows"}`;
+        : `Level 3: ${activeBranchElement?.name ?? "UML Artifacts"}`;
 
   return (
     <section id="design" className="design-browser">
@@ -729,7 +779,7 @@ function DesignBrowser({
           {activeLevel === "features" ? (
             <>
               <ChevronRight size={15} />
-              <span>Features</span>
+              <span>UML Artifacts</span>
             </>
           ) : null}
         </div>
@@ -737,17 +787,24 @@ function DesignBrowser({
         <div className="viewer-panel design-viewer-panel">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">{activeLevel === "features" ? "Mermaid UML" : "Structurizr C4"}</p>
+              <p className="eyebrow">{activeLevel === "features" ? "Mermaid UML Artifacts" : "Structurizr C4"}</p>
               <h3>{viewerTitle}</h3>
             </div>
             <div className="status-strip compact">
-              <span>{activeLevel === "features" ? "feature flow" : "branch view"}</span>
-              <span>{activeLevel === "features" ? activeMermaidDiagram?.key ?? "No attached UML" : branchStructurizr.viewKey}</span>
+              <span>{activeLevel === "features" ? artifactTarget?.type ?? "artifact" : "branch view"}</span>
+              <span>{activeLevel === "features" ? activeUmlArtifact?.key ?? "No attached UML" : branchStructurizr.viewKey}</span>
             </div>
           </div>
 
           {activeLevel === "features" ? (
-            <MermaidPanel diagram={activeMermaidDiagram?.source ?? ""} />
+            <div className="uml-artifact-viewer">
+              <UmlArtifactTabs
+                activeKey={activeUmlArtifact?.key ?? null}
+                artifacts={umlArtifacts}
+                onSelect={setActiveArtifactKey}
+              />
+              <MermaidPanel diagram={activeUmlArtifact?.source ?? ""} />
+            </div>
           ) : (
             <StructurizrFrame
               workspace={branchStructurizr.workspace}
@@ -792,7 +849,7 @@ function DesignBrowser({
         <SourcePanel
           diagram={sourceDiagram}
           source={activeLevel === "features" ? sourceDiagram?.source ?? "" : payload.structurizrDsl}
-          sourceKind={activeLevel === "features" ? "Mermaid UML" : "Structurizr DSL"}
+          sourceKind={activeLevel === "features" ? activeUmlArtifact?.artifactLabel ?? "Mermaid UML" : "Structurizr DSL"}
         />
       </section>
 
@@ -820,13 +877,13 @@ type DesignTreeNode = {
 const DESIGN_LEVELS: { id: DesignLevel; label: string; icon: React.ElementType }[] = [
   { id: "context", label: "System Context", icon: Network },
   { id: "components", label: "Components", icon: Braces },
-  { id: "features", label: "Features", icon: GitBranch },
+  { id: "features", label: "UML Artifacts", icon: GitBranch },
 ];
 
 const DESIGN_LEVEL_LABELS: Record<DesignLevel, string> = {
   context: "Level 1: System Context",
   components: "Level 2: Components",
-  features: "Level 3: Features",
+  features: "Level 3: UML Artifacts",
 };
 
 function DesignTree({
@@ -898,8 +955,8 @@ function DesignTree({
         <article className="design-list-note">
           <GitBranch size={18} />
           <div>
-            <strong>{branchElement ? `${branchElement.name} feature flows` : "Feature flow source"}</strong>
-            <span>Agents edit Mermaid UML attached to this branch. The browser renders it as the Level 3 view.</span>
+            <strong>{branchElement ? `${branchElement.name} UML artifacts` : "UML artifact source"}</strong>
+            <span>Agents edit typed Mermaid artifacts attached to the selected element or relationship.</span>
           </div>
         </article>
       ) : null}
@@ -1078,32 +1135,31 @@ function buildBreadcrumb(element: DesignElement | null, elements: DesignElement[
   return path;
 }
 
-function selectMermaidDiagram(
+function selectUmlArtifacts(
   diagrams: DesignDiagram[],
-  preferredExternalId: string | null,
-  activeBranchElement: DesignElement | null,
-  elements: DesignElement[],
-): DesignDiagram | undefined {
-  const mermaidDiagrams = diagrams.filter((diagram) => diagram.kind === "mermaid");
-  const candidateIds = new Set<string>();
-
-  if (preferredExternalId) {
-    candidateIds.add(preferredExternalId);
+  target: { type: DesignEntityType; externalId: string } | null,
+): DesignDiagram[] {
+  if (!target) {
+    return [];
   }
 
-  for (const element of buildBreadcrumb(activeBranchElement, elements).reverse()) {
-    candidateIds.add(element.externalId);
-  }
+  return diagrams
+    .filter(
+      (diagram) =>
+        diagram.kind === "mermaid" &&
+        diagram.attachedToExternalId === target.externalId &&
+        (!diagram.attachedToTargetType || diagram.attachedToTargetType === target.type),
+    )
+    .sort(compareUmlArtifacts);
+}
 
-  for (const candidateId of candidateIds) {
-    const exact = mermaidDiagrams.find((diagram) => diagram.attachedToExternalId === candidateId);
-
-    if (exact) {
-      return exact;
-    }
-  }
-
-  return undefined;
+function compareUmlArtifacts(left: DesignDiagram, right: DesignDiagram): number {
+  return (
+    left.artifactRank - right.artifactRank ||
+    left.sortOrder - right.sortOrder ||
+    left.title.localeCompare(right.title) ||
+    left.key.localeCompare(right.key)
+  );
 }
 
 function buildBranchStructurizrWorkspace(
@@ -1767,6 +1823,58 @@ function InspectorSection({ title, children }: React.PropsWithChildren<{ title: 
   );
 }
 
+function UmlArtifactTabs({
+  activeKey,
+  artifacts,
+  onSelect,
+}: {
+  activeKey: string | null;
+  artifacts: DesignDiagram[];
+  onSelect: (key: string) => void;
+}) {
+  if (artifacts.length <= 1) {
+    return null;
+  }
+
+  return (
+    <div className="uml-artifact-tabs" role="tablist" aria-label="UML artifacts">
+      {artifacts.map((artifact) => {
+        const Icon = iconForArtifactRole(artifact.artifactRole);
+
+        return (
+          <button
+            aria-selected={artifact.key === activeKey}
+            className={artifact.key === activeKey ? "active" : ""}
+            key={artifact.key}
+            onClick={() => onSelect(artifact.key)}
+            role="tab"
+            title={artifact.title}
+            type="button"
+          >
+            <Icon size={15} />
+            <span>{artifact.artifactLabel}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function iconForArtifactRole(role: string): React.ElementType {
+  switch (role) {
+    case "primary-structure":
+      return Braces;
+    case "interaction":
+      return PlayCircle;
+    case "workflow":
+      return GitBranch;
+    case "lifecycle":
+      return Activity;
+    default:
+      return ScrollText;
+  }
+}
+
 function SourcePanel({ diagram, source, sourceKind }: { diagram?: DesignDiagram; source: string; sourceKind: string }) {
   return (
     <section className="source-panel">
@@ -1784,7 +1892,7 @@ function SourcePanel({ diagram, source, sourceKind }: { diagram?: DesignDiagram;
 
 function SettingsView({
   activeProjectId,
-  designProtocolRule,
+  fixedHookPrompts,
   settings,
   onAdd,
   onDashboardChange,
@@ -1792,7 +1900,7 @@ function SettingsView({
   onError,
 }: {
   activeProjectId: string;
-  designProtocolRule: Rule | null;
+  fixedHookPrompts: FixedHookPrompt[];
   settings: AppSettings;
   onAdd: (settings: AppSettings, projectId: string) => void;
   onDashboardChange: (payload: DashboardPayload) => void;
@@ -1820,21 +1928,12 @@ function SettingsView({
       .catch((reason) => onError(String(reason)));
   }
 
-  function saveDesignProtocolRule(rule: Rule, changes: Partial<Rule>) {
-    const updatedRule = {
-      ...rule,
-      ...changes,
-    };
-
-    invoke<DashboardPayload>("update_rule", {
+  function saveFixedHookPrompt(hookPrompt: FixedHookPrompt, prompt: string) {
+    invoke<DashboardPayload>("update_fixed_hook_prompt", {
       input: {
         projectId: activeProjectId,
-        id: updatedRule.id,
-        name: updatedRule.name.trim() || "Design MCP API Protocol",
-        enabled: updatedRule.enabled,
-        intend: "design",
-        hook: "run.start",
-        prompt: updatedRule.prompt,
+        key: hookPrompt.key,
+        prompt,
       },
     })
       .then(onDashboardChange)
@@ -1888,31 +1987,31 @@ function SettingsView({
 
       <section className="data-panel settings-panel settings-design-protocol-panel">
         <div className="rules-panel-heading">
-          <h3>Design MCP Protocol</h3>
-          {designProtocolRule ? (
-            <label className="settings-toggle-row">
-              <span>Enabled</span>
-              <input
-                checked={designProtocolRule.enabled}
-                onChange={(event) => saveDesignProtocolRule(designProtocolRule, { enabled: event.target.checked })}
-                type="checkbox"
-              />
-            </label>
-          ) : null}
+          <h3>Fixed Design Hooks</h3>
         </div>
-        {designProtocolRule ? (
-          <MarkdownEditor
-            key={`design-protocol-${designProtocolRule.id}-${designProtocolRule.enabled}`}
-            value={designProtocolRule.prompt}
-            onBlur={(prompt) => saveDesignProtocolRule(designProtocolRule, { prompt })}
-            placeholder="Write the design run-start MCP protocol..."
-            minHeight="360px"
-            maxHeight="520px"
-            height="460px"
-          />
-        ) : (
-          <div className="empty-state">The design protocol rule will be created when the project database opens.</div>
-        )}
+        <div className="fixed-hook-editor-list">
+          {fixedHookPrompts.map((hookPrompt) => (
+            <section className="fixed-hook-editor" key={hookPrompt.key}>
+              <div className="rules-panel-heading">
+                <div>
+                  <p className="eyebrow">
+                    {hookPrompt.intend} / {hookPrompt.hook}
+                  </p>
+                  <h4>{hookPrompt.title}</h4>
+                </div>
+              </div>
+              <MarkdownEditor
+                key={`${hookPrompt.key}-${hookPrompt.updatedAt}`}
+                value={hookPrompt.prompt}
+                onBlur={(prompt) => saveFixedHookPrompt(hookPrompt, prompt)}
+                placeholder="Write the fixed run-start hook prompt..."
+                minHeight="260px"
+                maxHeight="420px"
+                height="320px"
+              />
+            </section>
+          ))}
+        </div>
       </section>
     </section>
   );
@@ -2408,7 +2507,7 @@ function MermaidPanel({ diagram }: { diagram: string }) {
       }
 
       if (!diagram) {
-        ref.current.textContent = "No UML artifact is attached to this design branch.";
+        ref.current.textContent = "No UML artifact is attached to this selection.";
         return;
       }
 

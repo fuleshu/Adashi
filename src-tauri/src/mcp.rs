@@ -2,8 +2,9 @@ use crate::design::{
     self, DesignBindingsResult, DesignByIdsResult, DesignChange, DesignOverviewResult,
     DesignSaveResult, DesignScopeResult, DesignSearchResult,
 };
+use crate::fixed_hooks::{self, DESIGN_AUTHORING_HOOK_KEY, IMPLEMENTATION_GUIDANCE_HOOK_KEY};
 use crate::memory::{self, ProjectMemory};
-use crate::rules::{self, InjectionRule, NewRule, Rule};
+use crate::rules::{self, InjectionRule, NewRule, Rule, UpdateRule};
 use crate::settings::{self, AppSettings, ProjectSettings};
 use crate::state as project_state;
 use crate::tasks::{self, NewTask, Task, UpdateTask};
@@ -14,6 +15,8 @@ use rmcp::transport::stdio;
 use rmcp::{serve_server, tool, tool_router};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 #[derive(Clone)]
@@ -60,6 +63,18 @@ struct RuleInjectionParams {
 #[serde(rename_all = "camelCase")]
 struct CreateRuleParams {
     project_id: Option<String>,
+    name: String,
+    enabled: bool,
+    intend: String,
+    hook: String,
+    prompt: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct UpdateRuleParams {
+    project_id: Option<String>,
+    rule_id: i64,
     name: String,
     enabled: bool,
     intend: String,
@@ -186,6 +201,8 @@ struct RuleInjectionResult {
     rules: Vec<InjectionRule>,
     #[serde(skip_serializing_if = "Option::is_none")]
     memory_rule: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    generated_context: Vec<String>,
     injection_prompt: String,
 }
 
@@ -194,6 +211,14 @@ struct RuleInjectionResult {
 struct CreateRuleResult {
     project_id: String,
     rule_id: i64,
+}
+
+#[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct UpdateRuleResult {
+    project_id: String,
+    updated_rule_id: i64,
+    revision: i64,
 }
 
 #[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
@@ -243,7 +268,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_get_rule_injections",
-        description = "Get enabled Adashi rule prompts for an intend and lifecycle hook. Agents should call this at run.start, task.start, task.end, and run.end when this MCP server is present."
+        description = "Get enabled optional rule prompts plus fixed generated lifecycle context for an intend and hook. run.start includes memory context, and design/implementation run.start includes Settings-managed fixed prompts plus compact formal-design context directly."
     )]
     fn get_rule_injections(
         &self,
@@ -252,26 +277,41 @@ impl AdashiMcpServer {
         let (project, db) = self.open_project(params.project_id.as_deref())?;
         let rules =
             rules::load_rule_injections(&db, &params.intend, &params.hook).map_err(tool_error)?;
-        let memory_rule = if params.hook == "run.start" {
-            let project_row_id = project_row_id(&db).map_err(tool_error)?;
-            Some(
-                memory::load_memory(&db, project_row_id)
-                    .map_err(tool_error)?
-                    .rule,
-            )
-        } else {
-            None
-        };
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let mut injection_parts = rules
             .iter()
             .map(|rule| rule.prompt.clone())
             .collect::<Vec<_>>();
+        let mut generated_context = Vec::new();
 
-        if let Some(rule) = memory_rule.as_deref() {
-            if !rule.trim().is_empty() {
-                injection_parts.push(rule.to_string());
+        let memory_rule = if params.hook == "run.start" {
+            let memory = memory::load_memory(&db, project_row_id).map_err(tool_error)?;
+            let memory_context = format_memory_run_start_context(&memory);
+            if !memory_context.trim().is_empty() {
+                injection_parts.push(memory_context.clone());
+                generated_context.push(memory_context);
             }
-        }
+
+            if matches!(params.intend.as_str(), "design" | "implementation") {
+                if let Some(prompt) =
+                    load_fixed_hook_prompt_for_injection(&db, project_row_id, &params.intend)?
+                {
+                    injection_parts.push(prompt);
+                }
+
+                let overview =
+                    design::load_overview(&db, project_row_id, Some(3)).map_err(tool_error)?;
+                let design_context = format_design_run_start_context(&params.intend, &overview);
+                if !design_context.trim().is_empty() {
+                    injection_parts.push(design_context.clone());
+                    generated_context.push(design_context);
+                }
+            }
+
+            Some(memory.rule)
+        } else {
+            None
+        };
 
         let injection_prompt = injection_parts.join("\n\n");
 
@@ -282,6 +322,7 @@ impl AdashiMcpServer {
             hook: params.hook,
             rules,
             memory_rule,
+            generated_context,
             injection_prompt,
         }))
     }
@@ -356,6 +397,37 @@ impl AdashiMcpServer {
         Ok(Json(CreateRuleResult {
             project_id: project.id,
             rule_id,
+        }))
+    }
+
+    #[tool(
+        name = "adashi_update_rule",
+        description = "Update an Adashi rule prompt by id. The write bumps the project revision so the desktop UI can merge the changed rule automatically."
+    )]
+    fn update_rule(
+        &self,
+        Parameters(params): Parameters<UpdateRuleParams>,
+    ) -> Result<Json<UpdateRuleResult>, ErrorData> {
+        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        rules::update_rule(
+            &db,
+            UpdateRule {
+                id: params.rule_id,
+                name: params.name,
+                enabled: params.enabled,
+                intend: params.intend,
+                hook: params.hook,
+                prompt: params.prompt,
+            },
+        )
+        .map_err(tool_error)?;
+        let revision =
+            project_state::bump_project_revision(&db, project_row_id).map_err(tool_error)?;
+        Ok(Json(UpdateRuleResult {
+            project_id: project.id,
+            updated_rule_id: params.rule_id,
+            revision: revision.revision,
         }))
     }
 
@@ -491,7 +563,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_design_get_overview",
-        description = "Read a compact top-down C4/UML design overview for the selected project. This is deterministic retrieval; the agent chooses the relevant design scope."
+        description = "Read a compact top-down C4/UML design overview for the selected project, including supported typed UML artifact types and diagram metadata. This is deterministic retrieval; the agent chooses the relevant design scope and artifact type."
     )]
     fn design_get_overview(
         &self,
@@ -506,7 +578,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_design_get_scope",
-        description = "Read an explicit C4 branch by element id, optionally including ancestors, children, attached UML, bindings, relationships, and canonical source."
+        description = "Read an explicit C4 branch by element id, optionally including ancestors, children, typed UML artifacts attached to elements or relationships, bindings, relationships, and canonical source."
     )]
     fn design_get_scope(
         &self,
@@ -528,7 +600,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_design_search",
-        description = "Run deterministic text search over stored design elements, relationships, UML, and source. The agent must reason over the hits; the MCP does not infer task context."
+        description = "Run deterministic text search over stored design elements, relationships, typed UML artifacts, and source. The agent must reason over the hits; the MCP does not infer task context."
     )]
     fn design_search(
         &self,
@@ -549,7 +621,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_design_get_by_ids",
-        description = "Read explicit design elements, relationships, UML artifacts, and bindings by stored design ids."
+        description = "Read explicit design elements, relationships, typed UML artifacts, supported artifact types, and bindings by stored design ids."
     )]
     fn design_get_by_ids(
         &self,
@@ -563,7 +635,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_design_get_bindings",
-        description = "Read design artifacts explicitly bound to files or symbols. This is stored traceability, not task interpretation."
+        description = "Read design artifacts explicitly bound to files or symbols, including typed UML artifact metadata when bindings target diagrams. This is stored traceability, not task interpretation."
     )]
     fn design_get_bindings(
         &self,
@@ -583,7 +655,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_design_save",
-        description = "Transactionally save a formal C4/UML design changeset. The save validates revision, containment, relationships, UML syntax, attachments, and bindings; invalid input returns correction errors and is not stored."
+        description = "Transactionally save a formal C4/UML design changeset. Use upsert_uml with diagramType and attachedToExternalId for typed Mermaid artifacts such as class/structure, sequence, flow, and state. The save validates revision, containment, relationships, UML syntax, attachments, and bindings; invalid input returns correction errors and is not stored."
     )]
     fn design_save(
         &self,
@@ -614,6 +686,250 @@ pub fn run_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
         service.waiting().await?;
         Ok::<(), Box<dyn std::error::Error>>(())
     })
+}
+
+fn format_memory_run_start_context(memory: &ProjectMemory) -> String {
+    let mut output = String::new();
+    let _ = writeln!(output, "# Adashi Memory Context (Generated)");
+    let _ = writeln!(output, "Updated: {}", memory.updated_at);
+    let _ = writeln!(output);
+    let _ = writeln!(output, "Protocol:");
+    let _ = writeln!(output, "{}", memory.rule.trim());
+    let _ = writeln!(output);
+    let _ = writeln!(output, "Current project memory:");
+
+    let memory_body = memory.memory.trim();
+    if memory_body.is_empty() {
+        let _ = writeln!(output, "(No project memory has been recorded yet.)");
+    } else {
+        let _ = writeln!(output, "{}", trim_for_injection(memory_body, 16_000));
+    }
+
+    output.trim().to_string()
+}
+
+fn load_fixed_hook_prompt_for_injection(
+    db: &rusqlite::Connection,
+    project_row_id: i64,
+    intend: &str,
+) -> Result<Option<String>, ErrorData> {
+    let key = match intend {
+        "design" => DESIGN_AUTHORING_HOOK_KEY,
+        "implementation" => IMPLEMENTATION_GUIDANCE_HOOK_KEY,
+        _ => return Ok(None),
+    };
+    let prompt = fixed_hooks::load_prompt(db, project_row_id, key).map_err(tool_error)?;
+    Ok(prompt
+        .map(|prompt| prompt.trim().to_string())
+        .filter(|prompt| !prompt.is_empty()))
+}
+
+fn format_design_run_start_context(intend: &str, overview: &DesignOverviewResult) -> String {
+    let title = if intend == "implementation" {
+        "Formal Design Implementation Guide"
+    } else {
+        "Formal Design Authoring Context"
+    };
+    let mut output = String::new();
+    let _ = writeln!(output, "# {title} (Generated)");
+    let _ = writeln!(
+        output,
+        "Workspace: {} (revision {})",
+        overview.workspace_name, overview.revision
+    );
+    if !overview.workspace_description.trim().is_empty() {
+        let _ = writeln!(
+            output,
+            "Purpose: {}",
+            one_line(&overview.workspace_description, 220)
+        );
+    }
+    let _ = writeln!(output);
+
+    if intend == "implementation" {
+        let _ = writeln!(
+            output,
+            "Use this formal design as implementation guidance. Align touched code with the bound design ids below; fetch a narrower scope only when the injected context is insufficient for the specific files, symbols, or component you are changing."
+        );
+    } else {
+        let _ = writeln!(
+            output,
+            "Use this generated overview as the already-loaded design context. Store design conclusions with `adashi_design_save`; fetch a narrower scope only when the current design task needs more detail than the injected overview."
+        );
+    }
+    let _ = writeln!(
+        output,
+        "The MCP remains deterministic: agents choose scopes and artifact types from explicit ids, bindings, and metadata."
+    );
+    let _ = writeln!(output);
+
+    let _ = writeln!(output, "Supported UML artifact types:");
+    for artifact_type in &overview.uml_artifact_types {
+        let _ = writeln!(
+            output,
+            "- {} (`{}`): {}",
+            artifact_type.artifact_label,
+            artifact_type.diagram_type,
+            one_line(&artifact_type.description, 160)
+        );
+    }
+    let _ = writeln!(output);
+
+    let _ = writeln!(output, "C4 design index:");
+    for line in format_element_index(&overview.elements, 48) {
+        let _ = writeln!(output, "{line}");
+    }
+    let _ = writeln!(output);
+
+    let attached_diagrams = overview
+        .diagrams
+        .iter()
+        .filter(|diagram| diagram.attached_to_external_id.is_some())
+        .collect::<Vec<_>>();
+    if !attached_diagrams.is_empty() {
+        let _ = writeln!(output, "Attached UML artifacts:");
+        for diagram in attached_diagrams.iter().take(24) {
+            let attached_to = diagram.attached_to_external_id.as_deref().unwrap_or("");
+            let target_type = diagram
+                .attached_to_target_type
+                .as_deref()
+                .unwrap_or("design");
+            let _ = writeln!(
+                output,
+                "- `{}` {} `{}` attached to {} `{}`",
+                diagram.key, diagram.artifact_label, diagram.diagram_type, target_type, attached_to
+            );
+        }
+        if attached_diagrams.len() > 24 {
+            let _ = writeln!(
+                output,
+                "- ... {} more attached artifacts",
+                attached_diagrams.len() - 24
+            );
+        }
+        let _ = writeln!(output);
+    }
+
+    if !overview.bindings.is_empty() {
+        let _ = writeln!(output, "Design bindings:");
+        for binding in overview.bindings.iter().take(40) {
+            let _ = writeln!(
+                output,
+                "- {} `{}` -> design `{}`",
+                binding.target_type, binding.target, binding.design_external_id
+            );
+        }
+        if overview.bindings.len() > 40 {
+            let _ = writeln!(
+                output,
+                "- ... {} more bindings",
+                overview.bindings.len() - 40
+            );
+        }
+        let _ = writeln!(output);
+    }
+
+    let design_decisions = overview
+        .relationships
+        .iter()
+        .filter(|relationship| relationship.tags.contains("Design Decision"))
+        .collect::<Vec<_>>();
+    if !design_decisions.is_empty() {
+        let _ = writeln!(output, "Stored design-decision relationships:");
+        for relationship in design_decisions.iter().take(16) {
+            let _ = writeln!(
+                output,
+                "- `{}` -> `{}`: {}",
+                relationship.source_external_id,
+                relationship.destination_external_id,
+                one_line(&relationship.description, 180)
+            );
+        }
+    }
+
+    output.trim().to_string()
+}
+
+fn format_element_index(elements: &[design::DesignElementRecord], limit: usize) -> Vec<String> {
+    let element_by_id = elements
+        .iter()
+        .map(|element| (element.external_id.as_str(), element))
+        .collect::<HashMap<_, _>>();
+    let mut sorted = elements.iter().collect::<Vec<_>>();
+    sorted.sort_by(|left, right| {
+        element_depth_for_prompt(left, &element_by_id)
+            .cmp(&element_depth_for_prompt(right, &element_by_id))
+            .then_with(|| left.parent_external_id.cmp(&right.parent_external_id))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+
+    let mut lines = sorted
+        .iter()
+        .take(limit)
+        .map(|element| {
+            let depth = element_depth_for_prompt(element, &element_by_id).min(5);
+            let indent = "  ".repeat(depth);
+            format!(
+                "- {indent}{} `{}` {} - {}",
+                element.element_type,
+                element.external_id,
+                element.name,
+                one_line(&element.description, 140)
+            )
+        })
+        .collect::<Vec<_>>();
+
+    if elements.len() > limit {
+        lines.push(format!(
+            "- ... {} more design elements",
+            elements.len() - limit
+        ));
+    }
+
+    lines
+}
+
+fn element_depth_for_prompt(
+    element: &design::DesignElementRecord,
+    element_by_id: &HashMap<&str, &design::DesignElementRecord>,
+) -> usize {
+    let mut depth = 0;
+    let mut current = element.parent_external_id.as_deref();
+    while let Some(parent_id) = current {
+        depth += 1;
+        current = element_by_id
+            .get(parent_id)
+            .and_then(|parent| parent.parent_external_id.as_deref());
+    }
+    depth
+}
+
+fn one_line(text: &str, limit: usize) -> String {
+    trim_for_injection(
+        &text.split_whitespace().collect::<Vec<_>>().join(" "),
+        limit,
+    )
+}
+
+fn trim_for_injection(text: &str, limit: usize) -> String {
+    let text = text.trim();
+    if text.len() <= limit {
+        return text.to_string();
+    }
+
+    let mut end = 0;
+    for (index, _) in text.char_indices() {
+        if index > limit {
+            break;
+        }
+        end = index;
+    }
+
+    format!(
+        "{}\n\n[Truncated to {} bytes for lifecycle injection. Fetch the dedicated MCP resource if exact full context is required.]",
+        text[..end].trim_end(),
+        limit
+    )
 }
 
 fn project_row_id(db: &rusqlite::Connection) -> Result<i64, String> {

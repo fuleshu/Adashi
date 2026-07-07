@@ -138,6 +138,18 @@ CREATE TABLE IF NOT EXISTS rules (
 CREATE INDEX IF NOT EXISTS idx_rules_project_intend_hook
     ON rules(project_id, intend, hook, enabled);
 
+CREATE TABLE IF NOT EXISTS fixed_hook_prompts (
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    title TEXT NOT NULL,
+    intend TEXT NOT NULL CHECK(intend IN ('general', 'design', 'implementation')),
+    hook TEXT NOT NULL CHECK(hook IN ('run.start', 'task.start', 'task.end', 'run.end')),
+    prompt TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(project_id, key)
+);
+
 CREATE TABLE IF NOT EXISTS project_memory (
     project_id INTEGER PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
     protocol_rule TEXT NOT NULL,
@@ -152,3 +164,4 @@ INSERT OR IGNORE INTO schema_migrations(version) VALUES (3);
 INSERT OR IGNORE INTO schema_migrations(version) VALUES (4);
 INSERT OR IGNORE INTO schema_migrations(version) VALUES (5);
 INSERT OR IGNORE INTO schema_migrations(version) VALUES (6);
+INSERT OR IGNORE INTO schema_migrations(version) VALUES (7);

@@ -1,4 +1,5 @@
 mod design;
+mod fixed_hooks;
 mod mcp;
 mod memory;
 mod rules;
@@ -17,6 +18,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow, WindowEvent};
 
+use crate::design::DesignArtifactTypeRecord;
+use crate::fixed_hooks::FixedHookPrompt;
 use crate::memory::ProjectMemory;
 use crate::rules::{NewRule, Rule, UpdateRule};
 use crate::settings::{AppSettings, ProjectSettings, WindowSettings};
@@ -42,12 +45,14 @@ struct DashboardPayload {
     structurizr_view_key: String,
     design_elements: Vec<DesignElement>,
     design_relationships: Vec<DesignRelationship>,
+    uml_artifact_types: Vec<DesignArtifactTypeRecord>,
     diagrams: Vec<DesignDiagram>,
     tasks: Vec<Task>,
     guidelines: Vec<Guideline>,
     post_task_commands: Vec<PostTaskCommand>,
     qa_checks: Vec<QaCheck>,
     rules: Vec<Rule>,
+    fixed_hook_prompts: Vec<FixedHookPrompt>,
     memory: ProjectMemory,
 }
 
@@ -60,7 +65,12 @@ struct DesignDiagram {
     title: String,
     source: String,
     diagram_type: String,
+    artifact_role: String,
+    artifact_label: String,
+    artifact_rank: i64,
     attached_to_external_id: Option<String>,
+    attached_to_target_type: Option<String>,
+    sort_order: i64,
 }
 
 #[derive(Serialize)]
@@ -169,12 +179,14 @@ fn load_dashboard_payload(
         structurizr_view_key: "AdashiContainers".to_string(),
         design_elements: load_design_elements(&db)?,
         design_relationships: load_design_relationships(&db)?,
+        uml_artifact_types: design::supported_uml_artifact_types(),
         diagrams: load_diagrams(&db)?,
         tasks: tasks::load_tasks(db)?,
         guidelines: load_guidelines(&db)?,
         post_task_commands: load_post_task_commands(&db)?,
         qa_checks: load_qa_checks(&db)?,
         rules: rules::load_rules(db)?,
+        fixed_hook_prompts: fixed_hooks::load_fixed_hook_prompts(db, project_row_id)?,
         memory: memory::load_memory(db, project_row_id)?,
     })
 }
@@ -336,6 +348,14 @@ struct UpdateMemoryRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct UpdateFixedHookPromptRequest {
+    project_id: Option<String>,
+    key: String,
+    prompt: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct UpdateDesignElementRequest {
     project_id: Option<String>,
     external_id: String,
@@ -451,6 +471,19 @@ fn update_memory(
     let db = open_project_database(&project).map_err(|err| err.to_string())?;
     let project_row_id = load_project_row_id(&db)?;
     memory::update_memory(&db, project_row_id, input.memory)?;
+    project_state::bump_project_revision(&db, project_row_id)?;
+    load_dashboard_payload(project, &db)
+}
+
+#[tauri::command]
+fn update_fixed_hook_prompt(
+    input: UpdateFixedHookPromptRequest,
+    state: State<'_, AppState>,
+) -> Result<DashboardPayload, String> {
+    let project = resolve_project(&state, input.project_id.as_deref())?;
+    let db = open_project_database(&project).map_err(|err| err.to_string())?;
+    let project_row_id = load_project_row_id(&db)?;
+    fixed_hooks::update_fixed_hook_prompt(&db, project_row_id, input.key, input.prompt)?;
     project_state::bump_project_revision(&db, project_row_id)?;
     load_dashboard_payload(project, &db)
 }
@@ -649,6 +682,7 @@ pub fn run() {
             set_active_project,
             update_design_element,
             update_design_relationship,
+            update_fixed_hook_prompt,
             update_memory,
             update_memory_rule,
             update_rule
@@ -696,7 +730,7 @@ pub(crate) fn open_project_database(
     let mut db = Connection::open(settings::project_database_path(project))?;
     schema::migrate(&mut db)?;
     seed::seed_initial_data(&mut db, project)?;
-    rules::ensure_design_mcp_rule(&db)?;
+    fixed_hooks::ensure_fixed_hook_prompts(&db).map_err(std::io::Error::other)?;
     Ok(db)
 }
 
@@ -774,21 +808,46 @@ fn save_window_state(
 fn load_diagrams(db: &Connection) -> Result<Vec<DesignDiagram>, String> {
     let mut statement = db
         .prepare(
-            "SELECT id, kind, key, title, source, diagram_type, attached_to_external_id
-             FROM diagrams
-             ORDER BY sort_order, id",
+            "SELECT
+                d.id,
+                d.kind,
+                d.key,
+                d.title,
+                d.source,
+                d.diagram_type,
+                d.attached_to_external_id,
+                CASE
+                    WHEN e.external_id IS NOT NULL THEN 'element'
+                    WHEN r.external_id IS NOT NULL THEN 'relationship'
+                    ELSE NULL
+                END AS attached_to_target_type,
+                d.sort_order
+             FROM diagrams d
+             LEFT JOIN c4_elements e
+                ON e.workspace_id = d.workspace_id
+                AND e.external_id = d.attached_to_external_id
+             LEFT JOIN c4_relationships r
+                ON r.workspace_id = d.workspace_id
+                AND r.external_id = d.attached_to_external_id
+             ORDER BY d.sort_order, d.id",
         )
         .map_err(|err| err.to_string())?;
     let rows = statement
         .query_map([], |row| {
+            let diagram_type: String = row.get(5)?;
             Ok(DesignDiagram {
                 id: row.get(0)?,
                 kind: row.get(1)?,
                 key: row.get(2)?,
                 title: row.get(3)?,
                 source: row.get(4)?,
-                diagram_type: row.get(5)?,
+                artifact_role: design::diagram_artifact_role(&diagram_type).to_string(),
+                artifact_label: design::diagram_artifact_label(&diagram_type).to_string(),
+                artifact_rank: design::diagram_artifact_rank(&diagram_type),
+                diagram_type,
                 attached_to_external_id: row.get(6)?,
+                attached_to_target_type: row.get(7)?,
+                sort_order: row.get(8)?,
             })
         })
         .map_err(|err| err.to_string())?;

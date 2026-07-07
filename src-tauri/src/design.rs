@@ -37,8 +37,25 @@ pub struct DesignDiagramRecord {
     pub language: String,
     pub title: String,
     pub diagram_type: String,
+    pub artifact_role: String,
+    pub artifact_label: String,
+    pub artifact_rank: i64,
     pub attached_to_external_id: Option<String>,
+    pub attached_to_target_type: Option<String>,
+    pub sort_order: i64,
     pub source: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[derive(rmcp::schemars::JsonSchema)]
+pub struct DesignArtifactTypeRecord {
+    pub diagram_type: String,
+    pub artifact_role: String,
+    pub artifact_label: String,
+    pub artifact_rank: i64,
+    pub mermaid_header: String,
+    pub description: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -83,6 +100,7 @@ pub struct DesignOverviewResult {
     pub workspace_name: String,
     pub workspace_description: String,
     pub structurizr_dsl: String,
+    pub uml_artifact_types: Vec<DesignArtifactTypeRecord>,
     pub elements: Vec<DesignElementRecord>,
     pub relationships: Vec<DesignRelationshipRecord>,
     pub diagrams: Vec<DesignDiagramRecord>,
@@ -95,6 +113,7 @@ pub struct DesignOverviewResult {
 pub struct DesignScopeResult {
     pub revision: i64,
     pub root_external_id: String,
+    pub uml_artifact_types: Vec<DesignArtifactTypeRecord>,
     pub ancestors: Vec<DesignElementRecord>,
     pub elements: Vec<DesignElementRecord>,
     pub relationships: Vec<DesignRelationshipRecord>,
@@ -126,6 +145,7 @@ pub struct DesignSearchHit {
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct DesignByIdsResult {
     pub revision: i64,
+    pub uml_artifact_types: Vec<DesignArtifactTypeRecord>,
     pub elements: Vec<DesignElementRecord>,
     pub relationships: Vec<DesignRelationshipRecord>,
     pub diagrams: Vec<DesignDiagramRecord>,
@@ -137,6 +157,7 @@ pub struct DesignByIdsResult {
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct DesignBindingsResult {
     pub revision: i64,
+    pub uml_artifact_types: Vec<DesignArtifactTypeRecord>,
     pub bindings: Vec<DesignBindingRecord>,
     pub elements: Vec<DesignElementRecord>,
     pub relationships: Vec<DesignRelationshipRecord>,
@@ -178,6 +199,7 @@ pub fn load_overview(
         workspace_name: workspace.name,
         workspace_description: workspace.description,
         structurizr_dsl: workspace.structurizr_dsl,
+        uml_artifact_types: supported_uml_artifact_types(),
         relationships: load_relationships(db, workspace.id)?,
         diagrams: load_diagrams(db, workspace.id)?,
         bindings: load_bindings(db, workspace.id)?,
@@ -259,6 +281,7 @@ pub fn load_scope(
     Ok(DesignScopeResult {
         revision,
         root_external_id: element_id.to_string(),
+        uml_artifact_types: supported_uml_artifact_types(),
         ancestors,
         elements: scoped_elements,
         relationships: scoped_relationships,
@@ -376,6 +399,7 @@ pub fn load_by_ids(
 
     Ok(DesignByIdsResult {
         revision,
+        uml_artifact_types: supported_uml_artifact_types(),
         elements: load_elements(db, workspace.id)?
             .into_iter()
             .filter(|element| ids.contains(element.external_id.as_str()))
@@ -419,6 +443,7 @@ pub fn load_by_bindings(
 
     Ok(DesignBindingsResult {
         revision,
+        uml_artifact_types: supported_uml_artifact_types(),
         elements: load_elements(db, workspace.id)?
             .into_iter()
             .filter(|element| design_ids.contains(element.external_id.as_str()))
@@ -924,6 +949,103 @@ fn validate_mermaid(source: &str) -> Option<String> {
     None
 }
 
+pub fn supported_uml_artifact_types() -> Vec<DesignArtifactTypeRecord> {
+    vec![
+        artifact_type_record(
+            "class",
+            "primary-structure",
+            "Structure",
+            10,
+            "classDiagram",
+            "Static classes, interfaces, packages, domain contracts, and internal component structure.",
+        ),
+        artifact_type_record(
+            "sequence",
+            "interaction",
+            "Sequence",
+            20,
+            "sequenceDiagram",
+            "Time-ordered interactions between components, APIs, actors, and storage.",
+        ),
+        artifact_type_record(
+            "flow",
+            "workflow",
+            "Flow",
+            30,
+            "flowchart",
+            "Workflow, process, decision, and activity-style behavior.",
+        ),
+        artifact_type_record(
+            "state",
+            "lifecycle",
+            "State",
+            40,
+            "stateDiagram-v2",
+            "Lifecycle states and transitions for stateful components or entities.",
+        ),
+    ]
+}
+
+fn artifact_type_record(
+    diagram_type: &str,
+    artifact_role: &str,
+    artifact_label: &str,
+    artifact_rank: i64,
+    mermaid_header: &str,
+    description: &str,
+) -> DesignArtifactTypeRecord {
+    DesignArtifactTypeRecord {
+        diagram_type: diagram_type.to_string(),
+        artifact_role: artifact_role.to_string(),
+        artifact_label: artifact_label.to_string(),
+        artifact_rank,
+        mermaid_header: mermaid_header.to_string(),
+        description: description.to_string(),
+    }
+}
+
+pub fn diagram_artifact_role(diagram_type: &str) -> &'static str {
+    match normalized_diagram_type(diagram_type).as_str() {
+        "class" | "classdiagram" | "package" | "component" | "structure" => "primary-structure",
+        "sequence" | "sequencediagram" => "interaction",
+        "flow" | "flowchart" | "graph" | "activity" => "workflow",
+        "state" | "statediagram" | "statediagram-v2" => "lifecycle",
+        "structurizr" | "c4" => "architecture-source",
+        _ => "reference",
+    }
+}
+
+pub fn diagram_artifact_label(diagram_type: &str) -> &'static str {
+    match diagram_artifact_role(diagram_type) {
+        "primary-structure" => "Structure",
+        "interaction" => "Sequence",
+        "workflow" => "Flow",
+        "lifecycle" => "State",
+        "architecture-source" => "C4 Source",
+        _ => "Artifact",
+    }
+}
+
+pub fn diagram_artifact_rank(diagram_type: &str) -> i64 {
+    match diagram_artifact_role(diagram_type) {
+        "primary-structure" => 10,
+        "interaction" => 20,
+        "workflow" => 30,
+        "lifecycle" => 40,
+        "architecture-source" => 90,
+        _ => 80,
+    }
+}
+
+fn normalized_diagram_type(diagram_type: &str) -> String {
+    diagram_type
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric() || *character == '-')
+        .collect()
+}
+
 fn load_workspace(db: &Connection) -> Result<WorkspaceRecord, String> {
     db.query_row(
         "SELECT id, name, description, structurizr_dsl
@@ -1002,21 +1124,45 @@ fn load_relationships(
 fn load_diagrams(db: &Connection, workspace_id: i64) -> Result<Vec<DesignDiagramRecord>, String> {
     let mut statement = db
         .prepare(
-            "SELECT kind, key, title, source, diagram_type, attached_to_external_id
-             FROM diagrams
-             WHERE workspace_id = ?1
-             ORDER BY sort_order, id",
+            "SELECT
+                d.kind,
+                d.key,
+                d.title,
+                d.source,
+                d.diagram_type,
+                d.attached_to_external_id,
+                CASE
+                    WHEN e.external_id IS NOT NULL THEN 'element'
+                    WHEN r.external_id IS NOT NULL THEN 'relationship'
+                    ELSE NULL
+                END AS attached_to_target_type,
+                d.sort_order
+             FROM diagrams d
+             LEFT JOIN c4_elements e
+                ON e.workspace_id = d.workspace_id
+                AND e.external_id = d.attached_to_external_id
+             LEFT JOIN c4_relationships r
+                ON r.workspace_id = d.workspace_id
+                AND r.external_id = d.attached_to_external_id
+             WHERE d.workspace_id = ?1
+             ORDER BY d.sort_order, d.id",
         )
         .map_err(|err| err.to_string())?;
     let rows = statement
         .query_map(params![workspace_id], |row| {
+            let diagram_type: String = row.get(4)?;
             Ok(DesignDiagramRecord {
                 language: row.get(0)?,
                 key: row.get(1)?,
                 title: row.get(2)?,
                 source: row.get(3)?,
-                diagram_type: row.get(4)?,
+                artifact_role: diagram_artifact_role(&diagram_type).to_string(),
+                artifact_label: diagram_artifact_label(&diagram_type).to_string(),
+                artifact_rank: diagram_artifact_rank(&diagram_type),
+                diagram_type,
                 attached_to_external_id: row.get(5)?,
+                attached_to_target_type: row.get(6)?,
+                sort_order: row.get(7)?,
             })
         })
         .map_err(|err| err.to_string())?;

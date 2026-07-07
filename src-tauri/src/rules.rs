@@ -3,21 +3,6 @@ use serde::{Deserialize, Serialize};
 
 pub const INTENDS: &[&str] = &["general", "design", "implementation"];
 pub const HOOKS: &[&str] = &["run.start", "task.start", "task.end", "run.end"];
-pub const DESIGN_MCP_RULE_NAME: &str = "Design MCP API Protocol";
-pub const DESIGN_MCP_RULE_PROMPT: &str = r#"# Formal Design MCP Protocol
-
-For every `design` intend run, use the Adashi design MCP API as the formal design source of truth. Do not store design conclusions as chat notes.
-
-Required workflow:
-- Start by reading the current top-down design with `adashi_design_get_overview`.
-- Use deterministic retrieval such as `adashi_design_search`, `adashi_design_get_scope`, `adashi_design_get_by_ids`, and `adashi_design_get_bindings` to inspect candidate parents, related UML, and explicit file or symbol bindings.
-- Keep all design reasoning in the agent. The MCP retrieves explicit scopes, ids, tags, source, and stored bindings; it must not infer design context from a natural-language task.
-- Save finished design work with one transactional `adashi_design_save` call. Include an `expectedRevision`, a clear `changeIntent`, explicit parent ids or artifact attachments, and every C4/UML/binding change needed for a coherent model.
-- If `adashi_design_save` returns `ok: false`, correct the formal source or structure and retry. Do not treat a rejected save as persisted design.
-
-`adashi_design_save` is the validation and persistence boundary. It rejects stale revisions, missing parents, invalid C4 containment, duplicate ids, unresolved relationships, orphan internal elements, invalid UML syntax, and incomplete source/semantic round trips.
-
-Store C4 as canonical Structurizr DSL/JSON generated from validated semantic rows. Store UML as explicit Mermaid artifacts attached to a C4 element or relationship. Implementation work must consult the formal design through explicit design ids, scopes, search results, or stored bindings before coding when design exists."#;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -204,51 +189,6 @@ pub fn delete_rule(db: &Connection, rule_id: i64) -> Result<(), String> {
     } else {
         Ok(())
     }
-}
-
-pub fn ensure_design_mcp_rule(db: &Connection) -> Result<(), String> {
-    let mut statement = db
-        .prepare("SELECT id FROM projects")
-        .map_err(|err| err.to_string())?;
-    let project_ids = statement
-        .query_map([], |row| row.get::<_, i64>(0))
-        .map_err(|err| err.to_string())?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|err| err.to_string())?;
-
-    for project_id in project_ids {
-        let exists = db
-            .query_row(
-                "SELECT EXISTS(
-                    SELECT 1
-                    FROM rules
-                    WHERE project_id = ?1
-                      AND name = ?2
-                      AND intend = 'design'
-                      AND hook = 'run.start'
-                )",
-                params![project_id, DESIGN_MCP_RULE_NAME],
-                |row| row.get::<_, i64>(0),
-            )
-            .map_err(|err| err.to_string())?
-            != 0;
-
-        if !exists {
-            create_rule(
-                db,
-                project_id,
-                NewRule {
-                    name: DESIGN_MCP_RULE_NAME.to_string(),
-                    enabled: true,
-                    intend: "design".to_string(),
-                    hook: "run.start".to_string(),
-                    prompt: DESIGN_MCP_RULE_PROMPT.to_string(),
-                },
-            )?;
-        }
-    }
-
-    Ok(())
 }
 
 fn validate_intend(intend: &str) -> Result<(), String> {
