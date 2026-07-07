@@ -4,11 +4,15 @@ import { invoke } from "@tauri-apps/api/core";
 import EasyMDE from "easymde";
 import {
   Activity,
+  ArrowDown,
+  ArrowUp,
   Bot,
   Braces,
+  Check,
   CheckCircle2,
   ChevronRight,
   Database,
+  ExternalLink,
   Folder,
   GitBranch,
   Link2,
@@ -22,6 +26,7 @@ import {
   ServerCog,
   Trash2,
   Wand2,
+  X,
 } from "lucide-react";
 import mermaid from "mermaid";
 import "easymde/dist/easymde.min.css";
@@ -149,10 +154,30 @@ type StructurizrViewJson = {
 
 type Task = {
   id: number;
+  number: number;
   title: string;
-  body: string;
-  status: string;
-  priority: number;
+  description: string;
+  state: TaskState;
+  designSpecificationLinks: TaskDesignSpecificationLink[];
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+  confirmedAt?: string | null;
+  completionMemo: string;
+  createdFiles: string[];
+  changedFiles: string[];
+  confirmationCommitId?: string | null;
+};
+
+type TaskState = "open" | "finished" | "confirmed";
+
+type TaskDesignSpecificationLink = {
+  id: number;
+  taskId: number;
+  sortOrder: number;
+  targetType: "element" | "relationship" | "uml";
+  designExternalId: string;
+  title: string;
 };
 
 type Guideline = {
@@ -494,7 +519,38 @@ function App() {
             onError={setError}
           />
         ) : activeView === "tasks" ? (
-          <TasksView tasks={payload.tasks} postTaskCommands={payload.postTaskCommands} />
+          <TasksView
+            projectId={payload.projectId}
+            tasks={payload.tasks}
+            designElements={payload.designElements}
+            designRelationships={payload.designRelationships}
+            diagrams={payload.diagrams}
+            postTaskCommands={payload.postTaskCommands}
+            onChange={(updatedPayload) => {
+              setPayload((currentPayload) =>
+                currentPayload ? mergeDashboardPayload(currentPayload, updatedPayload) : updatedPayload,
+              );
+            }}
+            onError={setError}
+            onOpenDesignLink={(link) => {
+              const target =
+                link.targetType === "uml"
+                  ? payload.diagrams.find((diagram) => diagram.key === link.designExternalId)
+                  : null;
+              const externalId =
+                link.targetType === "uml"
+                  ? target?.attachedToExternalId ?? link.designExternalId
+                  : link.designExternalId;
+              const entityType =
+                link.targetType === "relationship" || target?.attachedToTargetType === "relationship"
+                  ? "relationship"
+                  : "element";
+
+              setSelectedDesignEntity({ type: entityType, externalId });
+              setActiveDesignLevel(link.targetType === "uml" || entityType === "relationship" ? "features" : "components");
+              setActiveView("design");
+            }}
+          />
         ) : activeView === "qa" ? (
           <QaView qaChecks={payload.qaChecks} />
         ) : (
@@ -2017,32 +2073,451 @@ function SettingsView({
   );
 }
 
-function TasksView({ tasks, postTaskCommands }: { tasks: Task[]; postTaskCommands: Command[] }) {
-  return (
-    <section className="tasks-grid">
-      <Panel title="Task Queue">
-        {tasks.map((task) => (
-          <div className="row-item" key={task.id}>
-            <span className={`pill ${task.status}`}>{task.status}</span>
-            <span>{task.title}</span>
-            <strong>P{task.priority}</strong>
-          </div>
-        ))}
-      </Panel>
+function TasksView({
+  projectId,
+  tasks,
+  designElements,
+  designRelationships,
+  diagrams,
+  postTaskCommands,
+  onChange,
+  onError,
+  onOpenDesignLink,
+}: {
+  projectId: string;
+  tasks: Task[];
+  designElements: DesignElement[];
+  designRelationships: DesignRelationship[];
+  diagrams: DesignDiagram[];
+  postTaskCommands: Command[];
+  onChange: (payload: DashboardPayload) => void;
+  onError: (message: string) => void;
+  onOpenDesignLink: (link: TaskDesignSpecificationLink) => void;
+}) {
+  const [selectedTaskId, setSelectedTaskId] = React.useState<number | null>(tasks[0]?.id ?? null);
+  const [visibleStates, setVisibleStates] = React.useState<Record<TaskState, boolean>>({
+    open: true,
+    finished: true,
+    confirmed: false,
+  });
+  const [linkQuery, setLinkQuery] = React.useState("");
+  const [completionMemo, setCompletionMemo] = React.useState("");
+  const [createdFiles, setCreatedFiles] = React.useState("");
+  const [changedFiles, setChangedFiles] = React.useState("");
 
-      <Panel title="Post-Task Commands">
-        {postTaskCommands.map((command) => (
-          <div className="command-row" key={command.id}>
-            <PlayCircle size={17} />
-            <div>
-              <span>{command.label}</span>
-              <code>{command.command}</code>
+  const visibleTasks = tasks.filter((task) => visibleStates[task.state]);
+  const selectedTask =
+    tasks.find((task) => task.id === selectedTaskId && visibleStates[task.state]) ?? visibleTasks[0] ?? null;
+  const designLinkOptions = React.useMemo(
+    () => buildTaskDesignLinkOptions(designElements, designRelationships, diagrams, linkQuery),
+    [designElements, designRelationships, diagrams, linkQuery],
+  );
+
+  React.useEffect(() => {
+    if (!selectedTask && visibleTasks[0]) {
+      setSelectedTaskId(visibleTasks[0].id);
+    }
+  }, [selectedTask, visibleTasks]);
+
+  React.useEffect(() => {
+    setCompletionMemo(selectedTask?.completionMemo ?? "");
+    setCreatedFiles((selectedTask?.createdFiles ?? []).join("\n"));
+    setChangedFiles((selectedTask?.changedFiles ?? []).join("\n"));
+  }, [selectedTask?.id]);
+
+  function addTask() {
+    invoke<DashboardPayload>("create_task", {
+      input: {
+        projectId,
+        title: "New Task",
+        description: "",
+        designSpecificationLinks: [],
+      },
+    })
+      .then((updatedPayload) => {
+        const newestTask = updatedPayload.tasks.reduce<Task | null>(
+          (newest, task) => (!newest || task.number > newest.number ? task : newest),
+          null,
+        );
+        setSelectedTaskId(newestTask?.id ?? null);
+        onChange(updatedPayload);
+      })
+      .catch((reason) => onError(String(reason)));
+  }
+
+  function updateTask(task: Task, changes: Partial<Pick<Task, "title" | "description" | "state">> & {
+    designSpecificationLinks?: Array<Pick<TaskDesignSpecificationLink, "targetType" | "designExternalId">>;
+  }) {
+    invoke<DashboardPayload>("update_task", {
+      input: {
+        projectId,
+        taskId: task.id,
+        ...changes,
+      },
+    })
+      .then((updatedPayload) => {
+        setSelectedTaskId(task.id);
+        onChange(updatedPayload);
+      })
+      .catch((reason) => onError(String(reason)));
+  }
+
+  function deleteSelectedTask(task: Task) {
+    if (!window.confirm(`Delete task #${task.number}: ${task.title}?`)) {
+      return;
+    }
+
+    invoke<DashboardPayload>("delete_task", { projectId, taskId: task.id })
+      .then((updatedPayload) => {
+        setSelectedTaskId(updatedPayload.tasks.find((candidate) => visibleStates[candidate.state])?.id ?? null);
+        onChange(updatedPayload);
+      })
+      .catch((reason) => onError(String(reason)));
+  }
+
+  function addDesignLink(task: Task, option: TaskDesignLinkOption) {
+    if (task.designSpecificationLinks.some((link) => link.designExternalId === option.designExternalId)) {
+      return;
+    }
+
+    updateTask(task, {
+      designSpecificationLinks: [
+        ...task.designSpecificationLinks.map(linkToInput),
+        { targetType: option.targetType, designExternalId: option.designExternalId },
+      ],
+    });
+    setLinkQuery("");
+  }
+
+  function removeDesignLink(task: Task, designExternalId: string) {
+    updateTask(task, {
+      designSpecificationLinks: task.designSpecificationLinks
+        .filter((link) => link.designExternalId !== designExternalId)
+        .map(linkToInput),
+    });
+  }
+
+  function moveDesignLink(task: Task, index: number, direction: -1 | 1) {
+    const nextLinks = task.designSpecificationLinks.map(linkToInput);
+    const nextIndex = index + direction;
+
+    if (nextIndex < 0 || nextIndex >= nextLinks.length) {
+      return;
+    }
+
+    [nextLinks[index], nextLinks[nextIndex]] = [nextLinks[nextIndex], nextLinks[index]];
+    updateTask(task, { designSpecificationLinks: nextLinks });
+  }
+
+  function finishSelectedTask(task: Task) {
+    invoke<DashboardPayload>("finish_task", {
+      input: {
+        projectId,
+        taskId: task.id,
+        completionMemo,
+        createdFiles: splitLines(createdFiles),
+        changedFiles: splitLines(changedFiles),
+      },
+    })
+      .then(onChange)
+      .catch((reason) => onError(String(reason)));
+  }
+
+  function confirmSelectedTask(task: Task) {
+    invoke<DashboardPayload>("confirm_task", { projectId, taskId: task.id })
+      .then(onChange)
+      .catch((reason) => onError(String(reason)));
+  }
+
+  return (
+    <section className="task-workspace">
+      <section className="task-list-panel">
+        <div className="task-panel-heading">
+          <h3>Tasks</h3>
+          <button aria-label="Create task" onClick={addTask} title="Create task" type="button">
+            <Plus size={17} />
+          </button>
+        </div>
+
+        <div className="task-state-filters" aria-label="Task state filters">
+          {(["open", "finished", "confirmed"] as TaskState[]).map((state) => (
+            <label key={state}>
+              <input
+                checked={visibleStates[state]}
+                onChange={(event) => setVisibleStates((current) => ({ ...current, [state]: event.target.checked }))}
+                type="checkbox"
+              />
+              <span>{state}</span>
+            </label>
+          ))}
+        </div>
+
+        <div className="task-list">
+          {visibleTasks.length === 0 ? (
+            <div className="empty-state">No tasks match the current filters</div>
+          ) : (
+            visibleTasks.map((task) => (
+              <button
+                className={selectedTask?.id === task.id ? "task-list-item active" : "task-list-item"}
+                key={task.id}
+                onClick={() => setSelectedTaskId(task.id)}
+                type="button"
+              >
+                <span className={`pill task-state-${task.state}`}>{task.state}</span>
+                <strong>#{task.number} {task.title}</strong>
+                <small>{task.designSpecificationLinks.length} design links</small>
+              </button>
+            ))
+          )}
+        </div>
+
+        <section className="post-task-command-panel">
+          <h4>Post-Task Commands</h4>
+          {postTaskCommands.map((command) => (
+            <div className="command-row compact" key={command.id}>
+              <PlayCircle size={16} />
+              <div>
+                <span>{command.label}</span>
+                <code>{command.command}</code>
+              </div>
             </div>
-          </div>
-        ))}
-      </Panel>
+          ))}
+        </section>
+      </section>
+
+      <section className="task-detail-panel">
+        {selectedTask ? (
+          <>
+            <div className="task-detail-heading">
+              <div>
+                <p className="eyebrow">Task #{selectedTask.number}</p>
+                <h3>{selectedTask.title}</h3>
+              </div>
+              <div className="task-detail-actions">
+                {selectedTask.state === "finished" ? (
+                  <button aria-label="Confirm task" onClick={() => confirmSelectedTask(selectedTask)} title="Confirm task" type="button">
+                    <Check size={17} />
+                  </button>
+                ) : null}
+                <button
+                  aria-label={`Delete task #${selectedTask.number}`}
+                  className="danger-icon-button"
+                  onClick={() => deleteSelectedTask(selectedTask)}
+                  title="Delete task"
+                  type="button"
+                >
+                  <Trash2 size={17} />
+                </button>
+              </div>
+            </div>
+
+            <div className="task-editor-form">
+              <label>
+                <span>Title</span>
+                <input
+                  defaultValue={selectedTask.title}
+                  key={`task-title-${selectedTask.id}`}
+                  onBlur={(event) => updateTask(selectedTask, { title: event.target.value })}
+                />
+              </label>
+
+              <label>
+                <span>State</span>
+                <select
+                  value={selectedTask.state}
+                  onChange={(event) => updateTask(selectedTask, { state: event.target.value as TaskState })}
+                >
+                  <option value="open">open</option>
+                  <option value="finished">finished</option>
+                  <option value="confirmed">confirmed</option>
+                </select>
+              </label>
+
+              <label className="task-description-label">
+                <span>Description</span>
+                <textarea
+                  defaultValue={selectedTask.description}
+                  key={`task-description-${selectedTask.id}`}
+                  onBlur={(event) => updateTask(selectedTask, { description: event.target.value })}
+                />
+              </label>
+            </div>
+
+            <section className="task-detail-section">
+              <div className="task-section-heading">
+                <h4>Design Specification Links</h4>
+              </div>
+
+              <div className="task-link-list">
+                {selectedTask.designSpecificationLinks.length === 0 ? (
+                  <div className="empty-state compact">No design specifications linked</div>
+                ) : (
+                  selectedTask.designSpecificationLinks.map((link, index) => (
+                    <div className="task-link-row" key={link.id}>
+                      <button
+                        aria-label={`Open ${link.title} in Design`}
+                        onClick={() => onOpenDesignLink(link)}
+                        title="Open in Design"
+                        type="button"
+                      >
+                        <ExternalLink size={16} />
+                      </button>
+                      <div>
+                        <strong>{link.title}</strong>
+                        <span>{link.targetType} / {link.designExternalId}</span>
+                      </div>
+                      <button
+                        aria-label="Move link up"
+                        disabled={index === 0}
+                        onClick={() => moveDesignLink(selectedTask, index, -1)}
+                        title="Move up"
+                        type="button"
+                      >
+                        <ArrowUp size={16} />
+                      </button>
+                      <button
+                        aria-label="Move link down"
+                        disabled={index === selectedTask.designSpecificationLinks.length - 1}
+                        onClick={() => moveDesignLink(selectedTask, index, 1)}
+                        title="Move down"
+                        type="button"
+                      >
+                        <ArrowDown size={16} />
+                      </button>
+                      <button
+                        aria-label={`Remove ${link.title}`}
+                        onClick={() => removeDesignLink(selectedTask, link.designExternalId)}
+                        title="Remove link"
+                        type="button"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <label className="task-link-search">
+                <Search size={16} />
+                <input
+                  value={linkQuery}
+                  onChange={(event) => setLinkQuery(event.target.value)}
+                  placeholder="Search C4 elements, relationships, or UML"
+                />
+              </label>
+              {linkQuery.trim() ? (
+                <div className="task-link-results">
+                  {designLinkOptions.map((option) => (
+                    <button key={`${option.targetType}-${option.designExternalId}`} onClick={() => addDesignLink(selectedTask, option)} type="button">
+                      <Link2 size={15} />
+                      <span>{option.title}</span>
+                      <code>{option.targetType}</code>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </section>
+
+            <section className="task-detail-section">
+              <div className="task-section-heading">
+                <h4>Completion</h4>
+                {selectedTask.state !== "confirmed" ? (
+                  <button onClick={() => finishSelectedTask(selectedTask)} type="button">
+                    <CheckCircle2 size={17} />
+                    Finish
+                  </button>
+                ) : null}
+              </div>
+              <div className="task-completion-grid">
+                <label>
+                  <span>Memo</span>
+                  <textarea value={completionMemo} onChange={(event) => setCompletionMemo(event.target.value)} />
+                </label>
+                <label>
+                  <span>Created Files</span>
+                  <textarea value={createdFiles} onChange={(event) => setCreatedFiles(event.target.value)} />
+                </label>
+                <label>
+                  <span>Changed Files</span>
+                  <textarea value={changedFiles} onChange={(event) => setChangedFiles(event.target.value)} />
+                </label>
+              </div>
+            </section>
+          </>
+        ) : (
+          <div className="empty-state">Create or reveal a task to start editing</div>
+        )}
+      </section>
     </section>
   );
+}
+
+type TaskDesignLinkOption = {
+  targetType: "element" | "relationship" | "uml";
+  designExternalId: string;
+  title: string;
+  summary: string;
+};
+
+function buildTaskDesignLinkOptions(
+  elements: DesignElement[],
+  relationships: DesignRelationship[],
+  diagrams: DesignDiagram[],
+  query: string,
+): TaskDesignLinkOption[] {
+  const terms = query
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (terms.length === 0) {
+    return [];
+  }
+
+  const options: TaskDesignLinkOption[] = [
+    ...elements.map((element) => ({
+      targetType: "element" as const,
+      designExternalId: element.externalId,
+      title: element.name,
+      summary: `${element.externalId} ${element.elementType} ${element.description} ${element.technology} ${element.tags}`,
+    })),
+    ...relationships.map((relationship) => ({
+      targetType: "relationship" as const,
+      designExternalId: relationship.externalId,
+      title: relationship.description,
+      summary: `${relationship.externalId} ${relationship.sourceExternalId} ${relationship.destinationExternalId} ${relationship.technology} ${relationship.tags}`,
+    })),
+    ...diagrams
+      .filter((diagram) => diagram.kind === "mermaid")
+      .map((diagram) => ({
+        targetType: "uml" as const,
+        designExternalId: diagram.key,
+        title: diagram.title,
+        summary: `${diagram.key} ${diagram.diagramType} ${diagram.artifactLabel} ${diagram.attachedToExternalId ?? ""}`,
+      })),
+  ];
+
+  return options
+    .filter((option) => {
+      const haystack = `${option.title} ${option.summary}`.toLowerCase();
+      return terms.every((term) => haystack.includes(term));
+    })
+    .slice(0, 12);
+}
+
+function linkToInput(link: TaskDesignSpecificationLink): Pick<TaskDesignSpecificationLink, "targetType" | "designExternalId"> {
+  return {
+    targetType: link.targetType,
+    designExternalId: link.designExternalId,
+  };
+}
+
+function splitLines(value: string): string[] {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 function QaView({ qaChecks }: { qaChecks: QaCheck[] }) {

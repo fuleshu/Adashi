@@ -82,7 +82,7 @@ pub fn seed_initial_data(db: &mut Connection, project: &ProjectSettings) -> rusq
     }
 
     tx.execute(
-        "INSERT INTO agent_tasks(project_id, title, body, status, priority) VALUES (?1, ?2, ?3, 'ready', 1)",
+        "INSERT INTO agent_tasks(project_id, number, title, description, state) VALUES (?1, 1, ?2, ?3, 'open')",
         params![
             project_id,
             "Expose design workspace over MCP",
@@ -90,7 +90,7 @@ pub fn seed_initial_data(db: &mut Connection, project: &ProjectSettings) -> rusq
         ],
     )?;
     tx.execute(
-        "INSERT INTO agent_tasks(project_id, title, body, status, priority) VALUES (?1, ?2, ?3, 'planned', 2)",
+        "INSERT INTO agent_tasks(project_id, number, title, description, state) VALUES (?1, 2, ?2, ?3, 'open')",
         params![
             project_id,
             "Add task injection workflow",

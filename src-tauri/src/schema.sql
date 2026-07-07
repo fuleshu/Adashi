@@ -88,12 +88,41 @@ CREATE INDEX IF NOT EXISTS idx_design_bindings_target
 CREATE TABLE IF NOT EXISTS agent_tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    number INTEGER NOT NULL DEFAULT 0,
     title TEXT NOT NULL,
-    body TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL DEFAULT 'planned',
-    priority INTEGER NOT NULL DEFAULT 3,
+    description TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL DEFAULT 'open' CHECK(state IN ('open', 'finished', 'confirmed')),
+    completed_at TEXT,
+    confirmed_at TEXT,
+    completion_memo TEXT NOT NULL DEFAULT '',
+    created_files TEXT NOT NULL DEFAULT '[]',
+    changed_files TEXT NOT NULL DEFAULT '[]',
+    confirmation_commit_id TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(project_id, number)
+);
+
+CREATE TABLE IF NOT EXISTS task_design_specification_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL REFERENCES agent_tasks(id) ON DELETE CASCADE,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    target_type TEXT NOT NULL CHECK(target_type IN ('element', 'relationship', 'uml')),
+    design_external_id TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(task_id, design_external_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_design_links_task_order
+    ON task_design_specification_links(task_id, sort_order);
+
+CREATE TABLE IF NOT EXISTS task_qa_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL REFERENCES agent_tasks(id) ON DELETE CASCADE,
+    label TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    body TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS coding_guidelines (
@@ -165,3 +194,4 @@ INSERT OR IGNORE INTO schema_migrations(version) VALUES (4);
 INSERT OR IGNORE INTO schema_migrations(version) VALUES (5);
 INSERT OR IGNORE INTO schema_migrations(version) VALUES (6);
 INSERT OR IGNORE INTO schema_migrations(version) VALUES (7);
+INSERT OR IGNORE INTO schema_migrations(version) VALUES (8);

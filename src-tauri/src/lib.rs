@@ -24,7 +24,7 @@ use crate::memory::ProjectMemory;
 use crate::rules::{NewRule, Rule, UpdateRule};
 use crate::settings::{AppSettings, ProjectSettings, WindowSettings};
 use crate::state as project_state;
-use crate::tasks::Task;
+use crate::tasks::{FinishTask, NewTask, Task, TaskDesignSpecificationLinkInput, UpdateTask};
 
 struct AppState {
     settings_path: PathBuf,
@@ -181,7 +181,7 @@ fn load_dashboard_payload(
         design_relationships: load_design_relationships(&db)?,
         uml_artifact_types: design::supported_uml_artifact_types(),
         diagrams: load_diagrams(&db)?,
-        tasks: tasks::load_tasks(db)?,
+        tasks: tasks::load_tasks(db, project_row_id, None)?,
         guidelines: load_guidelines(&db)?,
         post_task_commands: load_post_task_commands(&db)?,
         qa_checks: load_qa_checks(&db)?,
@@ -384,6 +384,36 @@ struct CreateDesignRelationshipRequest {
     description: String,
     technology: String,
     tags: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateTaskRequest {
+    project_id: Option<String>,
+    title: String,
+    description: Option<String>,
+    design_specification_links: Option<Vec<TaskDesignSpecificationLinkInput>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateTaskRequest {
+    project_id: Option<String>,
+    task_id: i64,
+    title: Option<String>,
+    description: Option<String>,
+    state: Option<String>,
+    design_specification_links: Option<Vec<TaskDesignSpecificationLinkInput>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FinishTaskRequest {
+    project_id: Option<String>,
+    task_id: i64,
+    completion_memo: String,
+    created_files: Vec<String>,
+    changed_files: Vec<String>,
 }
 
 #[tauri::command]
@@ -646,6 +676,100 @@ fn create_design_relationship(
     load_dashboard_payload(project, &db)
 }
 
+#[tauri::command]
+fn create_task(
+    input: CreateTaskRequest,
+    state: State<'_, AppState>,
+) -> Result<DashboardPayload, String> {
+    let project = resolve_project(&state, input.project_id.as_deref())?;
+    let db = open_project_database(&project).map_err(|err| err.to_string())?;
+    let project_row_id = load_project_row_id(&db)?;
+    tasks::create_task(
+        &db,
+        project_row_id,
+        NewTask {
+            title: input.title,
+            description: input.description,
+            design_specification_links: input.design_specification_links,
+        },
+    )?;
+    project_state::bump_project_revision(&db, project_row_id)?;
+    load_dashboard_payload(project, &db)
+}
+
+#[tauri::command]
+fn update_task(
+    input: UpdateTaskRequest,
+    state: State<'_, AppState>,
+) -> Result<DashboardPayload, String> {
+    let project = resolve_project(&state, input.project_id.as_deref())?;
+    let db = open_project_database(&project).map_err(|err| err.to_string())?;
+    let project_row_id = load_project_row_id(&db)?;
+    tasks::update_task(
+        &db,
+        project_row_id,
+        UpdateTask {
+            task_id: input.task_id,
+            title: input.title,
+            description: input.description,
+            state: input.state,
+            design_specification_links: input.design_specification_links,
+        },
+    )?;
+    project_state::bump_project_revision(&db, project_row_id)?;
+    load_dashboard_payload(project, &db)
+}
+
+#[tauri::command]
+fn finish_task(
+    input: FinishTaskRequest,
+    state: State<'_, AppState>,
+) -> Result<DashboardPayload, String> {
+    let project = resolve_project(&state, input.project_id.as_deref())?;
+    let db = open_project_database(&project).map_err(|err| err.to_string())?;
+    let project_row_id = load_project_row_id(&db)?;
+    tasks::finish_task(
+        &db,
+        project_row_id,
+        FinishTask {
+            task_id: input.task_id,
+            completion_memo: input.completion_memo,
+            created_files: input.created_files,
+            changed_files: input.changed_files,
+        },
+    )?;
+    project_state::bump_project_revision(&db, project_row_id)?;
+    load_dashboard_payload(project, &db)
+}
+
+#[tauri::command]
+fn confirm_task(
+    project_id: Option<String>,
+    task_id: i64,
+    state: State<'_, AppState>,
+) -> Result<DashboardPayload, String> {
+    let project = resolve_project(&state, project_id.as_deref())?;
+    let db = open_project_database(&project).map_err(|err| err.to_string())?;
+    let project_row_id = load_project_row_id(&db)?;
+    tasks::confirm_task(&db, project_row_id, task_id)?;
+    project_state::bump_project_revision(&db, project_row_id)?;
+    load_dashboard_payload(project, &db)
+}
+
+#[tauri::command]
+fn delete_task(
+    project_id: Option<String>,
+    task_id: i64,
+    state: State<'_, AppState>,
+) -> Result<DashboardPayload, String> {
+    let project = resolve_project(&state, project_id.as_deref())?;
+    let db = open_project_database(&project).map_err(|err| err.to_string())?;
+    let project_row_id = load_project_row_id(&db)?;
+    tasks::delete_task(&db, project_row_id, task_id)?;
+    project_state::bump_project_revision(&db, project_row_id)?;
+    load_dashboard_payload(project, &db)
+}
+
 pub fn run_mcp() -> Result<(), Box<dyn std::error::Error>> {
     mcp::run_stdio_server()
 }
@@ -672,10 +796,14 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             add_project,
+            confirm_task,
             create_rule,
+            create_task,
             delete_rule,
             create_design_relationship,
             delete_project,
+            delete_task,
+            finish_task,
             get_app_settings,
             get_dashboard,
             get_project_revision,
@@ -685,7 +813,8 @@ pub fn run() {
             update_fixed_hook_prompt,
             update_memory,
             update_memory_rule,
-            update_rule
+            update_rule,
+            update_task
         ])
         .run(tauri::generate_context!())
         .expect("error while running Adashi");

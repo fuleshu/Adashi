@@ -7,7 +7,10 @@ use crate::memory::{self, ProjectMemory};
 use crate::rules::{self, InjectionRule, NewRule, Rule, UpdateRule};
 use crate::settings::{self, AppSettings, ProjectSettings};
 use crate::state as project_state;
-use crate::tasks::{self, NewTask, Task, UpdateTask};
+use crate::tasks::{
+    self, FinishTask, NewTask, Task, TaskDesignSpecificationLink, TaskDesignSpecificationLinkInput,
+    UpdateTask,
+};
 use crate::{open_project_database, resolve_project_from_settings};
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::ErrorData;
@@ -94,9 +97,8 @@ struct DeleteRuleParams {
 struct CreateTaskParams {
     project_id: Option<String>,
     title: String,
-    body: Option<String>,
-    status: Option<String>,
-    priority: Option<i64>,
+    description: Option<String>,
+    design_specification_links: Option<Vec<TaskDesignSpecificationLinkInput>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
@@ -105,9 +107,33 @@ struct UpdateTaskParams {
     project_id: Option<String>,
     task_id: i64,
     title: Option<String>,
-    body: Option<String>,
-    status: Option<String>,
-    priority: Option<i64>,
+    description: Option<String>,
+    state: Option<String>,
+    design_specification_links: Option<Vec<TaskDesignSpecificationLinkInput>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct ListTasksParams {
+    project_id: Option<String>,
+    states: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct TaskIdParams {
+    project_id: Option<String>,
+    task_id: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct FinishTaskParams {
+    project_id: Option<String>,
+    task_id: i64,
+    completion_memo: String,
+    created_files: Option<Vec<String>>,
+    changed_files: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
@@ -193,6 +219,24 @@ struct TaskListResult {
 
 #[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+struct TaskReadResult {
+    project_id: String,
+    project_name: String,
+    revision: i64,
+    task: Task,
+    design_specifications: Vec<TaskDesignSpecificationBranch>,
+}
+
+#[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct TaskDesignSpecificationBranch {
+    link: TaskDesignSpecificationLink,
+    scope: Option<DesignScopeResult>,
+    note: Option<String>,
+}
+
+#[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
 struct RuleInjectionResult {
     project_id: String,
     project_name: String,
@@ -236,6 +280,16 @@ struct TaskMutationResult {
     project_name: String,
     revision: i64,
     task: Task,
+    design_specifications: Vec<TaskDesignSpecificationBranch>,
+}
+
+#[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct DeleteTaskResult {
+    project_id: String,
+    project_name: String,
+    revision: i64,
+    deleted_task_id: i64,
 }
 
 #[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
@@ -329,23 +383,49 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_list_tasks",
-        description = "List Adashi tasks for a project, including task ids needed for update calls."
+        description = "List project-local Adashi tasks. Pass states to filter to open, finished, and/or confirmed."
     )]
     fn list_tasks(
         &self,
-        Parameters(params): Parameters<ProjectParams>,
+        Parameters(params): Parameters<ListTasksParams>,
     ) -> Result<Json<TaskListResult>, ErrorData> {
         let (project, db) = self.open_project(params.project_id.as_deref())?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let revision =
             project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
-        let tasks = tasks::load_tasks(&db).map_err(tool_error)?;
+        let tasks =
+            tasks::load_tasks(&db, project_row_id, params.states.as_deref()).map_err(tool_error)?;
 
         Ok(Json(TaskListResult {
             project_id: project.id,
             project_name: project.name,
             revision: revision.revision,
             tasks,
+        }))
+    }
+
+    #[tool(
+        name = "adashi_get_task",
+        description = "Read one Adashi task and return all linked design specification branches when links are present."
+    )]
+    fn get_task(
+        &self,
+        Parameters(params): Parameters<TaskIdParams>,
+    ) -> Result<Json<TaskReadResult>, ErrorData> {
+        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        let revision =
+            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
+        let task = tasks::load_task(&db, project_row_id, params.task_id).map_err(tool_error)?;
+        let design_specifications =
+            load_task_design_specifications(&db, project_row_id, &task).map_err(tool_error)?;
+
+        Ok(Json(TaskReadResult {
+            project_id: project.id,
+            project_name: project.name,
+            revision: revision.revision,
+            task,
+            design_specifications,
         }))
     }
 
@@ -453,7 +533,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_create_task",
-        description = "Create an Adashi task for the selected project. The write bumps the project revision so the desktop UI can merge the changed task list automatically."
+        description = "Create a project-local Adashi task with optional ordered design specification links. The write bumps project revision."
     )]
     fn create_task(
         &self,
@@ -466,26 +546,28 @@ impl AdashiMcpServer {
             project_row_id,
             NewTask {
                 title: params.title,
-                body: params.body,
-                status: params.status,
-                priority: params.priority,
+                description: params.description,
+                design_specification_links: params.design_specification_links,
             },
         )
         .map_err(tool_error)?;
         let revision =
             project_state::bump_project_revision(&db, project_row_id).map_err(tool_error)?;
+        let design_specifications =
+            load_task_design_specifications(&db, project_row_id, &task).map_err(tool_error)?;
 
         Ok(Json(TaskMutationResult {
             project_id: project.id,
             project_name: project.name,
             revision: revision.revision,
             task,
+            design_specifications,
         }))
     }
 
     #[tool(
         name = "adashi_update_task",
-        description = "Update selected fields of an Adashi task. Omitted fields keep their current values. The write bumps the project revision so the desktop UI can merge changed fields automatically."
+        description = "Update selected fields of an Adashi task, including state and full ordered design specification link replacement. Omitted fields keep current values."
     )]
     fn update_task(
         &self,
@@ -495,23 +577,84 @@ impl AdashiMcpServer {
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let task = tasks::update_task(
             &db,
+            project_row_id,
             UpdateTask {
                 task_id: params.task_id,
                 title: params.title,
-                body: params.body,
-                status: params.status,
-                priority: params.priority,
+                description: params.description,
+                state: params.state,
+                design_specification_links: params.design_specification_links,
             },
         )
         .map_err(tool_error)?;
         let revision =
             project_state::bump_project_revision(&db, project_row_id).map_err(tool_error)?;
+        let design_specifications =
+            load_task_design_specifications(&db, project_row_id, &task).map_err(tool_error)?;
 
         Ok(Json(TaskMutationResult {
             project_id: project.id,
             project_name: project.name,
             revision: revision.revision,
             task,
+            design_specifications,
+        }))
+    }
+
+    #[tool(
+        name = "adashi_finish_task",
+        description = "Mark an Adashi task finished. This is AI-owned and records a completion memo plus created and changed files."
+    )]
+    fn finish_task(
+        &self,
+        Parameters(params): Parameters<FinishTaskParams>,
+    ) -> Result<Json<TaskMutationResult>, ErrorData> {
+        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        let task = tasks::finish_task(
+            &db,
+            project_row_id,
+            FinishTask {
+                task_id: params.task_id,
+                completion_memo: params.completion_memo,
+                created_files: params.created_files.unwrap_or_default(),
+                changed_files: params.changed_files.unwrap_or_default(),
+            },
+        )
+        .map_err(tool_error)?;
+        let revision =
+            project_state::bump_project_revision(&db, project_row_id).map_err(tool_error)?;
+        let design_specifications =
+            load_task_design_specifications(&db, project_row_id, &task).map_err(tool_error)?;
+
+        Ok(Json(TaskMutationResult {
+            project_id: project.id,
+            project_name: project.name,
+            revision: revision.revision,
+            task,
+            design_specifications,
+        }))
+    }
+
+    #[tool(
+        name = "adashi_delete_task",
+        description = "Delete a project-local Adashi task by id. The write bumps project revision."
+    )]
+    fn delete_task(
+        &self,
+        Parameters(params): Parameters<TaskIdParams>,
+    ) -> Result<Json<DeleteTaskResult>, ErrorData> {
+        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        tasks::delete_task(&db, project_row_id, params.task_id).map_err(tool_error)?;
+        let revision =
+            project_state::bump_project_revision(&db, project_row_id).map_err(tool_error)?;
+
+        Ok(Json(DeleteTaskResult {
+            project_id: project.id,
+            project_name: project.name,
+            revision: revision.revision,
+            deleted_task_id: params.task_id,
         }))
     }
 
@@ -937,6 +1080,56 @@ fn project_row_id(db: &rusqlite::Connection) -> Result<i64, String> {
         row.get(0)
     })
     .map_err(|err| err.to_string())
+}
+
+fn load_task_design_specifications(
+    db: &rusqlite::Connection,
+    project_row_id: i64,
+    task: &Task,
+) -> Result<Vec<TaskDesignSpecificationBranch>, String> {
+    task.design_specification_links
+        .iter()
+        .map(|link| {
+            let root_id = match link.target_type.as_str() {
+                "element" => Some(link.design_external_id.clone()),
+                "uml" => db
+                    .query_row(
+                        "SELECT attached_to_external_id
+                         FROM diagrams
+                         WHERE key = ?1
+                         LIMIT 1",
+                        rusqlite::params![link.design_external_id],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .map_err(|err| err.to_string())?,
+                "relationship" => None,
+                _ => None,
+            };
+
+            let scope = match root_id {
+                Some(root_id) => Some(design::load_scope(
+                    db,
+                    project_row_id,
+                    &root_id,
+                    true,
+                    Some(2),
+                    false,
+                )?),
+                None => None,
+            };
+            let note = if scope.is_some() {
+                None
+            } else {
+                Some("This link does not resolve to an element-rooted design branch.".to_string())
+            };
+
+            Ok(TaskDesignSpecificationBranch {
+                link: link.clone(),
+                scope,
+                note,
+            })
+        })
+        .collect()
 }
 
 fn tool_error(message: String) -> ErrorData {
