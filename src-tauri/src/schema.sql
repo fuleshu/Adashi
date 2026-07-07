@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS diagrams (
     key TEXT NOT NULL,
     title TEXT NOT NULL,
     source TEXT NOT NULL,
+    diagram_type TEXT NOT NULL DEFAULT '',
+    attached_to_external_id TEXT,
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -68,6 +70,20 @@ CREATE TABLE IF NOT EXISTS c4_relationships (
     tags TEXT NOT NULL DEFAULT '',
     UNIQUE(workspace_id, external_id)
 );
+
+CREATE TABLE IF NOT EXISTS design_bindings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id INTEGER NOT NULL REFERENCES design_workspaces(id) ON DELETE CASCADE,
+    design_external_id TEXT NOT NULL,
+    target_type TEXT NOT NULL CHECK(target_type IN ('file', 'symbol')),
+    target TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(workspace_id, design_external_id, target_type, target)
+);
+
+CREATE INDEX IF NOT EXISTS idx_design_bindings_target
+    ON design_bindings(workspace_id, target_type, target);
 
 CREATE TABLE IF NOT EXISTS agent_tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -135,3 +151,4 @@ INSERT OR IGNORE INTO schema_migrations(version) VALUES (2);
 INSERT OR IGNORE INTO schema_migrations(version) VALUES (3);
 INSERT OR IGNORE INTO schema_migrations(version) VALUES (4);
 INSERT OR IGNORE INTO schema_migrations(version) VALUES (5);
+INSERT OR IGNORE INTO schema_migrations(version) VALUES (6);

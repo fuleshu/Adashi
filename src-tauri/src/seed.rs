@@ -38,13 +38,13 @@ pub fn seed_initial_data(db: &mut Connection, project: &ProjectSettings) -> rusq
     let workspace_id = tx.last_insert_rowid();
 
     tx.execute(
-        "INSERT INTO diagrams(workspace_id, kind, key, title, source, sort_order)
-         VALUES (?1, 'structurizr', 'AdashiContainers', 'Adashi container view', ?2, 1)",
+        "INSERT INTO diagrams(workspace_id, kind, key, title, source, diagram_type, attached_to_external_id, sort_order)
+         VALUES (?1, 'structurizr', 'AdashiContainers', 'Adashi container view', ?2, 'container', '2', 1)",
         params![workspace_id, STRUCTURIZR_JSON],
     )?;
     tx.execute(
-        "INSERT INTO diagrams(workspace_id, kind, key, title, source, sort_order)
-         VALUES (?1, 'mermaid', 'TaskLifecycle', 'Agent task lifecycle', ?2, 2)",
+        "INSERT INTO diagrams(workspace_id, kind, key, title, source, diagram_type, attached_to_external_id, sort_order)
+         VALUES (?1, 'mermaid', 'TaskLifecycle', 'Agent task lifecycle', ?2, 'sequence', '5', 2)",
         params![workspace_id, MERMAID_UML],
     )?;
 

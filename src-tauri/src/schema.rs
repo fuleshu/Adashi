@@ -3,6 +3,8 @@ use rusqlite::Connection;
 pub fn migrate(db: &mut Connection) -> rusqlite::Result<()> {
     db.execute_batch(include_str!("schema.sql"))?;
     ensure_rules_name_column(db)?;
+    ensure_diagram_attachment_columns(db)?;
+    ensure_design_bindings_table(db)?;
     crate::state::ensure_project_state(db)?;
     ensure_project_memory_rows(db)?;
     Ok(())
@@ -37,4 +39,74 @@ fn ensure_project_memory_rows(db: &Connection) -> rusqlite::Result<()> {
         [crate::memory::DEFAULT_MEMORY_RULE],
     )?;
     Ok(())
+}
+
+fn ensure_diagram_attachment_columns(db: &Connection) -> rusqlite::Result<()> {
+    let columns = table_columns(db, "diagrams")?;
+
+    if !columns.iter().any(|column| column == "diagram_type") {
+        db.execute(
+            "ALTER TABLE diagrams ADD COLUMN diagram_type TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
+
+    if !columns
+        .iter()
+        .any(|column| column == "attached_to_external_id")
+    {
+        db.execute(
+            "ALTER TABLE diagrams ADD COLUMN attached_to_external_id TEXT",
+            [],
+        )?;
+    }
+
+    db.execute(
+        "UPDATE diagrams
+         SET diagram_type = CASE WHEN diagram_type = '' THEN 'sequence' ELSE diagram_type END,
+             attached_to_external_id = COALESCE(
+                attached_to_external_id,
+                (
+                    SELECT external_id
+                    FROM c4_elements
+                    WHERE c4_elements.workspace_id = diagrams.workspace_id
+                      AND element_type = 'Software System'
+                    ORDER BY id
+                    LIMIT 1
+                )
+             )
+         WHERE kind = 'mermaid'",
+        [],
+    )?;
+
+    db.execute(
+        "INSERT OR IGNORE INTO schema_migrations(version) VALUES (6)",
+        [],
+    )?;
+    Ok(())
+}
+
+fn ensure_design_bindings_table(db: &Connection) -> rusqlite::Result<()> {
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS design_bindings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workspace_id INTEGER NOT NULL REFERENCES design_workspaces(id) ON DELETE CASCADE,
+            design_external_id TEXT NOT NULL,
+            target_type TEXT NOT NULL CHECK(target_type IN ('file', 'symbol')),
+            target TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(workspace_id, design_external_id, target_type, target)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_design_bindings_target
+            ON design_bindings(workspace_id, target_type, target);",
+    )?;
+    Ok(())
+}
+
+fn table_columns(db: &Connection, table: &str) -> rusqlite::Result<Vec<String>> {
+    let mut statement = db.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+    columns.collect()
 }

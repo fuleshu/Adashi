@@ -52,6 +52,36 @@
         host.innerHTML = "";
         structurizr.workspace = new structurizr.Workspace(workspace);
         currentDiagram = new structurizr.ui.Diagram("diagram", false, function () {
+          currentDiagram.onElementsSelected(function (elementIds) {
+            window.parent.postMessage(
+              {
+                type: "adashi:structurizr-selection",
+                entityType: "element",
+                ids: elementIds,
+              },
+              "*",
+            );
+          });
+          currentDiagram.onElementDoubleClicked(function (_event, elementId) {
+            window.parent.postMessage(
+              {
+                type: "adashi:structurizr-open",
+                entityType: "element",
+                id: elementId,
+              },
+              "*",
+            );
+          });
+          currentDiagram.onRelationshipDoubleClicked(function (_event, relationshipId) {
+            window.parent.postMessage(
+              {
+                type: "adashi:structurizr-open",
+                entityType: "relationship",
+                id: relationshipId,
+              },
+              "*",
+            );
+          });
           currentDiagram.changeView(viewKey);
           currentDiagram.resize();
           currentDiagram.zoomFitContent();

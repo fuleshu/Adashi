@@ -7,24 +7,29 @@ import {
   Bot,
   Braces,
   CheckCircle2,
+  ChevronRight,
   Database,
   Folder,
-  FileCode2,
   GitBranch,
+  Link2,
   ListChecks,
   Network,
   PlayCircle,
   Plus,
+  Search,
   ScrollText,
   Settings,
   ServerCog,
   Trash2,
+  Wand2,
 } from "lucide-react";
 import mermaid from "mermaid";
 import "easymde/dist/easymde.min.css";
 import "./styles.css";
 
 type DiagramKind = "mermaid" | "structurizr";
+type DesignLevel = "context" | "components" | "features";
+type DesignEntityType = "element" | "relationship";
 
 type DesignDiagram = {
   id: number;
@@ -32,6 +37,27 @@ type DesignDiagram = {
   key: string;
   title: string;
   source: string;
+};
+
+type DesignElement = {
+  id: number;
+  externalId: string;
+  parentExternalId?: string | null;
+  elementType: string;
+  name: string;
+  description: string;
+  technology: string;
+  tags: string;
+};
+
+type DesignRelationship = {
+  id: number;
+  externalId: string;
+  sourceExternalId: string;
+  destinationExternalId: string;
+  description: string;
+  technology: string;
+  tags: string;
 };
 
 type Task = {
@@ -104,8 +130,11 @@ type DashboardPayload = {
   revision: number;
   workspaceName: string;
   workspaceDescription: string;
+  structurizrDsl: string;
   structurizrWorkspace: string;
   structurizrViewKey: string;
+  designElements: DesignElement[];
+  designRelationships: DesignRelationship[];
   diagrams: DesignDiagram[];
   tasks: Task[];
   guidelines: Guideline[];
@@ -139,7 +168,11 @@ mermaid.initialize({
 function App() {
   const [settings, setSettings] = React.useState<AppSettings | null>(null);
   const [payload, setPayload] = React.useState<DashboardPayload | null>(null);
-  const [activeDiagram, setActiveDiagram] = React.useState<DiagramKind>("structurizr");
+  const [activeDesignLevel, setActiveDesignLevel] = React.useState<DesignLevel>("components");
+  const [selectedDesignEntity, setSelectedDesignEntity] = React.useState<{
+    type: DesignEntityType;
+    externalId: string;
+  } | null>(null);
   const [activeView, setActiveView] = React.useState<"design" | "tasks" | "rules" | "memory" | "qa" | "settings">("design");
   const [error, setError] = React.useState<string | null>(null);
   const payloadRef = React.useRef<DashboardPayload | null>(null);
@@ -324,6 +357,7 @@ function App() {
         {activeView === "settings" ? (
           <SettingsView
             activeProjectId={payload.projectId}
+            designProtocolRule={findDesignProtocolRule(payload.rules)}
             settings={settings}
             onAdd={(updatedSettings, projectId) => {
               setSettings(updatedSettings);
@@ -333,6 +367,11 @@ function App() {
             onDelete={(updatedSettings) => {
               setSettings(updatedSettings);
               loadDashboard(updatedSettings.lastActiveProjectId);
+            }}
+            onDashboardChange={(updatedPayload) => {
+              setPayload((currentPayload) =>
+                currentPayload ? mergeDashboardPayload(currentPayload, updatedPayload) : updatedPayload,
+              );
             }}
             onError={setError}
           />
@@ -363,58 +402,20 @@ function App() {
         ) : activeView === "qa" ? (
           <QaView qaChecks={payload.qaChecks} />
         ) : (
-        <section id="design" className="workspace-grid">
-          <div className="viewer-panel">
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">Design View</p>
-                <h3>{activeDiagram === "structurizr" ? "Structurizr C4" : mermaidDiagram?.title}</h3>
-              </div>
-              <div className="segmented" role="tablist" aria-label="Diagram viewer">
-                <button
-                  className={activeDiagram === "structurizr" ? "active" : ""}
-                  onClick={() => setActiveDiagram("structurizr")}
-                  type="button"
-                >
-                  <Braces size={16} />
-                  C4
-                </button>
-                <button
-                  className={activeDiagram === "mermaid" ? "active" : ""}
-                  onClick={() => setActiveDiagram("mermaid")}
-                  type="button"
-                >
-                  <GitBranch size={16} />
-                  UML
-                </button>
-              </div>
-            </div>
-            {activeDiagram === "structurizr" ? (
-              <StructurizrFrame workspace={payload.structurizrWorkspace} viewKey={payload.structurizrViewKey} />
-            ) : (
-              <MermaidPanel diagram={mermaidDiagram?.source ?? ""} />
-            )}
-          </div>
-
-          <div className="brief-panel">
-            <h3>Agent Workbench</h3>
-            <p>
-              This seed schema separates design artifacts, task injection, coding guidelines, post-task commands,
-              and QA checks so the MCP layer can expose each area cleanly.
-            </p>
-            <div className="brief-list">
-              {payload.guidelines.map((item) => (
-                <article key={item.id}>
-                  <FileCode2 size={18} />
-                  <div>
-                    <h4>{item.title}</h4>
-                    <p>{item.body}</p>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </div>
-        </section>
+          <DesignBrowser
+            activeLevel={activeDesignLevel}
+            mermaidDiagram={mermaidDiagram}
+            payload={payload}
+            selectedEntity={selectedDesignEntity}
+            onChange={(updatedPayload) => {
+              setPayload((currentPayload) =>
+                currentPayload ? mergeDashboardPayload(currentPayload, updatedPayload) : updatedPayload,
+              );
+            }}
+            onError={setError}
+            onLevelChange={setActiveDesignLevel}
+            onSelect={setSelectedDesignEntity}
+          />
         )}
       </section>
     </main>
@@ -425,6 +426,8 @@ function mergeDashboardPayload(current: DashboardPayload, next: DashboardPayload
   return {
     ...current,
     ...next,
+    designElements: reconcileById(current.designElements, next.designElements),
+    designRelationships: reconcileById(current.designRelationships, next.designRelationships),
     diagrams: reconcileById(current.diagrams, next.diagrams),
     tasks: reconcileById(current.tasks, next.tasks),
     guidelines: reconcileById(current.guidelines, next.guidelines),
@@ -456,6 +459,17 @@ function reconcileById<T extends { id: number }>(current: T[], next: T[]): T[] {
   return changed ? merged : current;
 }
 
+function findDesignProtocolRule(rules: Rule[]): Rule | null {
+  return (
+    rules.find(
+      (rule) =>
+        rule.name === "Design MCP API Protocol" &&
+        rule.intend === "design" &&
+        rule.hook === "run.start",
+    ) ?? null
+  );
+}
+
 function shallowEqualRecord(left: object, right: object): boolean {
   const leftRecord = left as Record<string, unknown>;
   const rightRecord = right as Record<string, unknown>;
@@ -469,16 +483,853 @@ function shallowEqualRecord(left: object, right: object): boolean {
   return leftKeys.every((key) => leftRecord[key] === rightRecord[key]);
 }
 
+function DesignBrowser({
+  activeLevel,
+  mermaidDiagram,
+  payload,
+  selectedEntity,
+  onChange,
+  onError,
+  onLevelChange,
+  onSelect,
+}: {
+  activeLevel: DesignLevel;
+  mermaidDiagram?: DesignDiagram;
+  payload: DashboardPayload;
+  selectedEntity: { type: DesignEntityType; externalId: string } | null;
+  onChange: (payload: DashboardPayload) => void;
+  onError: (message: string) => void;
+  onLevelChange: (level: DesignLevel) => void;
+  onSelect: (entity: { type: DesignEntityType; externalId: string } | null) => void;
+}) {
+  const [query, setQuery] = React.useState("");
+  const designTree = React.useMemo(() => buildDesignTree(payload.designElements), [payload.designElements]);
+  const rootElement =
+    payload.designElements.find(
+      (element) => !element.parentExternalId && element.elementType.toLowerCase() === "software system",
+    ) ??
+    payload.designElements.find((element) => !element.parentExternalId) ??
+    null;
+  const selectedElement =
+    selectedEntity?.type === "element"
+      ? payload.designElements.find((element) => element.externalId === selectedEntity.externalId) ?? null
+      : null;
+  const selectedRelationship =
+    selectedEntity?.type === "relationship"
+      ? payload.designRelationships.find((relationship) => relationship.externalId === selectedEntity.externalId) ?? null
+      : null;
+  const activeBranchElement = selectedElement ?? rootElement;
+  const branchChildren = activeBranchElement
+    ? payload.designElements.filter((element) => element.parentExternalId === activeBranchElement.externalId)
+    : [];
+  const branchRelationships = activeBranchElement
+    ? payload.designRelationships.filter(
+        (relationship) =>
+          relationship.sourceExternalId === activeBranchElement.externalId ||
+          relationship.destinationExternalId === activeBranchElement.externalId ||
+          branchChildren.some(
+            (child) =>
+              child.externalId === relationship.sourceExternalId || child.externalId === relationship.destinationExternalId,
+          ),
+      )
+    : [];
+  const sourceDiagram = activeLevel === "features" ? mermaidDiagram : payload.diagrams.find((diagram) => diagram.kind === "structurizr");
+
+  function selectLevel(level: DesignLevel) {
+    onLevelChange(level);
+
+    if (level === "context" && rootElement) {
+      onSelect({ type: "element", externalId: rootElement.externalId });
+    }
+
+    if ((level === "components" || level === "features") && !selectedEntity && rootElement) {
+      onSelect({ type: "element", externalId: rootElement.externalId });
+    }
+  }
+
+  function selectTreeElement(element: DesignElement) {
+    onSelect({ type: "element", externalId: element.externalId });
+
+    if (hasChildElements(element, payload.designElements)) {
+      onLevelChange("components");
+      return;
+    }
+
+    onLevelChange(element.parentExternalId ? "features" : "context");
+  }
+
+  const breadcrumbElements = buildBreadcrumb(activeBranchElement, payload.designElements);
+  const viewerTitle =
+    activeLevel === "context"
+      ? "Level 1: System Context"
+      : activeLevel === "components"
+        ? `Level 2: ${activeBranchElement?.name ?? "Components"}`
+        : `Level 3: ${activeBranchElement?.name ?? "Feature Flows"}`;
+
+  return (
+    <section id="design" className="design-browser">
+      <aside className="design-index-panel">
+        <div className="design-level-tabs" role="tablist" aria-label="C4 design level">
+          {DESIGN_LEVELS.map((level) => (
+            <button
+              className={activeLevel === level.id ? "active" : ""}
+              key={level.id}
+              onClick={() => selectLevel(level.id)}
+              type="button"
+            >
+              <level.icon size={17} />
+              <span>{level.label}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="design-search">
+          <Search size={16} />
+          <input
+            aria-label="Filter design entities"
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Filter design"
+            value={query}
+          />
+        </div>
+
+        <DesignTree
+          activeLevel={activeLevel}
+          branchElement={activeBranchElement}
+          elements={payload.designElements}
+          query={query}
+          relationships={payload.designRelationships}
+          roots={designTree}
+          selectedEntity={selectedEntity}
+          onSelectElement={selectTreeElement}
+          onSelectRelationship={(relationship) => onSelect({ type: "relationship", externalId: relationship.externalId })}
+        />
+      </aside>
+
+      <section className="design-main">
+        <div className="design-breadcrumbs" aria-label="Design breadcrumbs">
+          <button onClick={() => selectLevel("context")} type="button">System Context</button>
+          {breadcrumbElements.map((element) => (
+            <React.Fragment key={element.externalId}>
+              <ChevronRight size={15} />
+              <button onClick={() => selectTreeElement(element)} type="button">{element.name}</button>
+            </React.Fragment>
+          ))}
+          {activeLevel === "features" ? (
+            <>
+              <ChevronRight size={15} />
+              <span>Features</span>
+            </>
+          ) : null}
+        </div>
+
+        <div className="viewer-panel design-viewer-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">{activeLevel === "features" ? "Mermaid UML" : "Structurizr C4"}</p>
+              <h3>{viewerTitle}</h3>
+            </div>
+            <div className="status-strip compact">
+              <span>{activeLevel === "features" ? "feature flow" : "branch view"}</span>
+              <span>{activeLevel === "features" ? mermaidDiagram?.key ?? "Mermaid" : payload.structurizrViewKey}</span>
+            </div>
+          </div>
+
+          {activeLevel === "features" ? (
+            <MermaidPanel diagram={mermaidDiagram?.source ?? ""} />
+          ) : (
+            <StructurizrFrame
+              workspace={payload.structurizrWorkspace}
+              viewKey={payload.structurizrViewKey}
+              onOpen={(entity) => {
+                onSelect(entity);
+
+                if (entity.type === "element") {
+                  const openedElement = payload.designElements.find((element) => element.externalId === entity.externalId);
+                  onLevelChange(openedElement && hasChildElements(openedElement, payload.designElements) ? "components" : "features");
+                }
+              }}
+              onSelect={(externalId) => {
+                onSelect({ type: "element", externalId });
+              }}
+            />
+          )}
+        </div>
+
+        <SourcePanel
+          diagram={sourceDiagram}
+          source={activeLevel === "features" ? sourceDiagram?.source ?? "" : payload.structurizrDsl}
+          sourceKind={activeLevel === "features" ? "Mermaid UML" : "Structurizr DSL"}
+        />
+      </section>
+
+      <DesignInspector
+        elements={payload.designElements}
+        projectId={payload.projectId}
+        relationships={payload.designRelationships}
+        selectedElement={selectedElement}
+        selectedRelationship={selectedRelationship}
+        branchChildren={branchChildren}
+        branchRelationships={branchRelationships}
+        onChange={onChange}
+        onError={onError}
+        onJumpToFeatures={() => selectLevel("features")}
+      />
+    </section>
+  );
+}
+
+type DesignTreeNode = {
+  element: DesignElement;
+  children: DesignTreeNode[];
+};
+
+const DESIGN_LEVELS: { id: DesignLevel; label: string; icon: React.ElementType }[] = [
+  { id: "context", label: "System Context", icon: Network },
+  { id: "components", label: "Components", icon: Braces },
+  { id: "features", label: "Features", icon: GitBranch },
+];
+
+const DESIGN_LEVEL_LABELS: Record<DesignLevel, string> = {
+  context: "Level 1: System Context",
+  components: "Level 2: Components",
+  features: "Level 3: Features",
+};
+
+function DesignTree({
+  activeLevel,
+  branchElement,
+  elements,
+  query,
+  relationships,
+  roots,
+  selectedEntity,
+  onSelectElement,
+  onSelectRelationship,
+}: {
+  activeLevel: DesignLevel;
+  branchElement: DesignElement | null;
+  elements: DesignElement[];
+  query: string;
+  relationships: DesignRelationship[];
+  roots: DesignTreeNode[];
+  selectedEntity: { type: DesignEntityType; externalId: string } | null;
+  onSelectElement: (element: DesignElement) => void;
+  onSelectRelationship: (relationship: DesignRelationship) => void;
+}) {
+  const normalizedQuery = query.trim().toLowerCase();
+  const branchRelationships = branchElement
+    ? relationships.filter(
+        (relationship) =>
+          relationship.sourceExternalId === branchElement.externalId ||
+          relationship.destinationExternalId === branchElement.externalId,
+      )
+    : [];
+
+  return (
+    <div className="design-list">
+      <div className="design-tree-heading">
+        <span>{DESIGN_LEVEL_LABELS[activeLevel]}</span>
+        {branchElement ? <strong>{branchElement.name}</strong> : null}
+      </div>
+
+      {roots.map((node) => (
+        <DesignTreeItem
+          key={node.element.externalId}
+          node={node}
+          normalizedQuery={normalizedQuery}
+          selectedEntity={selectedEntity}
+          activeBranchExternalId={branchElement?.externalId ?? null}
+          onSelectElement={onSelectElement}
+        />
+      ))}
+
+      {activeLevel === "features" ? (
+        <article className="design-list-note">
+          <GitBranch size={18} />
+          <div>
+            <strong>{branchElement ? `${branchElement.name} feature flows` : "Feature flow source"}</strong>
+            <span>Agents edit Mermaid UML attached to this branch. The browser renders it as the Level 3 view.</span>
+          </div>
+        </article>
+      ) : null}
+
+      {branchRelationships.length > 0 ? <h4>Branch Relationships</h4> : null}
+      {branchRelationships.map((relationship) => {
+        const source = elements.find((element) => element.externalId === relationship.sourceExternalId);
+        const destination = elements.find((element) => element.externalId === relationship.destinationExternalId);
+        const haystack = `${relationship.description} ${relationship.technology} ${source?.name ?? ""} ${destination?.name ?? ""}`;
+
+        if (normalizedQuery && !haystack.toLowerCase().includes(normalizedQuery)) {
+          return null;
+        }
+
+        return (
+          <button
+            className={
+              selectedEntity?.type === "relationship" && selectedEntity.externalId === relationship.externalId
+                ? "design-list-item relationship active"
+                : "design-list-item relationship"
+            }
+            key={relationship.externalId}
+            onClick={() => onSelectRelationship(relationship)}
+            type="button"
+          >
+            <strong>
+              {source?.name ?? relationship.sourceExternalId} {"->"} {destination?.name ?? relationship.destinationExternalId}
+            </strong>
+            <span>{relationship.description}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function DesignTreeItem({
+  node,
+  normalizedQuery,
+  selectedEntity,
+  activeBranchExternalId,
+  onSelectElement,
+}: {
+  node: DesignTreeNode;
+  normalizedQuery: string;
+  selectedEntity: { type: DesignEntityType; externalId: string } | null;
+  activeBranchExternalId: string | null;
+  onSelectElement: (element: DesignElement) => void;
+}) {
+  const matches =
+    !normalizedQuery ||
+    `${node.element.name} ${node.element.description} ${node.element.elementType} ${node.element.tags}`
+      .toLowerCase()
+      .includes(normalizedQuery);
+  const visibleChildren = node.children.filter((child) => treeNodeMatches(child, normalizedQuery));
+
+  if (!matches && visibleChildren.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="design-tree-node">
+      <button
+        className={[
+          "design-list-item",
+          selectedEntity?.type === "element" && selectedEntity.externalId === node.element.externalId ? "active" : "",
+          activeBranchExternalId === node.element.externalId ? "branch-active" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        onClick={() => onSelectElement(node.element)}
+        type="button"
+      >
+        <strong>{node.element.name}</strong>
+        <span>{node.element.elementType}</span>
+      </button>
+      {visibleChildren.length > 0 ? (
+        <div className="design-tree-children">
+          {visibleChildren.map((child) => (
+            <DesignTreeItem
+              activeBranchExternalId={activeBranchExternalId}
+              key={child.element.externalId}
+              node={child}
+              normalizedQuery={normalizedQuery}
+              selectedEntity={selectedEntity}
+              onSelectElement={onSelectElement}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function buildDesignTree(elements: DesignElement[]): DesignTreeNode[] {
+  const nodes = new Map<string, DesignTreeNode>();
+  const roots: DesignTreeNode[] = [];
+
+  elements.forEach((element) => {
+    nodes.set(element.externalId, { element, children: [] });
+  });
+
+  elements.forEach((element) => {
+    const node = nodes.get(element.externalId);
+
+    if (!node) {
+      return;
+    }
+
+    const parentNode = element.parentExternalId ? nodes.get(element.parentExternalId) : null;
+
+    if (parentNode) {
+      parentNode.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  });
+
+  return roots;
+}
+
+function treeNodeMatches(node: DesignTreeNode, normalizedQuery: string): boolean {
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  const matches = `${node.element.name} ${node.element.description} ${node.element.elementType} ${node.element.tags}`
+    .toLowerCase()
+    .includes(normalizedQuery);
+
+  return matches || node.children.some((child) => treeNodeMatches(child, normalizedQuery));
+}
+
+function hasChildElements(element: DesignElement, elements: DesignElement[]): boolean {
+  return elements.some((candidate) => candidate.parentExternalId === element.externalId);
+}
+
+function buildBreadcrumb(element: DesignElement | null, elements: DesignElement[]): DesignElement[] {
+  if (!element) {
+    return [];
+  }
+
+  const byId = new Map(elements.map((candidate) => [candidate.externalId, candidate]));
+  const path: DesignElement[] = [];
+  let current: DesignElement | undefined = element;
+
+  while (current) {
+    path.unshift(current);
+    current = current.parentExternalId ? byId.get(current.parentExternalId) : undefined;
+  }
+
+  return path;
+}
+
+function DesignInspector({
+  elements,
+  projectId,
+  relationships,
+  selectedElement,
+  selectedRelationship,
+  branchChildren,
+  branchRelationships,
+  onChange,
+  onError,
+  onJumpToFeatures,
+}: {
+  elements: DesignElement[];
+  projectId: string;
+  relationships: DesignRelationship[];
+  selectedElement: DesignElement | null;
+  selectedRelationship: DesignRelationship | null;
+  branchChildren: DesignElement[];
+  branchRelationships: DesignRelationship[];
+  onChange: (payload: DashboardPayload) => void;
+  onError: (message: string) => void;
+  onJumpToFeatures: () => void;
+}) {
+  return (
+    <aside className="design-inspector-panel">
+      {selectedElement ? (
+        <ElementInspector
+          element={selectedElement}
+          elements={elements}
+          projectId={projectId}
+          relationships={relationships}
+          onChange={onChange}
+          onError={onError}
+          onJumpToFeatures={onJumpToFeatures}
+        />
+      ) : selectedRelationship ? (
+        <RelationshipInspector
+          elements={elements}
+          projectId={projectId}
+          relationship={selectedRelationship}
+          onChange={onChange}
+          onError={onError}
+        />
+      ) : (
+        <BranchInspector branchChildren={branchChildren} branchRelationships={branchRelationships} elements={elements} />
+      )}
+    </aside>
+  );
+}
+
+function BranchInspector({
+  branchChildren,
+  branchRelationships,
+  elements,
+}: {
+  branchChildren: DesignElement[];
+  branchRelationships: DesignRelationship[];
+  elements: DesignElement[];
+}) {
+  return (
+    <>
+      <div className="inspector-heading">
+        <div>
+          <p className="eyebrow">Current Branch</p>
+          <h3>Tree Overview</h3>
+        </div>
+        <span>C4</span>
+      </div>
+
+      <InspectorSection title="Child Nodes">
+        {branchChildren.length === 0 ? (
+          <div className="empty-state compact">No child nodes on this branch.</div>
+        ) : (
+          <div className="branch-fact-list">
+            {branchChildren.map((child) => (
+              <span key={child.externalId}>{child.name}</span>
+            ))}
+          </div>
+        )}
+      </InspectorSection>
+
+      <InspectorSection title="Branch Relations">
+        {branchRelationships.length === 0 ? (
+          <div className="empty-state compact">No relationships on this branch.</div>
+        ) : (
+          <div className="branch-fact-list">
+            {branchRelationships.map((relationship) => {
+              const source = elements.find((element) => element.externalId === relationship.sourceExternalId);
+              const destination = elements.find((element) => element.externalId === relationship.destinationExternalId);
+
+              return (
+                <span key={relationship.externalId}>
+                  {source?.name ?? relationship.sourceExternalId} {"->"} {destination?.name ?? relationship.destinationExternalId}
+                </span>
+              );
+            })}
+          </div>
+        )}
+      </InspectorSection>
+    </>
+  );
+}
+
+function ElementInspector({
+  element,
+  elements,
+  projectId,
+  relationships,
+  onChange,
+  onError,
+  onJumpToFeatures,
+}: {
+  element: DesignElement;
+  elements: DesignElement[];
+  projectId: string;
+  relationships: DesignRelationship[];
+  onChange: (payload: DashboardPayload) => void;
+  onError: (message: string) => void;
+  onJumpToFeatures: () => void;
+}) {
+  const outgoing = relationships.filter((relationship) => relationship.sourceExternalId === element.externalId);
+  const incoming = relationships.filter((relationship) => relationship.destinationExternalId === element.externalId);
+
+  function save(changes: Partial<DesignElement>) {
+    const updatedElement = { ...element, ...changes };
+
+    invoke<DashboardPayload>("update_design_element", {
+      input: {
+        projectId,
+        externalId: updatedElement.externalId,
+        name: updatedElement.name,
+        description: updatedElement.description,
+        technology: updatedElement.technology,
+        tags: updatedElement.tags,
+      },
+    })
+      .then(onChange)
+      .catch((reason) => onError(String(reason)));
+  }
+
+  return (
+    <>
+      <div className="inspector-heading">
+        <div>
+          <p className="eyebrow">Design Entity</p>
+          <h3>{element.name}</h3>
+        </div>
+        <span>{element.elementType}</span>
+      </div>
+
+      <div className="inspector-form">
+        <label>
+          <span>Name</span>
+          <input
+            defaultValue={element.name}
+            key={`element-name-${element.externalId}-${element.name}`}
+            onBlur={(event) => save({ name: event.target.value })}
+          />
+        </label>
+        <label>
+          <span>Description</span>
+          <textarea
+            defaultValue={element.description}
+            key={`element-description-${element.externalId}-${element.description}`}
+            onBlur={(event) => save({ description: event.target.value })}
+          />
+        </label>
+        <label>
+          <span>Technology</span>
+          <input
+            defaultValue={element.technology}
+            key={`element-technology-${element.externalId}-${element.technology}`}
+            onBlur={(event) => save({ technology: event.target.value })}
+          />
+        </label>
+        <label>
+          <span>Tags</span>
+          <input
+            defaultValue={element.tags}
+            key={`element-tags-${element.externalId}-${element.tags}`}
+            onBlur={(event) => save({ tags: event.target.value })}
+          />
+        </label>
+      </div>
+
+      <InspectorSection title="Connected Facts">
+        <RelationshipSummary direction="Outgoing" elements={elements} relationships={outgoing} />
+        <RelationshipSummary direction="Incoming" elements={elements} relationships={incoming} />
+      </InspectorSection>
+
+      <AddRelationshipForm elements={elements} projectId={projectId} sourceElement={element} onChange={onChange} onError={onError} />
+
+      <InspectorSection title="AI Edit Prompt">
+        <button className="wide-tool-button" onClick={onJumpToFeatures} type="button">
+          <Wand2 size={17} />
+          Ask AI to change this design
+        </button>
+      </InspectorSection>
+    </>
+  );
+}
+
+function RelationshipInspector({
+  elements,
+  projectId,
+  relationship,
+  onChange,
+  onError,
+}: {
+  elements: DesignElement[];
+  projectId: string;
+  relationship: DesignRelationship;
+  onChange: (payload: DashboardPayload) => void;
+  onError: (message: string) => void;
+}) {
+  const source = elements.find((element) => element.externalId === relationship.sourceExternalId);
+  const destination = elements.find((element) => element.externalId === relationship.destinationExternalId);
+
+  function save(changes: Partial<DesignRelationship>) {
+    const updatedRelationship = { ...relationship, ...changes };
+
+    invoke<DashboardPayload>("update_design_relationship", {
+      input: {
+        projectId,
+        externalId: updatedRelationship.externalId,
+        description: updatedRelationship.description,
+        technology: updatedRelationship.technology,
+        tags: updatedRelationship.tags,
+      },
+    })
+      .then(onChange)
+      .catch((reason) => onError(String(reason)));
+  }
+
+  return (
+    <>
+      <div className="inspector-heading">
+        <div>
+          <p className="eyebrow">Relationship</p>
+          <h3>
+            {source?.name ?? relationship.sourceExternalId} {"->"} {destination?.name ?? relationship.destinationExternalId}
+          </h3>
+        </div>
+        <span>{relationship.technology || "link"}</span>
+      </div>
+
+      <div className="inspector-form">
+        <label>
+          <span>Description</span>
+          <textarea
+            defaultValue={relationship.description}
+            key={`relationship-description-${relationship.externalId}-${relationship.description}`}
+            onBlur={(event) => save({ description: event.target.value })}
+          />
+        </label>
+        <label>
+          <span>Technology</span>
+          <input
+            defaultValue={relationship.technology}
+            key={`relationship-technology-${relationship.externalId}-${relationship.technology}`}
+            onBlur={(event) => save({ technology: event.target.value })}
+          />
+        </label>
+        <label>
+          <span>Tags</span>
+          <input
+            defaultValue={relationship.tags}
+            key={`relationship-tags-${relationship.externalId}-${relationship.tags}`}
+            onBlur={(event) => save({ tags: event.target.value })}
+          />
+        </label>
+      </div>
+
+      <InspectorSection title="Semantic Id">
+        <code>{`design://relationship/${relationship.externalId}`}</code>
+      </InspectorSection>
+    </>
+  );
+}
+
+function RelationshipSummary({
+  direction,
+  elements,
+  relationships,
+}: {
+  direction: string;
+  elements: DesignElement[];
+  relationships: DesignRelationship[];
+}) {
+  return (
+    <div className="relationship-summary">
+      <strong>{direction}</strong>
+      {relationships.length === 0 ? (
+        <span>None</span>
+      ) : (
+        relationships.map((relationship) => {
+          const source = elements.find((element) => element.externalId === relationship.sourceExternalId);
+          const destination = elements.find((element) => element.externalId === relationship.destinationExternalId);
+
+          return (
+            <span key={relationship.externalId}>
+              {source?.name ?? relationship.sourceExternalId} {"->"} {destination?.name ?? relationship.destinationExternalId}
+            </span>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
+function AddRelationshipForm({
+  elements,
+  projectId,
+  sourceElement,
+  onChange,
+  onError,
+}: {
+  elements: DesignElement[];
+  projectId: string;
+  sourceElement: DesignElement;
+  onChange: (payload: DashboardPayload) => void;
+  onError: (message: string) => void;
+}) {
+  const [destinationExternalId, setDestinationExternalId] = React.useState(
+    elements.find((element) => element.externalId !== sourceElement.externalId)?.externalId ?? "",
+  );
+  const [description, setDescription] = React.useState("");
+  const [technology, setTechnology] = React.useState("");
+
+  React.useEffect(() => {
+    if (!destinationExternalId || destinationExternalId === sourceElement.externalId) {
+      setDestinationExternalId(elements.find((element) => element.externalId !== sourceElement.externalId)?.externalId ?? "");
+    }
+  }, [destinationExternalId, elements, sourceElement.externalId]);
+
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    invoke<DashboardPayload>("create_design_relationship", {
+      input: {
+        projectId,
+        sourceExternalId: sourceElement.externalId,
+        destinationExternalId,
+        description,
+        technology,
+        tags: "Relationship",
+      },
+    })
+      .then((updatedPayload) => {
+        setDescription("");
+        setTechnology("");
+        onChange(updatedPayload);
+      })
+      .catch((reason) => onError(String(reason)));
+  }
+
+  return (
+    <InspectorSection title="Add Relation">
+      <form className="add-relationship-form" onSubmit={submit}>
+        <label>
+          <span>To</span>
+          <select value={destinationExternalId} onChange={(event) => setDestinationExternalId(event.target.value)}>
+            {elements
+              .filter((element) => element.externalId !== sourceElement.externalId)
+              .map((element) => (
+                <option key={element.externalId} value={element.externalId}>
+                  {element.name}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label>
+          <span>Description</span>
+          <input value={description} onChange={(event) => setDescription(event.target.value)} />
+        </label>
+        <label>
+          <span>Technology</span>
+          <input value={technology} onChange={(event) => setTechnology(event.target.value)} />
+        </label>
+        <button type="submit">
+          <Link2 size={17} />
+          Add
+        </button>
+      </form>
+    </InspectorSection>
+  );
+}
+
+function InspectorSection({ title, children }: React.PropsWithChildren<{ title: string }>) {
+  return (
+    <section className="inspector-section">
+      <h4>{title}</h4>
+      {children}
+    </section>
+  );
+}
+
+function SourcePanel({ diagram, source, sourceKind }: { diagram?: DesignDiagram; source: string; sourceKind: string }) {
+  return (
+    <section className="source-panel">
+      <div className="source-heading">
+        <div>
+          <p className="eyebrow">Design Source</p>
+          <h3>{diagram?.title ?? "No diagram source"}</h3>
+        </div>
+        <span>{sourceKind}</span>
+      </div>
+      <pre>{source}</pre>
+    </section>
+  );
+}
+
 function SettingsView({
   activeProjectId,
+  designProtocolRule,
   settings,
   onAdd,
+  onDashboardChange,
   onDelete,
   onError,
 }: {
   activeProjectId: string;
+  designProtocolRule: Rule | null;
   settings: AppSettings;
   onAdd: (settings: AppSettings, projectId: string) => void;
+  onDashboardChange: (payload: DashboardPayload) => void;
   onDelete: (settings: AppSettings) => void;
   onError: (message: string) => void;
 }) {
@@ -500,6 +1351,27 @@ function SettingsView({
   function remove(projectId: string) {
     invoke<AppSettings>("delete_project", { projectId })
       .then(onDelete)
+      .catch((reason) => onError(String(reason)));
+  }
+
+  function saveDesignProtocolRule(rule: Rule, changes: Partial<Rule>) {
+    const updatedRule = {
+      ...rule,
+      ...changes,
+    };
+
+    invoke<DashboardPayload>("update_rule", {
+      input: {
+        projectId: activeProjectId,
+        id: updatedRule.id,
+        name: updatedRule.name.trim() || "Design MCP API Protocol",
+        enabled: updatedRule.enabled,
+        intend: "design",
+        hook: "run.start",
+        prompt: updatedRule.prompt,
+      },
+    })
+      .then(onDashboardChange)
       .catch((reason) => onError(String(reason)));
   }
 
@@ -546,6 +1418,35 @@ function SettingsView({
             Add
           </button>
         </form>
+      </section>
+
+      <section className="data-panel settings-panel settings-design-protocol-panel">
+        <div className="rules-panel-heading">
+          <h3>Design MCP Protocol</h3>
+          {designProtocolRule ? (
+            <label className="settings-toggle-row">
+              <span>Enabled</span>
+              <input
+                checked={designProtocolRule.enabled}
+                onChange={(event) => saveDesignProtocolRule(designProtocolRule, { enabled: event.target.checked })}
+                type="checkbox"
+              />
+            </label>
+          ) : null}
+        </div>
+        {designProtocolRule ? (
+          <MarkdownEditor
+            key={`design-protocol-${designProtocolRule.id}-${designProtocolRule.enabled}`}
+            value={designProtocolRule.prompt}
+            onBlur={(prompt) => saveDesignProtocolRule(designProtocolRule, { prompt })}
+            placeholder="Write the design run-start MCP protocol..."
+            minHeight="360px"
+            maxHeight="520px"
+            height="460px"
+          />
+        ) : (
+          <div className="empty-state">The design protocol rule will be created when the project database opens.</div>
+        )}
       </section>
     </section>
   );
@@ -965,7 +1866,17 @@ function Panel({ title, children }: React.PropsWithChildren<{ title: string }>) 
   );
 }
 
-function StructurizrFrame({ workspace, viewKey }: { workspace: string; viewKey: string }) {
+function StructurizrFrame({
+  workspace,
+  viewKey,
+  onOpen,
+  onSelect,
+}: {
+  workspace: string;
+  viewKey: string;
+  onOpen?: (entity: { type: DesignEntityType; externalId: string }) => void;
+  onSelect?: (externalId: string) => void;
+}) {
   const frameRef = React.useRef<HTMLIFrameElement>(null);
 
   const postWorkspace = React.useCallback(() => {
@@ -982,6 +1893,31 @@ function StructurizrFrame({ workspace, viewKey }: { workspace: string; viewKey: 
   React.useEffect(() => {
     postWorkspace();
   }, [postWorkspace]);
+
+  React.useEffect(() => {
+    function receiveMessage(event: MessageEvent) {
+      if (!event.data || typeof event.data !== "object") {
+        return;
+      }
+
+      if (event.data.type === "adashi:structurizr-selection") {
+        const ids: unknown[] = Array.isArray(event.data.ids) ? event.data.ids : [];
+        const firstId = ids.find((id): id is string => typeof id === "string");
+
+        if (firstId) {
+          onSelect?.(firstId);
+        }
+      }
+
+      if (event.data.type === "adashi:structurizr-open" && typeof event.data.id === "string") {
+        const entityType = event.data.entityType === "relationship" ? "relationship" : "element";
+        onOpen?.({ type: entityType, externalId: event.data.id });
+      }
+    }
+
+    window.addEventListener("message", receiveMessage);
+    return () => window.removeEventListener("message", receiveMessage);
+  }, [onOpen, onSelect]);
 
   return (
     <iframe

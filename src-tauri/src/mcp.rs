@@ -1,3 +1,7 @@
+use crate::design::{
+    self, DesignBindingsResult, DesignByIdsResult, DesignChange, DesignOverviewResult,
+    DesignSaveResult, DesignScopeResult, DesignSearchResult,
+};
 use crate::memory::{self, ProjectMemory};
 use crate::rules::{self, InjectionRule, NewRule, Rule};
 use crate::settings::{self, AppSettings, ProjectSettings};
@@ -103,6 +107,56 @@ struct UpdateMemoryParams {
 struct UpdateMemoryRuleParams {
     project_id: Option<String>,
     rule: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct DesignOverviewParams {
+    project_id: Option<String>,
+    max_depth: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct DesignScopeParams {
+    project_id: Option<String>,
+    element_id: String,
+    include_ancestors: Option<bool>,
+    children_depth: Option<usize>,
+    include_source: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct DesignSearchParams {
+    project_id: Option<String>,
+    query: String,
+    kinds: Option<Vec<String>>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct DesignByIdsParams {
+    project_id: Option<String>,
+    ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct DesignBindingsParams {
+    project_id: Option<String>,
+    files: Option<Vec<String>>,
+    symbols: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct DesignSaveParams {
+    project_id: Option<String>,
+    expected_revision: i64,
+    change_intent: String,
+    changes: Vec<DesignChange>,
 }
 
 #[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
@@ -433,6 +487,119 @@ impl AdashiMcpServer {
             revision: revision.revision,
             memory,
         }))
+    }
+
+    #[tool(
+        name = "adashi_design_get_overview",
+        description = "Read a compact top-down C4/UML design overview for the selected project. This is deterministic retrieval; the agent chooses the relevant design scope."
+    )]
+    fn design_get_overview(
+        &self,
+        Parameters(params): Parameters<DesignOverviewParams>,
+    ) -> Result<Json<DesignOverviewResult>, ErrorData> {
+        let (_project, db) = self.open_project(params.project_id.as_deref())?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        let overview =
+            design::load_overview(&db, project_row_id, params.max_depth).map_err(tool_error)?;
+        Ok(Json(overview))
+    }
+
+    #[tool(
+        name = "adashi_design_get_scope",
+        description = "Read an explicit C4 branch by element id, optionally including ancestors, children, attached UML, bindings, relationships, and canonical source."
+    )]
+    fn design_get_scope(
+        &self,
+        Parameters(params): Parameters<DesignScopeParams>,
+    ) -> Result<Json<DesignScopeResult>, ErrorData> {
+        let (_project, db) = self.open_project(params.project_id.as_deref())?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        let scope = design::load_scope(
+            &db,
+            project_row_id,
+            &params.element_id,
+            params.include_ancestors.unwrap_or(true),
+            params.children_depth,
+            params.include_source.unwrap_or(false),
+        )
+        .map_err(tool_error)?;
+        Ok(Json(scope))
+    }
+
+    #[tool(
+        name = "adashi_design_search",
+        description = "Run deterministic text search over stored design elements, relationships, UML, and source. The agent must reason over the hits; the MCP does not infer task context."
+    )]
+    fn design_search(
+        &self,
+        Parameters(params): Parameters<DesignSearchParams>,
+    ) -> Result<Json<DesignSearchResult>, ErrorData> {
+        let (_project, db) = self.open_project(params.project_id.as_deref())?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        let result = design::search(
+            &db,
+            project_row_id,
+            &params.query,
+            &params.kinds.unwrap_or_default(),
+            params.limit.unwrap_or(20),
+        )
+        .map_err(tool_error)?;
+        Ok(Json(result))
+    }
+
+    #[tool(
+        name = "adashi_design_get_by_ids",
+        description = "Read explicit design elements, relationships, UML artifacts, and bindings by stored design ids."
+    )]
+    fn design_get_by_ids(
+        &self,
+        Parameters(params): Parameters<DesignByIdsParams>,
+    ) -> Result<Json<DesignByIdsResult>, ErrorData> {
+        let (_project, db) = self.open_project(params.project_id.as_deref())?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        let result = design::load_by_ids(&db, project_row_id, &params.ids).map_err(tool_error)?;
+        Ok(Json(result))
+    }
+
+    #[tool(
+        name = "adashi_design_get_bindings",
+        description = "Read design artifacts explicitly bound to files or symbols. This is stored traceability, not task interpretation."
+    )]
+    fn design_get_bindings(
+        &self,
+        Parameters(params): Parameters<DesignBindingsParams>,
+    ) -> Result<Json<DesignBindingsResult>, ErrorData> {
+        let (_project, db) = self.open_project(params.project_id.as_deref())?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        let result = design::load_by_bindings(
+            &db,
+            project_row_id,
+            &params.files.unwrap_or_default(),
+            &params.symbols.unwrap_or_default(),
+        )
+        .map_err(tool_error)?;
+        Ok(Json(result))
+    }
+
+    #[tool(
+        name = "adashi_design_save",
+        description = "Transactionally save a formal C4/UML design changeset. The save validates revision, containment, relationships, UML syntax, attachments, and bindings; invalid input returns correction errors and is not stored."
+    )]
+    fn design_save(
+        &self,
+        Parameters(params): Parameters<DesignSaveParams>,
+    ) -> Result<Json<DesignSaveResult>, ErrorData> {
+        let (_project, mut db) = self.open_project(params.project_id.as_deref())?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        let result = design::save_changes(
+            &mut db,
+            project_row_id,
+            params.expected_revision,
+            &params.change_intent,
+            &params.changes,
+        )
+        .map_err(tool_error)?;
+        Ok(Json(result))
     }
 }
 

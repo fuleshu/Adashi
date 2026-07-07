@@ -1,0 +1,1494 @@
+use crate::state;
+use rusqlite::{params, Connection};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::collections::{HashMap, HashSet};
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[derive(rmcp::schemars::JsonSchema)]
+pub struct DesignElementRecord {
+    pub external_id: String,
+    pub parent_external_id: Option<String>,
+    pub element_type: String,
+    pub name: String,
+    pub description: String,
+    pub technology: String,
+    pub tags: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[derive(rmcp::schemars::JsonSchema)]
+pub struct DesignRelationshipRecord {
+    pub external_id: String,
+    pub source_external_id: String,
+    pub destination_external_id: String,
+    pub description: String,
+    pub technology: String,
+    pub tags: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[derive(rmcp::schemars::JsonSchema)]
+pub struct DesignDiagramRecord {
+    pub key: String,
+    pub language: String,
+    pub title: String,
+    pub diagram_type: String,
+    pub attached_to_external_id: Option<String>,
+    pub source: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[derive(rmcp::schemars::JsonSchema)]
+pub struct DesignBindingRecord {
+    pub design_external_id: String,
+    pub target_type: String,
+    pub target: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[derive(rmcp::schemars::JsonSchema)]
+pub struct DesignChange {
+    pub op: String,
+    pub external_id: Option<String>,
+    pub parent_external_id: Option<String>,
+    pub element_type: Option<String>,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub technology: Option<String>,
+    pub tags: Option<String>,
+    pub source_external_id: Option<String>,
+    pub destination_external_id: Option<String>,
+    pub key: Option<String>,
+    pub title: Option<String>,
+    pub language: Option<String>,
+    pub diagram_type: Option<String>,
+    pub attached_to_external_id: Option<String>,
+    pub source: Option<String>,
+    pub design_external_id: Option<String>,
+    pub target_type: Option<String>,
+    pub target: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[derive(rmcp::schemars::JsonSchema)]
+pub struct DesignOverviewResult {
+    pub revision: i64,
+    pub workspace_name: String,
+    pub workspace_description: String,
+    pub structurizr_dsl: String,
+    pub elements: Vec<DesignElementRecord>,
+    pub relationships: Vec<DesignRelationshipRecord>,
+    pub diagrams: Vec<DesignDiagramRecord>,
+    pub bindings: Vec<DesignBindingRecord>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[derive(rmcp::schemars::JsonSchema)]
+pub struct DesignScopeResult {
+    pub revision: i64,
+    pub root_external_id: String,
+    pub ancestors: Vec<DesignElementRecord>,
+    pub elements: Vec<DesignElementRecord>,
+    pub relationships: Vec<DesignRelationshipRecord>,
+    pub diagrams: Vec<DesignDiagramRecord>,
+    pub bindings: Vec<DesignBindingRecord>,
+    pub structurizr_dsl: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[derive(rmcp::schemars::JsonSchema)]
+pub struct DesignSearchResult {
+    pub revision: i64,
+    pub hits: Vec<DesignSearchHit>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[derive(rmcp::schemars::JsonSchema)]
+pub struct DesignSearchHit {
+    pub kind: String,
+    pub id: String,
+    pub title: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[derive(rmcp::schemars::JsonSchema)]
+pub struct DesignByIdsResult {
+    pub revision: i64,
+    pub elements: Vec<DesignElementRecord>,
+    pub relationships: Vec<DesignRelationshipRecord>,
+    pub diagrams: Vec<DesignDiagramRecord>,
+    pub bindings: Vec<DesignBindingRecord>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[derive(rmcp::schemars::JsonSchema)]
+pub struct DesignBindingsResult {
+    pub revision: i64,
+    pub bindings: Vec<DesignBindingRecord>,
+    pub elements: Vec<DesignElementRecord>,
+    pub relationships: Vec<DesignRelationshipRecord>,
+    pub diagrams: Vec<DesignDiagramRecord>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[derive(rmcp::schemars::JsonSchema)]
+pub struct DesignSaveResult {
+    pub ok: bool,
+    pub stored: bool,
+    pub correction_required: bool,
+    pub revision: i64,
+    pub errors: Vec<DesignCorrection>,
+    pub structurizr_dsl: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[derive(rmcp::schemars::JsonSchema)]
+pub struct DesignCorrection {
+    pub code: String,
+    pub message: String,
+    pub request: String,
+}
+
+pub fn load_overview(
+    db: &Connection,
+    project_id: i64,
+    max_depth: Option<usize>,
+) -> Result<DesignOverviewResult, String> {
+    let workspace = load_workspace(db)?;
+    let revision = state::load_project_revision(db, project_id)?.revision;
+    let elements = filter_elements_by_depth(load_elements(db, workspace.id)?, max_depth);
+
+    Ok(DesignOverviewResult {
+        revision,
+        workspace_name: workspace.name,
+        workspace_description: workspace.description,
+        structurizr_dsl: workspace.structurizr_dsl,
+        relationships: load_relationships(db, workspace.id)?,
+        diagrams: load_diagrams(db, workspace.id)?,
+        bindings: load_bindings(db, workspace.id)?,
+        elements,
+    })
+}
+
+pub fn load_scope(
+    db: &Connection,
+    project_id: i64,
+    element_id: &str,
+    include_ancestors: bool,
+    children_depth: Option<usize>,
+    include_source: bool,
+) -> Result<DesignScopeResult, String> {
+    let workspace = load_workspace(db)?;
+    let revision = state::load_project_revision(db, project_id)?.revision;
+    let elements = load_elements(db, workspace.id)?;
+    let relationships = load_relationships(db, workspace.id)?;
+    let diagrams = load_diagrams(db, workspace.id)?;
+    let bindings = load_bindings(db, workspace.id)?;
+    let element_by_id = elements
+        .iter()
+        .map(|element| (element.external_id.as_str(), element))
+        .collect::<HashMap<_, _>>();
+
+    if !element_by_id.contains_key(element_id) {
+        return Err(format!("Unknown design element id: {element_id}"));
+    }
+
+    let scope_ids = collect_descendants(&elements, element_id, children_depth);
+    let mut scoped_elements = elements
+        .iter()
+        .filter(|element| scope_ids.contains(element.external_id.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    scoped_elements.sort_by_key(|element| element.external_id.clone());
+
+    let mut ancestor_ids = HashSet::new();
+    if include_ancestors {
+        let mut current = element_by_id
+            .get(element_id)
+            .and_then(|element| element.parent_external_id.as_deref());
+        while let Some(parent_id) = current {
+            ancestor_ids.insert(parent_id.to_string());
+            current = element_by_id
+                .get(parent_id)
+                .and_then(|element| element.parent_external_id.as_deref());
+        }
+    }
+
+    let ancestors = elements
+        .iter()
+        .filter(|element| ancestor_ids.contains(&element.external_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let scoped_relationships = relationships
+        .into_iter()
+        .filter(|relationship| {
+            scope_ids.contains(relationship.source_external_id.as_str())
+                || scope_ids.contains(relationship.destination_external_id.as_str())
+        })
+        .collect::<Vec<_>>();
+    let scoped_diagrams = diagrams
+        .into_iter()
+        .filter(|diagram| {
+            diagram
+                .attached_to_external_id
+                .as_deref()
+                .map(|id| scope_ids.contains(id))
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+    let scoped_bindings = bindings
+        .into_iter()
+        .filter(|binding| scope_ids.contains(binding.design_external_id.as_str()))
+        .collect::<Vec<_>>();
+
+    Ok(DesignScopeResult {
+        revision,
+        root_external_id: element_id.to_string(),
+        ancestors,
+        elements: scoped_elements,
+        relationships: scoped_relationships,
+        diagrams: scoped_diagrams,
+        bindings: scoped_bindings,
+        structurizr_dsl: if include_source {
+            Some(workspace.structurizr_dsl)
+        } else {
+            None
+        },
+    })
+}
+
+pub fn search(
+    db: &Connection,
+    project_id: i64,
+    query: &str,
+    kinds: &[String],
+    limit: usize,
+) -> Result<DesignSearchResult, String> {
+    let workspace = load_workspace(db)?;
+    let revision = state::load_project_revision(db, project_id)?.revision;
+    let terms = query
+        .to_lowercase()
+        .split_whitespace()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let allowed = kinds
+        .iter()
+        .map(|kind| kind.as_str())
+        .collect::<HashSet<_>>();
+    let any_kind = allowed.is_empty();
+    let mut hits = Vec::new();
+
+    if any_kind || allowed.contains("element") {
+        for element in load_elements(db, workspace.id)? {
+            let haystack = format!(
+                "{} {} {} {} {}",
+                element.external_id,
+                element.name,
+                element.description,
+                element.technology,
+                element.tags
+            )
+            .to_lowercase();
+            if matches_terms(&haystack, &terms) {
+                hits.push(DesignSearchHit {
+                    kind: "element".to_string(),
+                    id: element.external_id,
+                    title: element.name,
+                    summary: element.description,
+                });
+            }
+        }
+    }
+
+    if any_kind || allowed.contains("relationship") {
+        for relationship in load_relationships(db, workspace.id)? {
+            let haystack = format!(
+                "{} {} {} {} {} {}",
+                relationship.external_id,
+                relationship.source_external_id,
+                relationship.destination_external_id,
+                relationship.description,
+                relationship.technology,
+                relationship.tags
+            )
+            .to_lowercase();
+            if matches_terms(&haystack, &terms) {
+                hits.push(DesignSearchHit {
+                    kind: "relationship".to_string(),
+                    id: relationship.external_id,
+                    title: format!(
+                        "{} -> {}",
+                        relationship.source_external_id, relationship.destination_external_id
+                    ),
+                    summary: relationship.description,
+                });
+            }
+        }
+    }
+
+    if any_kind || allowed.contains("uml") || allowed.contains("source") {
+        for diagram in load_diagrams(db, workspace.id)? {
+            let haystack = format!(
+                "{} {} {} {} {}",
+                diagram.key, diagram.language, diagram.title, diagram.diagram_type, diagram.source
+            )
+            .to_lowercase();
+            if matches_terms(&haystack, &terms) {
+                hits.push(DesignSearchHit {
+                    kind: "uml".to_string(),
+                    id: diagram.key,
+                    title: diagram.title,
+                    summary: diagram
+                        .attached_to_external_id
+                        .unwrap_or_else(|| "unattached".to_string()),
+                });
+            }
+        }
+    }
+
+    hits.truncate(limit.max(1));
+    Ok(DesignSearchResult { revision, hits })
+}
+
+pub fn load_by_ids(
+    db: &Connection,
+    project_id: i64,
+    ids: &[String],
+) -> Result<DesignByIdsResult, String> {
+    let workspace = load_workspace(db)?;
+    let revision = state::load_project_revision(db, project_id)?.revision;
+    let ids = ids.iter().map(String::as_str).collect::<HashSet<_>>();
+
+    Ok(DesignByIdsResult {
+        revision,
+        elements: load_elements(db, workspace.id)?
+            .into_iter()
+            .filter(|element| ids.contains(element.external_id.as_str()))
+            .collect(),
+        relationships: load_relationships(db, workspace.id)?
+            .into_iter()
+            .filter(|relationship| ids.contains(relationship.external_id.as_str()))
+            .collect(),
+        diagrams: load_diagrams(db, workspace.id)?
+            .into_iter()
+            .filter(|diagram| ids.contains(diagram.key.as_str()))
+            .collect(),
+        bindings: load_bindings(db, workspace.id)?
+            .into_iter()
+            .filter(|binding| ids.contains(binding.design_external_id.as_str()))
+            .collect(),
+    })
+}
+
+pub fn load_by_bindings(
+    db: &Connection,
+    project_id: i64,
+    files: &[String],
+    symbols: &[String],
+) -> Result<DesignBindingsResult, String> {
+    let workspace = load_workspace(db)?;
+    let revision = state::load_project_revision(db, project_id)?.revision;
+    let file_set = files.iter().map(String::as_str).collect::<HashSet<_>>();
+    let symbol_set = symbols.iter().map(String::as_str).collect::<HashSet<_>>();
+    let bindings = load_bindings(db, workspace.id)?
+        .into_iter()
+        .filter(|binding| {
+            (binding.target_type == "file" && file_set.contains(binding.target.as_str()))
+                || (binding.target_type == "symbol" && symbol_set.contains(binding.target.as_str()))
+        })
+        .collect::<Vec<_>>();
+    let design_ids = bindings
+        .iter()
+        .map(|binding| binding.design_external_id.as_str())
+        .collect::<HashSet<_>>();
+
+    Ok(DesignBindingsResult {
+        revision,
+        elements: load_elements(db, workspace.id)?
+            .into_iter()
+            .filter(|element| design_ids.contains(element.external_id.as_str()))
+            .collect(),
+        relationships: load_relationships(db, workspace.id)?
+            .into_iter()
+            .filter(|relationship| design_ids.contains(relationship.external_id.as_str()))
+            .collect(),
+        diagrams: load_diagrams(db, workspace.id)?
+            .into_iter()
+            .filter(|diagram| design_ids.contains(diagram.key.as_str()))
+            .collect(),
+        bindings,
+    })
+}
+
+pub fn save_changes(
+    db: &mut Connection,
+    project_id: i64,
+    expected_revision: i64,
+    change_intent: &str,
+    changes: &[DesignChange],
+) -> Result<DesignSaveResult, String> {
+    let current_revision = state::load_project_revision(db, project_id)?.revision;
+    if current_revision != expected_revision {
+        return Ok(failed_save(
+            current_revision,
+            "revision.stale",
+            format!("Expected revision {expected_revision}, but current revision is {current_revision}."),
+            "Reload the design overview and resubmit the full changeset against the current revision.",
+        ));
+    }
+
+    if change_intent.trim().is_empty() {
+        return Ok(failed_save(
+            current_revision,
+            "save.missing_intent",
+            "Design save requires a non-empty changeIntent.",
+            "Describe the design change intent and resubmit the full changeset.",
+        ));
+    }
+
+    if changes.is_empty() {
+        return Ok(failed_save(
+            current_revision,
+            "save.empty_changeset",
+            "Design save requires at least one change.",
+            "Submit the C4, UML, or binding changes that make up the completed design update.",
+        ));
+    }
+
+    let tx = db.transaction().map_err(|err| err.to_string())?;
+    let workspace = load_workspace(&tx)?;
+
+    for change in changes {
+        if let Err(message) = apply_change(&tx, workspace.id, change) {
+            return Ok(failed_save(
+                current_revision,
+                "save.invalid_changeset",
+                message,
+                "Correct the design_save changeset fields and resubmit the full changeset.",
+            ));
+        }
+    }
+
+    let mut errors = validate_workspace(&tx, workspace.id)?;
+    if errors.is_empty() {
+        let dsl = build_structurizr_dsl(&tx, workspace.id)?;
+        let json_source = build_structurizr_json_source(&tx, workspace.id)?;
+        tx.execute(
+            "UPDATE design_workspaces
+             SET structurizr_dsl = ?1,
+                 structurizr_json = ?2,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?3",
+            params![dsl, json_source, workspace.id],
+        )
+        .map_err(|err| err.to_string())?;
+        tx.execute(
+            "UPDATE diagrams
+             SET source = ?1,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE workspace_id = ?2 AND kind = 'structurizr'",
+            params![json_source, workspace.id],
+        )
+        .map_err(|err| err.to_string())?;
+        state::bump_project_revision(&tx, project_id)?;
+        let revision = state::load_project_revision(&tx, project_id)?.revision;
+        tx.commit().map_err(|err| err.to_string())?;
+
+        Ok(DesignSaveResult {
+            ok: true,
+            stored: true,
+            correction_required: false,
+            revision,
+            errors,
+            structurizr_dsl: Some(dsl),
+        })
+    } else {
+        errors.sort_by(|left, right| left.code.cmp(&right.code));
+        Ok(DesignSaveResult {
+            ok: false,
+            stored: false,
+            correction_required: true,
+            revision: current_revision,
+            errors,
+            structurizr_dsl: None,
+        })
+    }
+}
+
+fn apply_change(db: &Connection, workspace_id: i64, change: &DesignChange) -> Result<(), String> {
+    match change.op.as_str() {
+        "upsert_element" => {
+            let external_id = required(change.external_id.as_deref(), "externalId")?;
+            let element_type = required(change.element_type.as_deref(), "elementType")?;
+            let name = required(change.name.as_deref(), "name")?;
+            db.execute(
+                "INSERT INTO c4_elements(
+                    workspace_id, external_id, parent_external_id, element_type, name, description, technology, tags
+                 )
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(workspace_id, external_id) DO UPDATE SET
+                    parent_external_id = excluded.parent_external_id,
+                    element_type = excluded.element_type,
+                    name = excluded.name,
+                    description = excluded.description,
+                    technology = excluded.technology,
+                    tags = excluded.tags",
+                params![
+                    workspace_id,
+                    external_id,
+                    optional_trim(change.parent_external_id.as_deref()),
+                    element_type.trim(),
+                    name.trim(),
+                    change.description.as_deref().unwrap_or("").trim(),
+                    change.technology.as_deref().unwrap_or("").trim(),
+                    change.tags.as_deref().unwrap_or("").trim(),
+                ],
+            )
+            .map_err(|err| err.to_string())?;
+        }
+        "upsert_relationship" => {
+            let external_id = required(change.external_id.as_deref(), "externalId")?;
+            let source_id = required(change.source_external_id.as_deref(), "sourceExternalId")?;
+            let destination_id = required(
+                change.destination_external_id.as_deref(),
+                "destinationExternalId",
+            )?;
+            let description = required(change.description.as_deref(), "description")?;
+            db.execute(
+                "INSERT INTO c4_relationships(
+                    workspace_id, external_id, source_external_id, destination_external_id, description, technology, tags
+                 )
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(workspace_id, external_id) DO UPDATE SET
+                    source_external_id = excluded.source_external_id,
+                    destination_external_id = excluded.destination_external_id,
+                    description = excluded.description,
+                    technology = excluded.technology,
+                    tags = excluded.tags",
+                params![
+                    workspace_id,
+                    external_id,
+                    source_id.trim(),
+                    destination_id.trim(),
+                    description.trim(),
+                    change.technology.as_deref().unwrap_or("").trim(),
+                    change.tags.as_deref().unwrap_or("").trim(),
+                ],
+            )
+            .map_err(|err| err.to_string())?;
+        }
+        "upsert_uml" => {
+            let key = required(change.key.as_deref(), "key")?;
+            let title = required(change.title.as_deref(), "title")?;
+            let language = required(change.language.as_deref(), "language")?;
+            let source = required(change.source.as_deref(), "source")?;
+            db.execute(
+                "INSERT INTO diagrams(
+                    workspace_id, kind, key, title, source, diagram_type, attached_to_external_id, sort_order
+                 )
+                 VALUES (
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7,
+                    COALESCE((SELECT MAX(sort_order) + 1 FROM diagrams WHERE workspace_id = ?1), 1)
+                 )
+                 ON CONFLICT(workspace_id, key) DO UPDATE SET
+                    kind = excluded.kind,
+                    title = excluded.title,
+                    source = excluded.source,
+                    diagram_type = excluded.diagram_type,
+                    attached_to_external_id = excluded.attached_to_external_id,
+                    updated_at = CURRENT_TIMESTAMP",
+                params![
+                    workspace_id,
+                    language.trim(),
+                    key.trim(),
+                    title.trim(),
+                    source,
+                    change.diagram_type.as_deref().unwrap_or("").trim(),
+                    optional_trim(change.attached_to_external_id.as_deref()),
+                ],
+            )
+            .map_err(|err| err.to_string())?;
+        }
+        "upsert_binding" => {
+            let design_external_id =
+                required(change.design_external_id.as_deref(), "designExternalId")?;
+            let target_type = required(change.target_type.as_deref(), "targetType")?;
+            let target = required(change.target.as_deref(), "target")?;
+            db.execute(
+                "INSERT INTO design_bindings(workspace_id, design_external_id, target_type, target)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(workspace_id, design_external_id, target_type, target) DO UPDATE SET
+                    updated_at = CURRENT_TIMESTAMP",
+                params![
+                    workspace_id,
+                    design_external_id.trim(),
+                    target_type.trim(),
+                    target.trim()
+                ],
+            )
+            .map_err(|err| err.to_string())?;
+        }
+        _ => return Err(format!("Unknown design save op: {}", change.op)),
+    }
+
+    Ok(())
+}
+
+fn validate_workspace(db: &Connection, workspace_id: i64) -> Result<Vec<DesignCorrection>, String> {
+    let elements = load_elements(db, workspace_id)?;
+    let relationships = load_relationships(db, workspace_id)?;
+    let diagrams = load_diagrams(db, workspace_id)?;
+    let bindings = load_bindings(db, workspace_id)?;
+    let mut errors = Vec::new();
+    let element_by_id = elements
+        .iter()
+        .map(|element| (element.external_id.as_str(), element))
+        .collect::<HashMap<_, _>>();
+    let relationship_ids = relationships
+        .iter()
+        .map(|relationship| relationship.external_id.as_str())
+        .collect::<HashSet<_>>();
+
+    let internal_systems = elements
+        .iter()
+        .filter(|element| {
+            element.element_type.eq_ignore_ascii_case("Software System")
+                && !has_tag(&element.tags, "External")
+        })
+        .count();
+    if internal_systems != 1 {
+        errors.push(correction(
+            "c4.system_root_count",
+            format!("Expected exactly one internal Software System, found {internal_systems}."),
+            "Resubmit the model with one internal top-level software system and mark other systems as External if needed.",
+        ));
+    }
+
+    for element in &elements {
+        if element.external_id.trim().is_empty() {
+            errors.push(correction(
+                "c4.empty_element_id",
+                "A C4 element has an empty external id.",
+                "Assign every element a stable non-empty externalId.",
+            ));
+        }
+
+        if element.name.trim().is_empty() {
+            errors.push(correction(
+                "c4.empty_element_name",
+                format!("Element '{}' has no name.", element.external_id),
+                "Provide a human-readable name for every C4 element.",
+            ));
+        }
+
+        match normalized_element_type(&element.element_type).as_deref() {
+            Some("Person") | Some("Software System") => {
+                if element.parent_external_id.is_some() {
+                    errors.push(correction(
+                        "c4.invalid_parent",
+                        format!("Top-level element '{}' must not have a parent.", element.external_id),
+                        "Move this element to the top level or change it to a valid contained C4 type.",
+                    ));
+                }
+            }
+            Some("Container") => {
+                validate_parent_type(&mut errors, &element_by_id, element, "Software System")
+            }
+            Some("Component") => {
+                validate_parent_type(&mut errors, &element_by_id, element, "Container")
+            }
+            _ => errors.push(correction(
+                "c4.invalid_element_type",
+                format!(
+                    "Element '{}' has unsupported type '{}'.",
+                    element.external_id, element.element_type
+                ),
+                "Use one of: Person, Software System, Container, Component.",
+            )),
+        }
+    }
+
+    for relationship in &relationships {
+        if relationship.external_id.trim().is_empty() {
+            errors.push(correction(
+                "c4.empty_relationship_id",
+                "A C4 relationship has an empty external id.",
+                "Assign every relationship a stable non-empty externalId.",
+            ));
+        }
+        if relationship.description.trim().is_empty() {
+            errors.push(correction(
+                "c4.empty_relationship_description",
+                format!(
+                    "Relationship '{}' has no description.",
+                    relationship.external_id
+                ),
+                "Describe the relationship and resubmit the full changeset.",
+            ));
+        }
+        if !element_by_id.contains_key(relationship.source_external_id.as_str()) {
+            errors.push(correction(
+                "c4.unresolved_relationship_source",
+                format!(
+                    "Relationship '{}' references unknown source '{}'.",
+                    relationship.external_id, relationship.source_external_id
+                ),
+                "Create the source element or correct sourceExternalId.",
+            ));
+        }
+        if !element_by_id.contains_key(relationship.destination_external_id.as_str()) {
+            errors.push(correction(
+                "c4.unresolved_relationship_destination",
+                format!(
+                    "Relationship '{}' references unknown destination '{}'.",
+                    relationship.external_id, relationship.destination_external_id
+                ),
+                "Create the destination element or correct destinationExternalId.",
+            ));
+        }
+        if relationship.source_external_id == relationship.destination_external_id {
+            errors.push(correction(
+                "c4.self_relationship",
+                format!(
+                    "Relationship '{}' connects an element to itself.",
+                    relationship.external_id
+                ),
+                "Connect two different elements or remove the relationship.",
+            ));
+        }
+    }
+
+    for diagram in &diagrams {
+        if diagram.language == "structurizr" {
+            continue;
+        }
+        if !diagram.language.eq_ignore_ascii_case("mermaid") {
+            errors.push(correction(
+                "uml.unsupported_language",
+                format!(
+                    "Diagram '{}' uses unsupported language '{}'.",
+                    diagram.key, diagram.language
+                ),
+                "Use Mermaid UML for stored UML artifacts.",
+            ));
+            continue;
+        }
+        if let Some(error) = validate_mermaid(&diagram.source) {
+            errors.push(correction(
+                "uml.syntax_error",
+                format!("Diagram '{}': {error}", diagram.key),
+                "Correct the Mermaid UML source and resubmit the full diagram.",
+            ));
+        }
+        match diagram.attached_to_external_id.as_deref() {
+            Some(id) if element_by_id.contains_key(id) || relationship_ids.contains(id) => {}
+            Some(id) => errors.push(correction(
+                "uml.invalid_attachment",
+                format!(
+                    "Diagram '{}' is attached to unknown design id '{}'.",
+                    diagram.key, id
+                ),
+                "Attach the UML artifact to an existing C4 element or relationship id.",
+            )),
+            None => errors.push(correction(
+                "uml.missing_attachment",
+                format!(
+                    "Diagram '{}' is not attached to a C4 element or relationship.",
+                    diagram.key
+                ),
+                "Attach the UML artifact to the C4 element or relationship it specifies.",
+            )),
+        }
+    }
+
+    for binding in &bindings {
+        if binding.target_type != "file" && binding.target_type != "symbol" {
+            errors.push(correction(
+                "binding.invalid_target_type",
+                format!(
+                    "Binding '{}' uses invalid target type '{}'.",
+                    binding.design_external_id, binding.target_type
+                ),
+                "Use targetType 'file' or 'symbol'.",
+            ));
+        }
+        if !element_by_id.contains_key(binding.design_external_id.as_str())
+            && !relationship_ids.contains(binding.design_external_id.as_str())
+            && !diagrams
+                .iter()
+                .any(|diagram| diagram.key == binding.design_external_id)
+        {
+            errors.push(correction(
+                "binding.unknown_design_id",
+                format!(
+                    "Binding points to unknown design id '{}'.",
+                    binding.design_external_id
+                ),
+                "Bind files or symbols only to existing element, relationship, or UML ids.",
+            ));
+        }
+    }
+
+    Ok(errors)
+}
+
+fn validate_parent_type(
+    errors: &mut Vec<DesignCorrection>,
+    element_by_id: &HashMap<&str, &DesignElementRecord>,
+    element: &DesignElementRecord,
+    required_type: &str,
+) {
+    let Some(parent_id) = element.parent_external_id.as_deref() else {
+        errors.push(correction(
+            "c4.missing_parent",
+            format!("Element '{}' has no parent.", element.external_id),
+            format!("Set parentExternalId to a valid {required_type} id."),
+        ));
+        return;
+    };
+
+    let Some(parent) = element_by_id.get(parent_id) else {
+        errors.push(correction(
+            "c4.missing_parent",
+            format!(
+                "Element '{}' references unknown parent '{}'.",
+                element.external_id, parent_id
+            ),
+            "Create the parent element or correct parentExternalId.",
+        ));
+        return;
+    };
+
+    if normalized_element_type(&parent.element_type).as_deref() != Some(required_type) {
+        errors.push(correction(
+            "c4.invalid_parent_type",
+            format!(
+                "Element '{}' is a '{}' but parent '{}' is '{}'.",
+                element.external_id, element.element_type, parent.external_id, parent.element_type
+            ),
+            format!("Move this element under a {required_type}."),
+        ));
+    }
+}
+
+fn validate_mermaid(source: &str) -> Option<String> {
+    let trimmed = source.trim();
+    if trimmed.is_empty() {
+        return Some("source is empty".to_string());
+    }
+
+    let first_line = trimmed.lines().next().unwrap_or("").trim();
+    let valid_start = first_line.starts_with("sequenceDiagram")
+        || first_line.starts_with("flowchart ")
+        || first_line.starts_with("graph ")
+        || first_line.starts_with("classDiagram")
+        || first_line.starts_with("stateDiagram")
+        || first_line.starts_with("erDiagram")
+        || first_line.starts_with("journey")
+        || first_line.starts_with("gantt");
+    if !valid_start {
+        return Some(format!(
+            "first line '{first_line}' is not a supported Mermaid UML diagram header"
+        ));
+    }
+
+    for (open, close) in [('(', ')'), ('[', ']'), ('{', '}')] {
+        let opens = trimmed
+            .chars()
+            .filter(|character| *character == open)
+            .count();
+        let closes = trimmed
+            .chars()
+            .filter(|character| *character == close)
+            .count();
+        if opens != closes {
+            return Some(format!("unbalanced '{open}' and '{close}' delimiters"));
+        }
+    }
+
+    None
+}
+
+fn load_workspace(db: &Connection) -> Result<WorkspaceRecord, String> {
+    db.query_row(
+        "SELECT id, name, description, structurizr_dsl
+         FROM design_workspaces
+         ORDER BY id
+         LIMIT 1",
+        [],
+        |row| {
+            Ok(WorkspaceRecord {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                structurizr_dsl: row.get(3)?,
+            })
+        },
+    )
+    .map_err(|err| err.to_string())
+}
+
+fn load_elements(db: &Connection, workspace_id: i64) -> Result<Vec<DesignElementRecord>, String> {
+    let mut statement = db
+        .prepare(
+            "SELECT external_id, parent_external_id, element_type, name, description, technology, tags
+             FROM c4_elements
+             WHERE workspace_id = ?1
+             ORDER BY parent_external_id IS NOT NULL, parent_external_id, id",
+        )
+        .map_err(|err| err.to_string())?;
+    let rows = statement
+        .query_map(params![workspace_id], |row| {
+            Ok(DesignElementRecord {
+                external_id: row.get(0)?,
+                parent_external_id: row.get(1)?,
+                element_type: row.get(2)?,
+                name: row.get(3)?,
+                description: row.get(4)?,
+                technology: row.get(5)?,
+                tags: row.get(6)?,
+            })
+        })
+        .map_err(|err| err.to_string())?;
+
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|err| err.to_string())
+}
+
+fn load_relationships(
+    db: &Connection,
+    workspace_id: i64,
+) -> Result<Vec<DesignRelationshipRecord>, String> {
+    let mut statement = db
+        .prepare(
+            "SELECT external_id, source_external_id, destination_external_id, description, technology, tags
+             FROM c4_relationships
+             WHERE workspace_id = ?1
+             ORDER BY id",
+        )
+        .map_err(|err| err.to_string())?;
+    let rows = statement
+        .query_map(params![workspace_id], |row| {
+            Ok(DesignRelationshipRecord {
+                external_id: row.get(0)?,
+                source_external_id: row.get(1)?,
+                destination_external_id: row.get(2)?,
+                description: row.get(3)?,
+                technology: row.get(4)?,
+                tags: row.get(5)?,
+            })
+        })
+        .map_err(|err| err.to_string())?;
+
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|err| err.to_string())
+}
+
+fn load_diagrams(db: &Connection, workspace_id: i64) -> Result<Vec<DesignDiagramRecord>, String> {
+    let mut statement = db
+        .prepare(
+            "SELECT kind, key, title, source, diagram_type, attached_to_external_id
+             FROM diagrams
+             WHERE workspace_id = ?1
+             ORDER BY sort_order, id",
+        )
+        .map_err(|err| err.to_string())?;
+    let rows = statement
+        .query_map(params![workspace_id], |row| {
+            Ok(DesignDiagramRecord {
+                language: row.get(0)?,
+                key: row.get(1)?,
+                title: row.get(2)?,
+                source: row.get(3)?,
+                diagram_type: row.get(4)?,
+                attached_to_external_id: row.get(5)?,
+            })
+        })
+        .map_err(|err| err.to_string())?;
+
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|err| err.to_string())
+}
+
+fn load_bindings(db: &Connection, workspace_id: i64) -> Result<Vec<DesignBindingRecord>, String> {
+    let mut statement = db
+        .prepare(
+            "SELECT design_external_id, target_type, target
+             FROM design_bindings
+             WHERE workspace_id = ?1
+             ORDER BY target_type, target, design_external_id",
+        )
+        .map_err(|err| err.to_string())?;
+    let rows = statement
+        .query_map(params![workspace_id], |row| {
+            Ok(DesignBindingRecord {
+                design_external_id: row.get(0)?,
+                target_type: row.get(1)?,
+                target: row.get(2)?,
+            })
+        })
+        .map_err(|err| err.to_string())?;
+
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|err| err.to_string())
+}
+
+fn filter_elements_by_depth(
+    elements: Vec<DesignElementRecord>,
+    max_depth: Option<usize>,
+) -> Vec<DesignElementRecord> {
+    let Some(max_depth) = max_depth else {
+        return elements;
+    };
+    let element_by_id = elements
+        .iter()
+        .map(|element| (element.external_id.as_str(), element))
+        .collect::<HashMap<_, _>>();
+
+    elements
+        .iter()
+        .filter(|element| element_depth(element, &element_by_id) <= max_depth)
+        .cloned()
+        .collect()
+}
+
+fn element_depth(
+    element: &DesignElementRecord,
+    element_by_id: &HashMap<&str, &DesignElementRecord>,
+) -> usize {
+    let mut depth = 0;
+    let mut current = element.parent_external_id.as_deref();
+
+    while let Some(parent_id) = current {
+        depth += 1;
+        current = element_by_id
+            .get(parent_id)
+            .and_then(|parent| parent.parent_external_id.as_deref());
+    }
+
+    depth
+}
+
+fn collect_descendants(
+    elements: &[DesignElementRecord],
+    root_id: &str,
+    children_depth: Option<usize>,
+) -> HashSet<String> {
+    let max_depth = children_depth.unwrap_or(usize::MAX);
+    let mut ids = HashSet::new();
+    ids.insert(root_id.to_string());
+
+    for depth in 0..max_depth {
+        let current_ids = ids.clone();
+        let mut added = false;
+        for element in elements {
+            if element
+                .parent_external_id
+                .as_deref()
+                .map(|parent| current_ids.contains(parent))
+                .unwrap_or(false)
+                && ids.insert(element.external_id.clone())
+            {
+                added = true;
+            }
+        }
+        if !added || depth == max_depth {
+            break;
+        }
+    }
+
+    ids
+}
+
+fn matches_terms(haystack: &str, terms: &[String]) -> bool {
+    if terms.is_empty() {
+        return true;
+    }
+
+    terms.iter().all(|term| haystack.contains(term))
+}
+
+fn build_structurizr_dsl(db: &Connection, workspace_id: i64) -> Result<String, String> {
+    let workspace = load_workspace(db)?;
+    let elements = load_elements(db, workspace_id)?;
+    let relationships = load_relationships(db, workspace_id)?;
+    let children_by_parent = group_children(&elements);
+    let root_system = elements
+        .iter()
+        .find(|element| {
+            element.element_type.eq_ignore_ascii_case("Software System")
+                && !has_tag(&element.tags, "External")
+        })
+        .or_else(|| {
+            elements
+                .iter()
+                .find(|element| element.parent_external_id.is_none())
+        });
+
+    let mut dsl = String::new();
+    dsl.push_str(&format!(
+        "workspace \"{}\" \"{}\" {{\n",
+        escape_dsl(&workspace.name),
+        escape_dsl(&workspace.description)
+    ));
+    dsl.push_str("    model {\n");
+
+    for element in elements
+        .iter()
+        .filter(|element| element.parent_external_id.is_none())
+    {
+        push_element_dsl(&mut dsl, element, &children_by_parent, 2);
+    }
+
+    dsl.push('\n');
+    for relationship in &relationships {
+        dsl.push_str(&format!(
+            "        {} -> {} \"{}\" \"{}\"{}\n",
+            dsl_identifier(&relationship.source_external_id),
+            dsl_identifier(&relationship.destination_external_id),
+            escape_dsl(&relationship.description),
+            escape_dsl(&relationship.technology),
+            dsl_tags(&relationship.tags)
+        ));
+    }
+
+    dsl.push_str("    }\n\n");
+    dsl.push_str("    views {\n");
+    if let Some(system) = root_system {
+        dsl.push_str(&format!(
+            "        container {} \"AdashiContainers\" {{\n",
+            dsl_identifier(&system.external_id)
+        ));
+        dsl.push_str("            include *\n");
+        dsl.push_str("            autolayout lr\n");
+        dsl.push_str("        }\n");
+    }
+    dsl.push_str("    }\n");
+    dsl.push('}');
+    Ok(dsl)
+}
+
+fn build_structurizr_json_source(db: &Connection, workspace_id: i64) -> Result<String, String> {
+    let workspace = load_workspace(db)?;
+    let elements = load_elements(db, workspace_id)?;
+    let relationships = load_relationships(db, workspace_id)?;
+    let mut element_json = elements
+        .iter()
+        .map(|element| (element.external_id.clone(), element_to_json(element)))
+        .collect::<HashMap<_, _>>();
+
+    for relationship in &relationships {
+        if let Some(source) = element_json.get_mut(&relationship.source_external_id) {
+            let relationship_json = json!({
+                "id": relationship.external_id,
+                "tags": relationship.tags,
+                "sourceId": relationship.source_external_id,
+                "destinationId": relationship.destination_external_id,
+                "description": relationship.description,
+                "technology": relationship.technology
+            });
+            source
+                .as_object_mut()
+                .and_then(|object| object.get_mut("relationships"))
+                .and_then(Value::as_array_mut)
+                .map(|items| items.push(relationship_json));
+        }
+    }
+
+    let mut people = Vec::new();
+    let mut systems = Vec::new();
+    for element in elements
+        .iter()
+        .filter(|element| element.parent_external_id.is_none())
+    {
+        if element.element_type.eq_ignore_ascii_case("Person") {
+            if let Some(value) = element_json.remove(&element.external_id) {
+                people.push(value);
+            }
+        } else if element.element_type.eq_ignore_ascii_case("Software System") {
+            let mut system = element_json
+                .remove(&element.external_id)
+                .unwrap_or_else(|| element_to_json(element));
+            let containers = build_child_json(&elements, &mut element_json, &element.external_id);
+            system["containers"] = json!(containers);
+            systems.push(system);
+        }
+    }
+
+    let root_system_id = elements
+        .iter()
+        .find(|element| {
+            element.element_type.eq_ignore_ascii_case("Software System")
+                && !has_tag(&element.tags, "External")
+        })
+        .map(|element| element.external_id.clone())
+        .unwrap_or_default();
+    let view_elements = elements
+        .iter()
+        .map(|element| {
+            let relationship_ids = relationships
+                .iter()
+                .filter(|relationship| relationship.source_external_id == element.external_id)
+                .map(|relationship| relationship.external_id.clone())
+                .collect::<Vec<_>>();
+            json!({
+                "id": element.external_id,
+                "relationships": relationship_ids
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let workspace_json = json!({
+        "id": workspace.id,
+        "name": workspace.name,
+        "description": workspace.description,
+        "model": {
+            "people": people,
+            "softwareSystems": systems
+        },
+        "views": {
+            "containerViews": [{
+                "softwareSystemId": root_system_id,
+                "key": "AdashiContainers",
+                "description": "Container view for the Adashi design workspace.",
+                "elements": view_elements,
+                "animations": [],
+                "automaticLayout": {
+                    "implementation": "Dagre",
+                    "rankDirection": "LeftRight",
+                    "rankSeparation": 300,
+                    "nodeSeparation": 300,
+                    "edgeSeparation": 50,
+                    "vertices": false
+                }
+            }],
+            "configuration": {
+                "defaultView": "AdashiContainers",
+                "styles": {
+                    "elements": [
+                        { "tag": "Person", "shape": "Person", "background": "#2f6f6d", "color": "#ffffff" },
+                        { "tag": "Software System", "background": "#335c67", "color": "#ffffff" },
+                        { "tag": "Container", "background": "#fffaf0", "color": "#1f2933", "stroke": "#2f6f6d" },
+                        { "tag": "Component", "background": "#f7f7f2", "color": "#1f2933", "stroke": "#7fb0a8" },
+                        { "tag": "Database", "shape": "Cylinder", "background": "#e4b363", "color": "#1f2933" }
+                    ],
+                    "relationships": [
+                        { "tag": "Relationship", "color": "#47615f", "thickness": 3 }
+                    ]
+                }
+            }
+        }
+    });
+
+    serde_json::to_string_pretty(&workspace_json).map_err(|err| err.to_string())
+}
+
+fn build_child_json(
+    elements: &[DesignElementRecord],
+    element_json: &mut HashMap<String, Value>,
+    parent_id: &str,
+) -> Vec<Value> {
+    elements
+        .iter()
+        .filter(|element| element.parent_external_id.as_deref() == Some(parent_id))
+        .map(|element| {
+            let mut value = element_json
+                .remove(&element.external_id)
+                .unwrap_or_else(|| element_to_json(element));
+            let children = build_child_json(elements, element_json, &element.external_id);
+            if !children.is_empty() {
+                value["components"] = json!(children);
+            }
+            value
+        })
+        .collect()
+}
+
+fn element_to_json(element: &DesignElementRecord) -> Value {
+    json!({
+        "id": element.external_id,
+        "tags": element.tags,
+        "name": element.name,
+        "description": element.description,
+        "technology": element.technology,
+        "relationships": [],
+        "location": if has_tag(&element.tags, "External") { "External" } else { "Internal" },
+        "type": element.element_type,
+        "canonicalName": format!("/{}", element.name),
+        "parentId": element.parent_external_id
+    })
+}
+
+fn group_children<'a>(
+    elements: &'a [DesignElementRecord],
+) -> HashMap<&'a str, Vec<&'a DesignElementRecord>> {
+    let mut children_by_parent: HashMap<&str, Vec<&DesignElementRecord>> = HashMap::new();
+    for element in elements {
+        if let Some(parent_id) = element.parent_external_id.as_deref() {
+            children_by_parent
+                .entry(parent_id)
+                .or_default()
+                .push(element);
+        }
+    }
+    children_by_parent
+}
+
+fn push_element_dsl(
+    dsl: &mut String,
+    element: &DesignElementRecord,
+    children_by_parent: &HashMap<&str, Vec<&DesignElementRecord>>,
+    indent: usize,
+) {
+    let spaces = "    ".repeat(indent);
+    let declaration = match normalized_element_type(&element.element_type).as_deref() {
+        Some("Person") => "person",
+        Some("Software System") => "softwareSystem",
+        Some("Container") => "container",
+        Some("Component") => "component",
+        _ => "softwareSystem",
+    };
+    let children = children_by_parent
+        .get(element.external_id.as_str())
+        .cloned()
+        .unwrap_or_default();
+
+    if children.is_empty() {
+        dsl.push_str(&format!(
+            "{}{} = {} \"{}\" \"{}\" \"{}\"{}\n",
+            spaces,
+            dsl_identifier(&element.external_id),
+            declaration,
+            escape_dsl(&element.name),
+            escape_dsl(&element.description),
+            escape_dsl(&element.technology),
+            dsl_tags(&element.tags)
+        ));
+        return;
+    }
+
+    dsl.push_str(&format!(
+        "{}{} = {} \"{}\" \"{}\" \"{}\"{} {{\n",
+        spaces,
+        dsl_identifier(&element.external_id),
+        declaration,
+        escape_dsl(&element.name),
+        escape_dsl(&element.description),
+        escape_dsl(&element.technology),
+        dsl_tags(&element.tags)
+    ));
+    for child in children {
+        push_element_dsl(dsl, child, children_by_parent, indent + 1);
+    }
+    dsl.push_str(&format!("{}}}\n", spaces));
+}
+
+fn normalized_element_type(element_type: &str) -> Option<String> {
+    match element_type.trim().to_ascii_lowercase().as_str() {
+        "person" => Some("Person".to_string()),
+        "software system" | "softwaresystem" => Some("Software System".to_string()),
+        "container" => Some("Container".to_string()),
+        "component" => Some("Component".to_string()),
+        _ => None,
+    }
+}
+
+fn dsl_identifier(external_id: &str) -> String {
+    let sanitized = external_id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    format!("e_{sanitized}")
+}
+
+fn dsl_tags(tags: &str) -> String {
+    if tags.trim().is_empty() {
+        String::new()
+    } else {
+        format!(" \"{}\"", escape_dsl(tags.trim()))
+    }
+}
+
+fn escape_dsl(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn has_tag(tags: &str, tag: &str) -> bool {
+    tags.split(',')
+        .map(str::trim)
+        .any(|candidate| candidate.eq_ignore_ascii_case(tag))
+}
+
+fn required<'a>(value: Option<&'a str>, field: &str) -> Result<&'a str, String> {
+    let value = value.unwrap_or("").trim();
+    if value.is_empty() {
+        Err(format!("Design save field '{field}' is required"))
+    } else {
+        Ok(value)
+    }
+}
+
+fn optional_trim(value: Option<&str>) -> Option<String> {
+    let trimmed = value.unwrap_or("").trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn failed_save(
+    revision: i64,
+    code: &str,
+    message: impl Into<String>,
+    request: impl Into<String>,
+) -> DesignSaveResult {
+    DesignSaveResult {
+        ok: false,
+        stored: false,
+        correction_required: true,
+        revision,
+        errors: vec![correction(code, message, request)],
+        structurizr_dsl: None,
+    }
+}
+
+fn correction(
+    code: &str,
+    message: impl Into<String>,
+    request: impl Into<String>,
+) -> DesignCorrection {
+    DesignCorrection {
+        code: code.to_string(),
+        message: message.into(),
+        request: request.into(),
+    }
+}
+
+struct WorkspaceRecord {
+    id: i64,
+    name: String,
+    description: String,
+    structurizr_dsl: String,
+}
