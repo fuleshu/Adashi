@@ -156,7 +156,7 @@ button {
 .rule-editor-form select,
 .task-editor-form input,
 .task-editor-form select,
-.qa-editor-form input,
+.qa-editor-form input:not([type="checkbox"]),
 .qa-editor-form select {
   background: #fffdf8;
   border: 1px solid #d4cebf;
@@ -1181,9 +1181,16 @@ button {
   width: 100%;
 }
 
-.qa-enabled-row {
+.qa-enabled-toggle {
+  align-content: center;
   align-self: end;
-  min-height: 38px;
+  justify-items: center;
+  min-height: 62px;
+}
+
+.qa-enabled-toggle input {
+  height: 18px;
+  width: 18px;
 }
 
 .task-detail-section {

@@ -263,6 +263,7 @@ type QaJob = {
   taskLinks: QaJobTaskLink[];
   tags: string[];
   latestRun?: QaJobRun | null;
+  runHistory: QaJobRun[];
 };
 
 type QaJobQuery = {
@@ -632,7 +633,6 @@ function App() {
             projectId={payload.projectId}
             qaChecks={payload.qaChecks}
             qaJobs={payload.qaJobs}
-            qaRuns={payload.qaRuns}
             tasks={payload.tasks}
             designElements={payload.designElements}
             designRelationships={payload.designRelationships}
@@ -2635,7 +2635,6 @@ function QaView({
   projectId,
   qaChecks,
   qaJobs,
-  qaRuns,
   tasks,
   designElements,
   designRelationships,
@@ -2647,7 +2646,6 @@ function QaView({
   projectId: string;
   qaChecks: QaCheck[];
   qaJobs: QaJob[];
-  qaRuns: QaRun[];
   tasks: Task[];
   designElements: DesignElement[];
   designRelationships: DesignRelationship[];
@@ -2667,7 +2665,7 @@ function QaView({
   const [tagFilter, setTagFilter] = React.useState("");
   const [designQuery, setDesignQuery] = React.useState("");
   const [taskQuery, setTaskQuery] = React.useState("");
-  const [selectedRunId, setSelectedRunId] = React.useState<number | null>(qaRuns[0]?.id ?? null);
+  const [selectedJobRunId, setSelectedJobRunId] = React.useState<number | null>(qaJobs[0]?.runHistory[0]?.id ?? null);
   const [running, setRunning] = React.useState(false);
 
   const tagTerms = tagFilter
@@ -2688,7 +2686,8 @@ function QaView({
     qaJobs.find((job) => job.id === selectedJobId && visibleJobs.some((visibleJob) => visibleJob.id === job.id)) ??
     visibleJobs[0] ??
     null;
-  const selectedRun = qaRuns.find((run) => run.id === selectedRunId) ?? qaRuns[0] ?? null;
+  const selectedJobRun =
+    selectedJob?.runHistory.find((jobRun) => jobRun.id === selectedJobRunId) ?? selectedJob?.runHistory[0] ?? null;
   const designLinkOptions = React.useMemo(
     () => buildTaskDesignLinkOptions(designElements, designRelationships, diagrams, designQuery),
     [designElements, designRelationships, diagrams, designQuery],
@@ -2702,10 +2701,10 @@ function QaView({
   }, [selectedJob, visibleJobs]);
 
   React.useEffect(() => {
-    if (!selectedRun && qaRuns[0]) {
-      setSelectedRunId(qaRuns[0].id);
+    if (selectedJob?.runHistory.length && !selectedJobRun) {
+      setSelectedJobRunId(selectedJob.runHistory[0].id);
     }
-  }, [selectedRun, qaRuns]);
+  }, [selectedJob, selectedJobRun]);
 
   function addJob() {
     invoke<DashboardPayload>("create_qa_job", {
@@ -2779,9 +2778,11 @@ function QaView({
         query,
         triggerSource: "dashboard",
       },
-    })
+      })
       .then((updatedPayload) => {
-        setSelectedRunId(updatedPayload.qaRuns[0]?.id ?? null);
+        const refreshedJob =
+          selectedJobId === null ? null : updatedPayload.qaJobs.find((job) => job.id === selectedJobId);
+        setSelectedJobRunId(refreshedJob?.runHistory[0]?.id ?? null);
         onChange(updatedPayload);
       })
       .catch((reason) => onError(String(reason)))
@@ -2966,13 +2967,13 @@ function QaView({
                   type="number"
                 />
               </label>
-              <label className="settings-toggle-row qa-enabled-row">
+              <label className="qa-enabled-toggle">
+                <span>Enabled</span>
                 <input
                   checked={selectedJob.enabled}
                   onChange={(event) => updateJob(selectedJob, { enabled: event.target.checked })}
                   type="checkbox"
                 />
-                <span>enabled</span>
               </label>
               <label className="task-description-label">
                 <span>Command</span>
@@ -3107,39 +3108,39 @@ function QaView({
 
         <section className="qa-history-panel">
           <div className="task-section-heading">
-            <h4>Run History</h4>
+            <h4>Job History</h4>
           </div>
           <div className="qa-history-layout">
             <div className="qa-run-list">
-              {qaRuns.length === 0 ? (
-                <div className="empty-state compact">No QA runs recorded</div>
+              {!selectedJob ? (
+                <div className="empty-state compact">No QA job selected</div>
+              ) : selectedJob.runHistory.length === 0 ? (
+                <div className="empty-state compact">No results for this job</div>
               ) : (
-                qaRuns.map((run) => (
+                selectedJob.runHistory.map((jobRun) => (
                   <button
-                    className={selectedRun?.id === run.id ? "qa-run-item active" : "qa-run-item"}
-                    key={run.id}
-                    onClick={() => setSelectedRunId(run.id)}
+                    className={selectedJobRun?.id === jobRun.id ? "qa-run-item active" : "qa-run-item"}
+                    key={jobRun.id}
+                    onClick={() => setSelectedJobRunId(jobRun.id)}
                     type="button"
                   >
-                    <span className={`pill qa-run-${run.status}`}>{run.status}</span>
-                    <strong>Run #{run.id}</strong>
-                    <small>{run.summary || run.startedAt}</small>
+                    <span className={`pill qa-run-${jobRun.status}`}>{jobRun.status}</span>
+                    <strong>Run #{jobRun.qaRunId}</strong>
+                    <small>{jobRun.finishedAt ?? jobRun.startedAt}</small>
                   </button>
                 ))
               )}
             </div>
             <div className="qa-console">
-              {selectedRun ? (
-                selectedRun.jobRuns.map((jobRun) => (
-                  <article key={jobRun.id}>
-                    <div>
-                      <span className={`pill qa-run-${jobRun.status}`}>{jobRun.status}</span>
-                      <strong>{qaJobs.find((job) => job.id === jobRun.qaJobId)?.name ?? `Job ${jobRun.qaJobId}`}</strong>
-                      <small>{jobRun.durationMs ?? 0} ms</small>
-                    </div>
-                    <pre>{jobRun.output || "(no output)"}</pre>
-                  </article>
-                ))
+              {selectedJobRun && selectedJob ? (
+                <article key={selectedJobRun.id}>
+                  <div>
+                    <span className={`pill qa-run-${selectedJobRun.status}`}>{selectedJobRun.status}</span>
+                    <strong>{selectedJob.name}</strong>
+                    <small>{selectedJobRun.durationMs ?? 0} ms</small>
+                  </div>
+                  <pre>{selectedJobRun.output || "(no output)"}</pre>
+                </article>
               ) : (
                 <div className="empty-state compact">No console output</div>
               )}

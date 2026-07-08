@@ -32,6 +32,7 @@ pub struct QaJob {
     pub task_links: Vec<QaJobTaskLink>,
     pub tags: Vec<String>,
     pub latest_run: Option<QaJobRun>,
+    pub run_history: Vec<QaJobRun>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -368,6 +369,7 @@ pub fn run_jobs(
             ],
         )
         .map_err(|err| err.to_string())?;
+        prune_job_run_history(db, job.id)?;
     }
 
     let status = if failed == 0 && timed_out == 0 {
@@ -427,6 +429,7 @@ pub fn load_run(db: &Connection, project_id: i64, qa_run_id: i64) -> Result<QaRu
 
 fn hydrate_job(db: &Connection, _project_id: i64, row: QaJobRow) -> Result<QaJob, String> {
     let latest_run = load_latest_job_run(db, row.id)?;
+    let run_history = load_job_run_history(db, row.id, 2)?;
     let design_specification_links = load_design_links(db, row.id)?;
     let task_links = load_task_links(db, row.id)?;
     let tags = load_tags(db, row.id)?;
@@ -450,6 +453,7 @@ fn hydrate_job(db: &Connection, _project_id: i64, row: QaJobRow) -> Result<QaJob
         task_links,
         tags,
         latest_run,
+        run_history,
     })
 }
 
@@ -953,6 +957,29 @@ fn load_latest_job_run(db: &Connection, qa_job_id: i64) -> Result<Option<QaJobRu
     .map_err(|err| err.to_string())
 }
 
+fn load_job_run_history(
+    db: &Connection,
+    qa_job_id: i64,
+    limit: i64,
+) -> Result<Vec<QaJobRun>, String> {
+    let mut statement = db
+        .prepare(
+            "SELECT id, qa_run_id, qa_job_id, command_snapshot, status, exit_code,
+                    started_at, finished_at, duration_ms, output
+             FROM qa_job_runs
+             WHERE qa_job_id = ?1
+             ORDER BY id DESC
+             LIMIT ?2",
+        )
+        .map_err(|err| err.to_string())?;
+    let rows = statement
+        .query_map(params![qa_job_id, limit.clamp(1, 20)], read_job_run)
+        .map_err(|err| err.to_string())?;
+
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|err| err.to_string())
+}
+
 fn load_job_runs_for_run(db: &Connection, qa_run_id: i64) -> Result<Vec<QaJobRun>, String> {
     let mut statement = db
         .prepare(
@@ -969,6 +996,23 @@ fn load_job_runs_for_run(db: &Connection, qa_run_id: i64) -> Result<Vec<QaJobRun
 
     rows.collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|err| err.to_string())
+}
+
+fn prune_job_run_history(db: &Connection, qa_job_id: i64) -> Result<(), String> {
+    db.execute(
+        "DELETE FROM qa_job_runs
+         WHERE qa_job_id = ?1
+           AND id NOT IN (
+                SELECT id
+                FROM qa_job_runs
+                WHERE qa_job_id = ?1
+                ORDER BY id DESC
+                LIMIT 2
+           )",
+        params![qa_job_id],
+    )
+    .map_err(|err| err.to_string())?;
+    Ok(())
 }
 
 fn read_job_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<QaJobRun> {
