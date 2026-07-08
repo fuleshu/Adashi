@@ -2247,7 +2247,7 @@ function TasksView({
     })
       .then((updatedPayload) => {
         const newestTask = updatedPayload.tasks.reduce<Task | null>(
-          (newest, task) => (!newest || task.number > newest.number ? task : newest),
+          (newest, task) => (!newest || task.id > newest.id ? task : newest),
           null,
         );
         setSelectedTaskId(newestTask?.id ?? null);
@@ -2274,7 +2274,7 @@ function TasksView({
   }
 
   function deleteSelectedTask(task: Task) {
-    if (!window.confirm(`Delete task #${task.number}: ${task.title}?`)) {
+    if (!window.confirm(`Delete Task Id ${task.id}: ${task.title}?`)) {
       return;
     }
 
@@ -2375,7 +2375,7 @@ function TasksView({
                 type="button"
               >
                 <span className={`pill task-state-${task.state}`}>{task.state}</span>
-                <strong>#{task.number} {task.title}</strong>
+                <strong>Task Id {task.id} {task.title}</strong>
                 <small>{task.designSpecificationLinks.length} design links</small>
               </button>
             ))
@@ -2401,7 +2401,7 @@ function TasksView({
           <>
             <div className="task-detail-heading">
               <div>
-                <p className="eyebrow">Task #{selectedTask.number}</p>
+                <p className="eyebrow">Task Id {selectedTask.id}</p>
                 <h3>{selectedTask.title}</h3>
               </div>
               <div className="task-detail-actions">
@@ -2411,7 +2411,7 @@ function TasksView({
                   </button>
                 ) : null}
                 <button
-                  aria-label={`Delete task #${selectedTask.number}`}
+                  aria-label={`Delete Task Id ${selectedTask.id}`}
                   className="danger-icon-button"
                   onClick={() => deleteSelectedTask(selectedTask)}
                   title="Delete task"
@@ -3074,7 +3074,7 @@ function QaView({
                     selectedJob.taskLinks.map((link) => (
                       <div className="qa-task-link-row" key={link.id}>
                         <div>
-                          <strong>#{link.number} {link.title}</strong>
+                          <strong>Task Id {link.taskId} {link.title}</strong>
                           <span>{link.state}</span>
                         </div>
                         <button onClick={() => removeTaskLink(selectedJob, link.taskId)} title="Remove task" type="button">
@@ -3093,7 +3093,7 @@ function QaView({
                     {taskLinkOptions.map((task) => (
                       <button key={task.id} onClick={() => addTaskLink(selectedJob, task)} type="button">
                         <Link2 size={15} />
-                        <span>#{task.number} {task.title}</span>
+                        <span>Task Id {task.id} {task.title}</span>
                         <code>{task.state}</code>
                       </button>
                     ))}
@@ -3165,7 +3165,7 @@ function buildQaTaskLinkOptions(tasks: Task[], query: string): Task[] {
 
   return tasks
     .filter((task) => {
-      const haystack = `#${task.number} ${task.title} ${task.description} ${task.state}`.toLowerCase();
+      const haystack = `task id ${task.id} ${task.title} ${task.description} ${task.state}`.toLowerCase();
       return terms.every((term) => haystack.includes(term));
     })
     .slice(0, 12);
