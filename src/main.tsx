@@ -27,6 +27,8 @@ import {
   Trash2,
   Wand2,
   X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import mermaid from "mermaid";
 import "easymde/dist/easymde.min.css";
@@ -35,6 +37,7 @@ import "./styles.css";
 type DiagramKind = "mermaid" | "structurizr";
 type DesignLevel = "context" | "components" | "features";
 type DesignEntityType = "element" | "relationship";
+type DesignProjectionMode = "branch" | "dependencies";
 
 type DesignDiagram = {
   id: number;
@@ -142,6 +145,7 @@ type StructurizrViewJson = {
   softwareSystemId?: string;
   containerId?: string;
   elements: StructurizrViewElementJson[];
+  relationships: Array<{ id: string }>;
   automaticLayout?: {
     implementation: "Dagre";
     rankDirection: "LeftRight";
@@ -150,6 +154,15 @@ type StructurizrViewJson = {
     edgeSeparation: number;
     vertices: boolean;
   };
+};
+
+type StructurizrProjection = {
+  workspace: string;
+  viewKey: string;
+  source: string;
+  visibleElementIds: Set<string>;
+  visibleRelationshipIds: Set<string>;
+  hiddenRelationshipCount: number;
 };
 
 type Task = {
@@ -778,6 +791,8 @@ function DesignBrowser({
   const [isResizingSource, setIsResizingSource] = React.useState(false);
   const [sourcePanelHeight, setSourcePanelHeight] = React.useState(200);
   const [activeArtifactKey, setActiveArtifactKey] = React.useState<string | null>(null);
+  const [projectionMode, setProjectionMode] = React.useState<DesignProjectionMode>("branch");
+  const [structurizrZoom, setStructurizrZoom] = React.useState(0);
   const designMainRef = React.useRef<HTMLElement | null>(null);
   const designTree = React.useMemo(() => buildDesignTree(payload.designElements), [payload.designElements]);
   const rootElement =
@@ -827,13 +842,18 @@ function DesignBrowser({
         activeBranchElement,
         rootElement,
         payload.structurizrViewKey,
+        projectionMode,
       ),
-    [activeBranchElement, activeLevel, payload, rootElement],
+    [activeBranchElement, activeLevel, payload, projectionMode, rootElement],
   );
   const sourceDiagram =
     activeLevel === "features"
       ? activeUmlArtifact
       : payload.diagrams.find((diagram) => diagram.kind === "structurizr");
+  const visibleBranchRelationships =
+    activeLevel === "features" || projectionMode === "branch"
+      ? branchRelationships
+      : payload.designRelationships.filter((relationship) => branchStructurizr.visibleRelationshipIds.has(relationship.externalId));
 
   React.useEffect(() => {
     if (activeArtifactKey && umlArtifacts.some((diagram) => diagram.key === activeArtifactKey)) {
@@ -954,13 +974,72 @@ function DesignBrowser({
         <div className="viewer-panel design-viewer-panel">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">{activeLevel === "features" ? "Mermaid UML Artifacts" : "Structurizr C4"}</p>
+              <p className="eyebrow">
+                {activeLevel === "features"
+                  ? "Mermaid UML Artifacts"
+                  : projectionMode === "dependencies"
+                    ? "Structurizr Dependency View"
+                    : "Structurizr C4"}
+              </p>
               <h3>{viewerTitle}</h3>
             </div>
-            <div className="status-strip compact">
-              <span>{activeLevel === "features" ? artifactTarget?.type ?? "artifact" : "branch view"}</span>
-              <span>{activeLevel === "features" ? activeUmlArtifact?.key ?? "No attached UML" : branchStructurizr.viewKey}</span>
-            </div>
+            {activeLevel === "features" ? (
+              <div className="status-strip compact">
+                <span>{artifactTarget?.type ?? "artifact"}</span>
+                <span>{activeUmlArtifact?.key ?? "No attached UML"}</span>
+              </div>
+            ) : (
+              <div className="viewer-controls">
+                <div className="segmented compact" role="tablist" aria-label="C4 view mode">
+                  <button
+                    aria-selected={projectionMode === "branch"}
+                    className={projectionMode === "branch" ? "active" : ""}
+                    onClick={() => setProjectionMode("branch")}
+                    role="tab"
+                    title="Branch C4 view"
+                    type="button"
+                  >
+                    <Network size={15} />
+                    <span>Branch</span>
+                  </button>
+                  <button
+                    aria-selected={projectionMode === "dependencies"}
+                    className={projectionMode === "dependencies" ? "active" : ""}
+                    onClick={() => setProjectionMode("dependencies")}
+                    role="tab"
+                    title="Dependency View"
+                    type="button"
+                  >
+                    <GitBranch size={15} />
+                    <span>Dependency</span>
+                  </button>
+                </div>
+                <div className="status-strip compact">
+                  <span>{projectionMode === "dependencies" ? "dependency view" : "branch view"}</span>
+                  <span>{branchStructurizr.viewKey}</span>
+                  {branchStructurizr.hiddenRelationshipCount > 0 ? (
+                    <span>{branchStructurizr.hiddenRelationshipCount} hidden</span>
+                  ) : null}
+                </div>
+                <div className="zoom-control">
+                  <ZoomOut size={15} />
+                  <input
+                    aria-label="Structurizr zoom"
+                    max={220}
+                    min={25}
+                    onChange={(event) => setStructurizrZoom(Number(event.target.value))}
+                    step={5}
+                    type="range"
+                    value={structurizrZoom === 0 ? 100 : structurizrZoom}
+                  />
+                  <ZoomIn size={15} />
+                  <button onClick={() => setStructurizrZoom(0)} title="Fit diagram" type="button">
+                    Fit
+                  </button>
+                  <span>{structurizrZoom === 0 ? "Fit" : `${structurizrZoom}%`}</span>
+                </div>
+              </div>
+            )}
           </div>
 
           {activeLevel === "features" ? (
@@ -976,6 +1055,8 @@ function DesignBrowser({
             <StructurizrFrame
               workspace={branchStructurizr.workspace}
               viewKey={branchStructurizr.viewKey}
+              zoomPercent={structurizrZoom}
+              onZoomChange={setStructurizrZoom}
               onOpen={(entity) => {
                 onSelect(entity);
 
@@ -1015,8 +1096,20 @@ function DesignBrowser({
 
         <SourcePanel
           diagram={sourceDiagram}
-          source={activeLevel === "features" ? sourceDiagram?.source ?? "" : payload.structurizrDsl}
-          sourceKind={activeLevel === "features" ? activeUmlArtifact?.artifactLabel ?? "Mermaid UML" : "Structurizr DSL"}
+          source={
+            activeLevel === "features"
+              ? sourceDiagram?.source ?? ""
+              : projectionMode === "dependencies"
+                ? branchStructurizr.source
+                : payload.structurizrDsl
+          }
+          sourceKind={
+            activeLevel === "features"
+              ? activeUmlArtifact?.artifactLabel ?? "Mermaid UML"
+              : projectionMode === "dependencies"
+                ? "Dependency Projection"
+                : "Structurizr DSL"
+          }
         />
       </section>
 
@@ -1027,7 +1120,7 @@ function DesignBrowser({
         selectedElement={selectedElement}
         selectedRelationship={selectedRelationship}
         branchChildren={branchChildren}
-        branchRelationships={branchRelationships}
+        branchRelationships={visibleBranchRelationships}
         onChange={onChange}
         onError={onError}
         onJumpToFeatures={() => selectLevel("features")}
@@ -1335,14 +1428,29 @@ function buildBranchStructurizrWorkspace(
   activeBranchElement: DesignElement | null,
   rootElement: DesignElement | null,
   fallbackViewKey: string,
-): { workspace: string; viewKey: string } {
-  const viewKey = `AdashiBranch-${activeLevel}-${sanitizeViewKey(activeBranchElement?.externalId ?? "root")}`;
-  const visibleIds = selectStructurizrViewElementIds(payload.designElements, activeLevel, activeBranchElement, rootElement);
+  projectionMode: DesignProjectionMode,
+): StructurizrProjection {
+  const viewKey = `Adashi-${projectionMode}-${activeLevel}-${sanitizeViewKey(activeBranchElement?.externalId ?? "root")}`;
+  const branchIds = selectStructurizrViewElementIds(payload.designElements, activeLevel, activeBranchElement, rootElement);
+  const dependencyProjection =
+    projectionMode === "dependencies" && activeLevel !== "context"
+      ? buildDependencyProjection(payload.designElements, payload.designRelationships, branchIds, activeBranchElement)
+      : null;
+  const visibleIds = dependencyProjection?.visibleIds ?? branchIds;
   const visibleElements = payload.designElements.filter((element) => visibleIds.has(element.externalId));
-  const visibleRelationships = payload.designRelationships.filter(
-    (relationship) => visibleIds.has(relationship.sourceExternalId) && visibleIds.has(relationship.destinationExternalId),
-  );
-  const viewElements = buildViewLayout(visibleElements, activeLevel, activeBranchElement).map((layout) => ({
+  const visibleRelationships =
+    dependencyProjection?.relationships ??
+    payload.designRelationships.filter(
+      (relationship) => visibleIds.has(relationship.sourceExternalId) && visibleIds.has(relationship.destinationExternalId),
+    );
+  const visibleRelationshipIds = new Set(visibleRelationships.map((relationship) => relationship.externalId));
+  const viewElements = buildViewLayout(
+    visibleElements,
+    activeLevel,
+    activeBranchElement,
+    dependencyProjection?.roles ?? new Map(),
+    projectionMode,
+  ).map((layout) => ({
     id: layout.element.externalId,
     relationships: visibleRelationships
       .filter((relationship) => relationship.sourceExternalId === layout.element.externalId)
@@ -1358,6 +1466,8 @@ function buildBranchStructurizrWorkspace(
     activeBranchElement,
     rootElement,
     viewElements,
+    visibleRelationships,
+    projectionMode,
   );
   const workspace: StructurizrWorkspaceJson = {
     id: 1,
@@ -1379,15 +1489,15 @@ function buildBranchStructurizrWorkspace(
         defaultView: view.key,
         styles: {
           elements: [
-            { tag: "Element", fontSize: 16 },
-            { tag: "Person", shape: "Person", background: "#2f6f6d", color: "#ffffff", fontSize: 16 },
-            { tag: "Software System", background: "#335c67", color: "#ffffff", fontSize: 16 },
-            { tag: "Container", background: "#fffaf0", color: "#1f2933", stroke: "#2f6f6d", fontSize: 16 },
-            { tag: "Component", background: "#f8faf7", color: "#1f2933", stroke: "#7fb6ad", fontSize: 16 },
-            { tag: "Database", shape: "Cylinder", background: "#e4b363", color: "#1f2933", fontSize: 16 },
-            { tag: "Placeholder", background: "#f7efe3", color: "#1f2933", stroke: "#c89f5d", fontSize: 16 },
+            { tag: "Element", fontSize: 14 },
+            { tag: "Person", shape: "Person", background: "#2f6f6d", color: "#ffffff", fontSize: 14 },
+            { tag: "Software System", background: "#335c67", color: "#ffffff", fontSize: 14 },
+            { tag: "Container", background: "#fffaf0", color: "#1f2933", stroke: "#2f6f6d", fontSize: 14 },
+            { tag: "Component", background: "#f8faf7", color: "#1f2933", stroke: "#7fb6ad", fontSize: 14 },
+            { tag: "Database", shape: "Cylinder", background: "#e4b363", color: "#1f2933", fontSize: 14 },
+            { tag: "Placeholder", background: "#f7efe3", color: "#1f2933", stroke: "#c89f5d", fontSize: 14 },
           ],
-          relationships: [{ tag: "Relationship", color: "#47615f", fontSize: 14, thickness: 3 }],
+          relationships: [{ tag: "Relationship", color: "#47615f", fontSize: 11, thickness: 2 }],
         },
       },
     },
@@ -1401,7 +1511,146 @@ function buildBranchStructurizrWorkspace(
     workspace.views.containerViews = [view];
   }
 
-  return { workspace: JSON.stringify(workspace), viewKey: view.key };
+  return {
+    workspace: JSON.stringify(workspace),
+    viewKey: view.key,
+    source:
+      projectionMode === "dependencies" && dependencyProjection
+        ? buildDependencyProjectionSource(
+            activeBranchElement,
+            visibleElements,
+            visibleRelationships,
+            dependencyProjection.hiddenRelationshipCount,
+            payload.designElements,
+          )
+        : payload.structurizrDsl,
+    visibleElementIds: visibleIds,
+    visibleRelationshipIds,
+    hiddenRelationshipCount: dependencyProjection?.hiddenRelationshipCount ?? 0,
+  };
+}
+
+type DependencyNodeRole = "incoming" | "core" | "outgoing";
+
+type DependencyProjection = {
+  visibleIds: Set<string>;
+  relationships: DesignRelationship[];
+  roles: Map<string, DependencyNodeRole>;
+  hiddenRelationshipCount: number;
+};
+
+function buildDependencyProjection(
+  elements: DesignElement[],
+  relationships: DesignRelationship[],
+  branchIds: Set<string>,
+  activeBranchElement: DesignElement | null,
+): DependencyProjection {
+  const visibleIds = new Set(branchIds);
+  const roles = new Map<string, DependencyNodeRole>();
+  const branchRelationshipIds = new Set<string>();
+
+  branchIds.forEach((externalId) => roles.set(externalId, "core"));
+
+  relationships.forEach((relationship) => {
+    const sourceInBranch = branchIds.has(relationship.sourceExternalId);
+    const destinationInBranch = branchIds.has(relationship.destinationExternalId);
+
+    if (!sourceInBranch && !destinationInBranch) {
+      return;
+    }
+
+    branchRelationshipIds.add(relationship.externalId);
+
+    if (sourceInBranch && !destinationInBranch) {
+      visibleIds.add(relationship.destinationExternalId);
+      roles.set(relationship.destinationExternalId, "outgoing");
+    }
+
+    if (!sourceInBranch && destinationInBranch) {
+      visibleIds.add(relationship.sourceExternalId);
+      roles.set(relationship.sourceExternalId, roles.get(relationship.sourceExternalId) === "outgoing" ? "outgoing" : "incoming");
+    }
+  });
+
+  const candidates = relationships
+    .filter((relationship) => branchRelationshipIds.has(relationship.externalId))
+    .filter((relationship) => visibleIds.has(relationship.sourceExternalId) && visibleIds.has(relationship.destinationExternalId))
+    .map((relationship) => ({
+      relationship,
+      score: scoreDependencyRelationship(relationship, branchIds, activeBranchElement, elements),
+    }))
+    .sort((left, right) => right.score - left.score || compareRelationshipStable(left.relationship, right.relationship, elements));
+
+  const kept: DesignRelationship[] = [];
+  const endpointCounts = new Map<string, number>();
+  const maxTotalRelationships = 48;
+  const maxRelationshipsPerEndpoint = 8;
+
+  for (const candidate of candidates) {
+    const sourceCount = endpointCounts.get(candidate.relationship.sourceExternalId) ?? 0;
+    const destinationCount = endpointCounts.get(candidate.relationship.destinationExternalId) ?? 0;
+
+    if (
+      kept.length >= maxTotalRelationships ||
+      sourceCount >= maxRelationshipsPerEndpoint ||
+      destinationCount >= maxRelationshipsPerEndpoint
+    ) {
+      continue;
+    }
+
+    kept.push(candidate.relationship);
+    endpointCounts.set(candidate.relationship.sourceExternalId, sourceCount + 1);
+    endpointCounts.set(candidate.relationship.destinationExternalId, destinationCount + 1);
+  }
+
+  return {
+    visibleIds,
+    relationships: kept.sort((left, right) => compareRelationshipStable(left, right, elements)),
+    roles,
+    hiddenRelationshipCount: candidates.length - kept.length,
+  };
+}
+
+function scoreDependencyRelationship(
+  relationship: DesignRelationship,
+  branchIds: Set<string>,
+  activeBranchElement: DesignElement | null,
+  elements: DesignElement[],
+): number {
+  let score = 0;
+  const sourceInBranch = branchIds.has(relationship.sourceExternalId);
+  const destinationInBranch = branchIds.has(relationship.destinationExternalId);
+
+  if (sourceInBranch && destinationInBranch) {
+    score += 40;
+  } else {
+    score += 30;
+  }
+
+  if (
+    activeBranchElement &&
+    (relationship.sourceExternalId === activeBranchElement.externalId ||
+      relationship.destinationExternalId === activeBranchElement.externalId)
+  ) {
+    score += 12;
+  }
+
+  if (relationship.technology.trim()) {
+    score += 6;
+  }
+
+  if (relationship.description.trim()) {
+    score += 4;
+  }
+
+  const source = elements.find((element) => element.externalId === relationship.sourceExternalId);
+  const destination = elements.find((element) => element.externalId === relationship.destinationExternalId);
+
+  if (source?.parentExternalId === destination?.parentExternalId) {
+    score += 3;
+  }
+
+  return score;
 }
 
 function buildStructurizrDisplayModel(
@@ -1461,14 +1710,25 @@ function buildStructurizrView(
   activeBranchElement: DesignElement | null,
   rootElement: DesignElement | null,
   elements: StructurizrViewElementJson[],
+  relationships: DesignRelationship[],
+  projectionMode: DesignProjectionMode,
 ): StructurizrViewJson {
   const view: StructurizrViewJson = {
     key: viewKey,
     description: activeBranchElement
-      ? `${activeBranchElement.name} ${activeLevel} branch view`
+      ? `${activeBranchElement.name} ${activeLevel} ${projectionMode} view`
       : "Adashi branch view",
     softwareSystemId: rootElement?.externalId,
     elements,
+    relationships: relationships.map((relationship) => ({ id: relationship.externalId })),
+    automaticLayout: {
+      implementation: "Dagre",
+      rankDirection: "LeftRight",
+      rankSeparation: projectionMode === "dependencies" ? 220 : 300,
+      nodeSeparation: projectionMode === "dependencies" ? 180 : 240,
+      edgeSeparation: 70,
+      vertices: false,
+    },
   };
 
   if (activeBranchElement?.elementType.toLowerCase() === "container") {
@@ -1483,6 +1743,8 @@ function buildViewLayout(
   elements: DesignElement[],
   activeLevel: DesignLevel,
   activeBranchElement: DesignElement | null,
+  dependencyRoles: Map<string, DependencyNodeRole> = new Map(),
+  projectionMode: DesignProjectionMode = "branch",
 ): Array<{
   element: DesignElement;
   x: number;
@@ -1490,6 +1752,10 @@ function buildViewLayout(
   width: number;
   height: number;
 }> {
+  if (projectionMode === "dependencies" && dependencyRoles.size > 0) {
+    return buildDependencyViewLayout(elements, dependencyRoles, activeBranchElement);
+  }
+
   const people = elements.filter((element) => element.elementType.toLowerCase() === "person");
   const nonPeople = elements.filter((element) => element.elementType.toLowerCase() !== "person");
   const orderedElements = activeLevel === "context" ? [...people, ...nonPeople] : elements;
@@ -1515,6 +1781,141 @@ function buildViewLayout(
   });
 }
 
+function buildDependencyViewLayout(
+  elements: DesignElement[],
+  dependencyRoles: Map<string, DependencyNodeRole>,
+  activeBranchElement: DesignElement | null,
+): Array<{
+  element: DesignElement;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}> {
+  const elementWidth = 360;
+  const elementHeight = 180;
+  const gapX = 160;
+  const gapY = 82;
+  const margin = 80;
+  const roleColumns: Record<DependencyNodeRole, number> = {
+    incoming: 0,
+    core: 1,
+    outgoing: 2,
+  };
+  const roleRows = new Map<DependencyNodeRole, DesignElement[]>();
+
+  elements
+    .slice()
+    .sort((left, right) => compareElementsForDependencyView(left, right, activeBranchElement))
+    .forEach((element) => {
+      const role = dependencyRoles.get(element.externalId) ?? "core";
+      const current = roleRows.get(role) ?? [];
+      roleRows.set(role, [...current, element]);
+    });
+
+  return Array.from(roleRows.entries()).flatMap(([role, roleElements]) =>
+    roleElements.map((element, index) => ({
+      element,
+      x: margin + roleColumns[role] * (elementWidth + gapX),
+      y: margin + index * (elementHeight + gapY),
+      width: elementWidth,
+      height: elementHeight,
+    })),
+  );
+}
+
+function compareElementsForDependencyView(
+  left: DesignElement,
+  right: DesignElement,
+  activeBranchElement: DesignElement | null,
+): number {
+  const leftActive = activeBranchElement?.externalId === left.externalId ? 0 : 1;
+  const rightActive = activeBranchElement?.externalId === right.externalId ? 0 : 1;
+
+  return (
+    leftActive - rightActive ||
+    elementTypeRank(left) - elementTypeRank(right) ||
+    (left.parentExternalId ?? "").localeCompare(right.parentExternalId ?? "") ||
+    left.name.localeCompare(right.name) ||
+    left.externalId.localeCompare(right.externalId)
+  );
+}
+
+function elementTypeRank(element: DesignElement): number {
+  switch (element.elementType.toLowerCase()) {
+    case "person":
+      return 0;
+    case "software system":
+      return 1;
+    case "container":
+      return 2;
+    case "component":
+      return 3;
+    default:
+      return 4;
+  }
+}
+
+function compareRelationshipStable(
+  left: DesignRelationship,
+  right: DesignRelationship,
+  elements: DesignElement[],
+): number {
+  const leftSource = elements.find((element) => element.externalId === left.sourceExternalId);
+  const rightSource = elements.find((element) => element.externalId === right.sourceExternalId);
+  const leftDestination = elements.find((element) => element.externalId === left.destinationExternalId);
+  const rightDestination = elements.find((element) => element.externalId === right.destinationExternalId);
+
+  return (
+    (leftSource?.name ?? left.sourceExternalId).localeCompare(rightSource?.name ?? right.sourceExternalId) ||
+    (leftDestination?.name ?? left.destinationExternalId).localeCompare(
+      rightDestination?.name ?? right.destinationExternalId,
+    ) ||
+    left.description.localeCompare(right.description) ||
+    left.externalId.localeCompare(right.externalId)
+  );
+}
+
+function buildDependencyProjectionSource(
+  activeBranchElement: DesignElement | null,
+  visibleElements: DesignElement[],
+  visibleRelationships: DesignRelationship[],
+  hiddenRelationshipCount: number,
+  allElements: DesignElement[],
+): string {
+  const elementById = new Map(allElements.map((element) => [element.externalId, element]));
+  const lines = [
+    `Dependency View: ${activeBranchElement?.name ?? "Adashi"}`,
+    "",
+    "Visible elements:",
+    ...visibleElements
+      .slice()
+      .sort((left, right) => compareElementsForDependencyView(left, right, activeBranchElement))
+      .map((element) => `- ${element.name} [${element.externalId}] (${element.elementType}) :: ${element.technology || "no technology"}`),
+    "",
+    "Visible relationships:",
+  ];
+
+  if (visibleRelationships.length === 0) {
+    lines.push("- none");
+  } else {
+    visibleRelationships.forEach((relationship) => {
+      const source = elementById.get(relationship.sourceExternalId);
+      const destination = elementById.get(relationship.destinationExternalId);
+      const technology = relationship.technology ? ` (${relationship.technology})` : "";
+      lines.push(
+        `- ${source?.name ?? relationship.sourceExternalId} -> ${destination?.name ?? relationship.destinationExternalId}: ${relationship.description}${technology}`,
+      );
+    });
+  }
+
+  if (hiddenRelationshipCount > 0) {
+    lines.push("", `${hiddenRelationshipCount} lower-priority relationship(s) hidden in this projection.`);
+  }
+
+  return lines.join("\n");
+}
+
 function elementToStructurizrJson(
   element: DesignElement,
   elements: DesignElement[],
@@ -1524,7 +1925,7 @@ function elementToStructurizrJson(
   const value: StructurizrElementJson = {
     id: element.externalId,
     canonicalName: buildCanonicalName(element, elements),
-    description: summarizeDiagramDescription(element.description),
+    description: summarizeDiagramDescription(element.description, 82),
     location: hasTag(element.tags, "External") ? "External" : "Internal",
     name: element.name,
     parentId: element.parentExternalId ?? null,
@@ -1534,11 +1935,11 @@ function elementToStructurizrJson(
         id: relationship.externalId,
         sourceId: relationship.sourceExternalId,
         destinationId: relationship.destinationExternalId,
-        description: summarizeDiagramDescription(relationship.description),
+        description: summarizeDiagramDescription(relationship.description, 58),
         technology: relationship.technology,
-        tags: relationship.tags,
+        tags: mergeStructurizrTags(relationship.tags, ["Relationship"]),
       })),
-    tags: element.tags,
+    tags: buildStructurizrElementTags(element),
     technology: element.technology,
     type: element.elementType,
   };
@@ -1562,23 +1963,38 @@ function buildCanonicalName(element: DesignElement, elements: DesignElement[]): 
     .join("/")}`;
 }
 
-function summarizeDiagramDescription(description: string): string {
+function buildStructurizrElementTags(element: DesignElement): string {
+  return mergeStructurizrTags(element.tags, ["Element", element.elementType]);
+}
+
+function mergeStructurizrTags(tags: string, requiredTags: string[]): string {
+  const values = new Map<string, string>();
+
+  [...requiredTags, ...tags.split(",")]
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+    .forEach((tag) => values.set(tag.toLowerCase(), tag));
+
+  return Array.from(values.values()).join(",");
+}
+
+function summarizeDiagramDescription(description: string, maxLength = 82): string {
   const normalized = description.replace(/\s+/g, " ").trim();
 
-  if (normalized.length <= 110) {
+  if (normalized.length <= maxLength) {
     return normalized;
   }
 
   const sentenceEnd = normalized.search(/[.!?]\s/);
 
-  if (sentenceEnd > 48 && sentenceEnd <= 110) {
+  if (sentenceEnd > 32 && sentenceEnd <= maxLength) {
     return normalized.slice(0, sentenceEnd + 1);
   }
 
-  const clipped = normalized.slice(0, 108);
+  const clipped = normalized.slice(0, Math.max(0, maxLength - 2));
   const wordBoundary = clipped.lastIndexOf(" ");
 
-  return `${clipped.slice(0, wordBoundary > 64 ? wordBoundary : clipped.length).trim()}...`;
+  return `${clipped.slice(0, wordBoundary > maxLength * 0.55 ? wordBoundary : clipped.length).trim()}...`;
 }
 
 function hasTag(tags: string, tag: string): boolean {
@@ -3556,11 +3972,15 @@ function Panel({ title, children }: React.PropsWithChildren<{ title: string }>) 
 function StructurizrFrame({
   workspace,
   viewKey,
+  zoomPercent,
+  onZoomChange,
   onOpen,
   onSelect,
 }: {
   workspace: string;
   viewKey: string;
+  zoomPercent: number;
+  onZoomChange: (zoomPercent: number) => void;
   onOpen?: (entity: { type: DesignEntityType; externalId: string }) => void;
   onSelect?: (externalId: string) => void;
 }) {
@@ -3577,9 +3997,27 @@ function StructurizrFrame({
     );
   }, [viewKey, workspace]);
 
+  const postZoom = React.useCallback(() => {
+    frameRef.current?.contentWindow?.postMessage(
+      zoomPercent === 0
+        ? {
+            type: "adashi:structurizr-fit",
+          }
+        : {
+            type: "adashi:structurizr-zoom",
+            zoomPercent,
+          },
+      "*",
+    );
+  }, [zoomPercent]);
+
   React.useEffect(() => {
     postWorkspace();
   }, [postWorkspace]);
+
+  React.useEffect(() => {
+    postZoom();
+  }, [postZoom]);
 
   React.useEffect(() => {
     function receiveMessage(event: MessageEvent) {
@@ -3600,11 +4038,15 @@ function StructurizrFrame({
         const entityType = event.data.entityType === "relationship" ? "relationship" : "element";
         onOpen?.({ type: entityType, externalId: event.data.id });
       }
+
+      if (event.data.type === "adashi:structurizr-zoom-changed" && typeof event.data.zoomPercent === "number") {
+        onZoomChange(Math.round(event.data.zoomPercent));
+      }
     }
 
     window.addEventListener("message", receiveMessage);
     return () => window.removeEventListener("message", receiveMessage);
-  }, [onOpen, onSelect]);
+  }, [onOpen, onSelect, onZoomChange]);
 
   return (
     <iframe

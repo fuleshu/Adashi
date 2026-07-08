@@ -574,6 +574,61 @@ button {
   padding: 5px 8px;
 }
 
+.viewer-controls {
+  align-items: flex-end;
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+  min-width: 0;
+}
+
+.segmented.compact button {
+  font-size: 12px;
+  min-height: 30px;
+  padding: 0 9px;
+}
+
+.zoom-control {
+  align-items: center;
+  color: #617170;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: auto minmax(110px, 160px) auto auto auto;
+  min-width: 0;
+}
+
+.zoom-control input {
+  accent-color: #2f6f6d;
+  min-width: 0;
+  width: 100%;
+}
+
+.zoom-control button {
+  background: #fffdf8;
+  border: 1px solid #d4cebf;
+  border-radius: 6px;
+  color: #244947;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 760;
+  min-height: 28px;
+  padding: 0 8px;
+}
+
+.zoom-control button:hover {
+  background: #e6f1ed;
+  border-color: #b7cdc6;
+}
+
+.zoom-control span {
+  color: #43514f;
+  font-size: 11px;
+  font-weight: 760;
+  min-width: 36px;
+  text-align: right;
+}
+
 .design-inspector-panel {
   align-content: start;
   display: grid;
