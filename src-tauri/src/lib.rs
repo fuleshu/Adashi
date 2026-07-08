@@ -17,7 +17,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow, WindowEvent};
+use tauri::{Manager, Monitor, PhysicalPosition, PhysicalSize, State, WebviewWindow, WindowEvent};
 
 use crate::design::DesignArtifactTypeRecord;
 use crate::fixed_hooks::FixedHookPrompt;
@@ -32,6 +32,9 @@ struct AppState {
     settings_path: PathBuf,
     settings: Arc<Mutex<AppSettings>>,
 }
+
+const MIN_RESTORED_WINDOW_WIDTH: u32 = 640;
+const MIN_RESTORED_WINDOW_HEIGHT: u32 = 480;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1025,18 +1028,16 @@ fn restore_window(
     window: &WebviewWindow,
     settings: &Arc<Mutex<AppSettings>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let window_settings = settings
+    let saved = settings
         .lock()
         .map_err(|_| "Settings lock was poisoned")?
         .window
         .clone();
+    let restored = restored_window_settings(&saved, &window.available_monitors()?);
 
-    window.set_size(PhysicalSize::new(
-        window_settings.width,
-        window_settings.height,
-    ))?;
+    window.set_size(PhysicalSize::new(restored.width, restored.height))?;
 
-    if let (Some(x), Some(y)) = (window_settings.x, window_settings.y) {
+    if let (Some(x), Some(y)) = (restored.x, restored.y) {
         window.set_position(PhysicalPosition::new(x, y))?;
     }
 
@@ -1062,7 +1063,18 @@ fn save_window_state(
     settings_path: &PathBuf,
     settings: &Arc<Mutex<AppSettings>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let size = window.outer_size()?;
+    if window.is_minimized().unwrap_or(false)
+        || window.is_maximized().unwrap_or(false)
+        || window.is_fullscreen().unwrap_or(false)
+    {
+        return Ok(());
+    }
+
+    let size = window.inner_size()?;
+    if size.width < MIN_RESTORED_WINDOW_WIDTH || size.height < MIN_RESTORED_WINDOW_HEIGHT {
+        return Ok(());
+    }
+
     let position = window.outer_position().ok();
 
     let mut app_settings = settings.lock().map_err(|_| "Settings lock was poisoned")?;
@@ -1074,6 +1086,84 @@ fn save_window_state(
     };
     settings::save(settings_path, &app_settings)?;
     Ok(())
+}
+
+fn restored_window_settings(saved: &WindowSettings, monitors: &[Monitor]) -> WindowSettings {
+    let Some(monitor) = best_window_monitor(saved, monitors) else {
+        return WindowSettings {
+            width: saved.width.max(MIN_RESTORED_WINDOW_WIDTH),
+            height: saved.height.max(MIN_RESTORED_WINDOW_HEIGHT),
+            x: saved.x,
+            y: saved.y,
+        };
+    };
+
+    let monitor_position = monitor.position();
+    let monitor_size = monitor.size();
+    let monitor_left = i64::from(monitor_position.x);
+    let monitor_top = i64::from(monitor_position.y);
+    let monitor_width = monitor_size.width.max(MIN_RESTORED_WINDOW_WIDTH);
+    let monitor_height = monitor_size.height.max(MIN_RESTORED_WINDOW_HEIGHT);
+    let width = saved.width.clamp(MIN_RESTORED_WINDOW_WIDTH, monitor_width);
+    let height = saved
+        .height
+        .clamp(MIN_RESTORED_WINDOW_HEIGHT, monitor_height);
+
+    let x = saved.x.map(|x| {
+        let max_x = monitor_left + i64::from(monitor_width.saturating_sub(width));
+        i64::from(x).clamp(monitor_left, max_x) as i32
+    });
+    let y = saved.y.map(|y| {
+        let max_y = monitor_top + i64::from(monitor_height.saturating_sub(height));
+        i64::from(y).clamp(monitor_top, max_y) as i32
+    });
+
+    WindowSettings {
+        width,
+        height,
+        x,
+        y,
+    }
+}
+
+fn best_window_monitor<'a>(
+    window: &WindowSettings,
+    monitors: &'a [Monitor],
+) -> Option<&'a Monitor> {
+    monitors
+        .iter()
+        .filter_map(|monitor| {
+            let intersection = window_monitor_intersection_area(window, monitor);
+            (intersection > 0).then_some((intersection, monitor))
+        })
+        .max_by_key(|(intersection, _)| *intersection)
+        .map(|(_, monitor)| monitor)
+        .or_else(|| monitors.first())
+}
+
+fn window_monitor_intersection_area(window: &WindowSettings, monitor: &Monitor) -> i64 {
+    let (Some(x), Some(y)) = (window.x, window.y) else {
+        return 0;
+    };
+
+    let window_left = i64::from(x);
+    let window_top = i64::from(y);
+    let window_right = window_left + i64::from(window.width);
+    let window_bottom = window_top + i64::from(window.height);
+    let monitor_position = monitor.position();
+    let monitor_size = monitor.size();
+    let monitor_left = i64::from(monitor_position.x);
+    let monitor_top = i64::from(monitor_position.y);
+    let monitor_right = monitor_left + i64::from(monitor_size.width);
+    let monitor_bottom = monitor_top + i64::from(monitor_size.height);
+
+    let intersection_width = window_right.min(monitor_right) - window_left.max(monitor_left);
+    let intersection_height = window_bottom.min(monitor_bottom) - window_top.max(monitor_top);
+    if intersection_width < 80 || intersection_height < 80 {
+        return 0;
+    }
+
+    intersection_width * intersection_height
 }
 
 fn load_diagrams(db: &Connection) -> Result<Vec<DesignDiagram>, String> {
