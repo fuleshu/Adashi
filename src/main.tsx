@@ -1727,7 +1727,7 @@ function buildStructurizrView(
       rankSeparation: projectionMode === "dependencies" ? 220 : 300,
       nodeSeparation: projectionMode === "dependencies" ? 180 : 240,
       edgeSeparation: 70,
-      vertices: false,
+      vertices: true,
     },
   };
 
