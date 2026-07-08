@@ -300,6 +300,17 @@ type Rule = {
   prompt: string;
 };
 
+type RuleTemplate = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  intend: RuleIntend;
+  hook: RuleHook;
+  prompt: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type FixedHookPrompt = {
   key: string;
   title: string;
@@ -330,6 +341,7 @@ type AppSettings = {
   };
   projects: ProjectSettings[];
   lastActiveProjectId?: string | null;
+  ruleTemplates: RuleTemplate[];
 };
 
 type DashboardPayload = {
@@ -353,6 +365,7 @@ type DashboardPayload = {
   qaJobs: QaJob[];
   qaRuns: QaRun[];
   rules: Rule[];
+  ruleTemplates: RuleTemplate[];
   fixedHookPrompts: FixedHookPrompt[];
   memory: ProjectMemory;
 };
@@ -590,12 +603,14 @@ function App() {
           <RulesView
             projectId={payload.projectId}
             rules={payload.rules}
+            ruleTemplates={settings.ruleTemplates}
             onChange={(updatedPayload) => {
               setPayload((currentPayload) =>
                 currentPayload ? mergeDashboardPayload(currentPayload, updatedPayload) : updatedPayload,
               );
             }}
             onError={setError}
+            onSettingsChange={setSettings}
           />
         ) : activeView === "memory" ? (
           <MemoryView
@@ -709,11 +724,34 @@ function mergeDashboardPayload(current: DashboardPayload, next: DashboardPayload
     qaJobs: reconcileById(current.qaJobs, next.qaJobs),
     qaRuns: reconcileById(current.qaRuns, next.qaRuns),
     rules: reconcileById(current.rules, next.rules),
+    ruleTemplates: reconcileByStringId(current.ruleTemplates, next.ruleTemplates),
     fixedHookPrompts: reconcileByKey(current.fixedHookPrompts, next.fixedHookPrompts),
   };
 }
 
 function reconcileById<T extends { id: number }>(current: T[], next: T[]): T[] {
+  const currentById = new Map(current.map((item) => [item.id, item]));
+  let changed = current.length !== next.length;
+
+  const merged = next.map((nextItem, index) => {
+    const currentItem = currentById.get(nextItem.id);
+
+    if (current[index]?.id !== nextItem.id) {
+      changed = true;
+    }
+
+    if (currentItem && shallowEqualRecord(currentItem, nextItem)) {
+      return currentItem;
+    }
+
+    changed = true;
+    return nextItem;
+  });
+
+  return changed ? merged : current;
+}
+
+function reconcileByStringId<T extends { id: string }>(current: T[], next: T[]): T[] {
   const currentById = new Map(current.map((item) => [item.id, item]));
   let changed = current.length !== next.length;
 
@@ -3604,15 +3642,20 @@ function splitCommaList(value: string): string[] {
 function RulesView({
   projectId,
   rules,
+  ruleTemplates,
   onChange,
   onError,
+  onSettingsChange,
 }: {
   projectId: string;
   rules: Rule[];
+  ruleTemplates: RuleTemplate[];
   onChange: (payload: DashboardPayload) => void;
   onError: (message: string) => void;
+  onSettingsChange: (settings: AppSettings) => void;
 }) {
   const [selectedRuleId, setSelectedRuleId] = React.useState<number | null>(rules[0]?.id ?? null);
+  const [selectedTemplateId, setSelectedTemplateId] = React.useState<string>(ruleTemplates[0]?.id ?? "");
 
   React.useEffect(() => {
     if (rules.length === 0) {
@@ -3625,7 +3668,19 @@ function RulesView({
     }
   }, [rules, selectedRuleId]);
 
+  React.useEffect(() => {
+    if (ruleTemplates.length === 0) {
+      setSelectedTemplateId("");
+      return;
+    }
+
+    if (!selectedTemplateId || !ruleTemplates.some((template) => template.id === selectedTemplateId)) {
+      setSelectedTemplateId(ruleTemplates[0].id);
+    }
+  }, [ruleTemplates, selectedTemplateId]);
+
   const selectedRule = rules.find((rule) => rule.id === selectedRuleId) ?? null;
+  const selectedTemplate = ruleTemplates.find((template) => template.id === selectedTemplateId) ?? null;
 
   function addRule() {
     invoke<DashboardPayload>("create_rule", {
@@ -3682,6 +3737,60 @@ function RulesView({
       .catch((reason) => onError(String(reason)));
   }
 
+  function saveSelectedRuleAsTemplate() {
+    if (!selectedRule) {
+      return;
+    }
+
+    invoke<AppSettings>("save_rule_template", {
+      input: {
+        projectId,
+        ruleId: selectedRule.id,
+      },
+    })
+      .then((updatedSettings) => {
+        const newestTemplate = updatedSettings.ruleTemplates[updatedSettings.ruleTemplates.length - 1] ?? null;
+        setSelectedTemplateId(newestTemplate?.id ?? "");
+        onSettingsChange(updatedSettings);
+      })
+      .catch((reason) => onError(String(reason)));
+  }
+
+  function createRuleFromSelectedTemplate() {
+    if (!selectedTemplate) {
+      return;
+    }
+
+    invoke<DashboardPayload>("create_rule_from_template", {
+      input: {
+        projectId,
+        templateId: selectedTemplate.id,
+      },
+    })
+      .then((updatedPayload) => {
+        const newestRule = updatedPayload.rules.reduce<Rule | null>(
+          (newest, rule) => (!newest || rule.id > newest.id ? rule : newest),
+          null,
+        );
+        setSelectedRuleId(newestRule?.id ?? null);
+        onChange(updatedPayload);
+      })
+      .catch((reason) => onError(String(reason)));
+  }
+
+  function removeSelectedTemplate() {
+    if (!selectedTemplate) {
+      return;
+    }
+
+    invoke<AppSettings>("delete_rule_template", { templateId: selectedTemplate.id })
+      .then((updatedSettings) => {
+        setSelectedTemplateId(updatedSettings.ruleTemplates[0]?.id ?? "");
+        onSettingsChange(updatedSettings);
+      })
+      .catch((reason) => onError(String(reason)));
+  }
+
   return (
     <section className="rules-grid">
       <section className="rules-list-panel">
@@ -3712,6 +3821,52 @@ function RulesView({
             ))
           )}
         </div>
+
+        <section className="rule-template-panel">
+          <div className="rule-template-heading">
+            <h4>Templates</h4>
+            <button disabled={!selectedRule} onClick={saveSelectedRuleAsTemplate} title="Save selected rule as template" type="button">
+              <Wand2 size={16} />
+              Save
+            </button>
+          </div>
+          <select
+            disabled={ruleTemplates.length === 0}
+            value={selectedTemplateId}
+            onChange={(event) => setSelectedTemplateId(event.target.value)}
+          >
+            {ruleTemplates.length === 0 ? (
+              <option value="">No templates</option>
+            ) : (
+              ruleTemplates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name}
+                </option>
+              ))
+            )}
+          </select>
+          <div className="rule-template-actions">
+            <button disabled={!selectedTemplate} onClick={createRuleFromSelectedTemplate} title="Create rule from selected template" type="button">
+              <Plus size={16} />
+              Create
+            </button>
+            <button
+              className="danger-icon-button"
+              disabled={!selectedTemplate}
+              onClick={removeSelectedTemplate}
+              title="Delete selected template"
+              type="button"
+            >
+              <Trash2 size={16} />
+            </button>
+          </div>
+          {selectedTemplate ? (
+            <div className="rule-template-meta">
+              <span>{selectedTemplate.intend}</span>
+              <code>{selectedTemplate.hook}</code>
+            </div>
+          ) : null}
+        </section>
       </section>
 
       <section className="rules-editor-panel">

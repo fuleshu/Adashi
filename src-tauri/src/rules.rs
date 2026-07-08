@@ -1,6 +1,8 @@
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
+use crate::settings::RuleTemplate;
+
 pub const INTENDS: &[&str] = &["general", "design", "implementation"];
 pub const HOOKS: &[&str] = &["run.start", "task.start", "task.end", "run.end"];
 
@@ -84,6 +86,29 @@ pub fn load_rules(db: &Connection) -> Result<Vec<Rule>, String> {
         .map_err(|err| err.to_string())
 }
 
+pub fn load_rule(db: &Connection, rule_id: i64) -> Result<Rule, String> {
+    db.query_row(
+        "SELECT id, name, enabled, intend, hook, prompt
+         FROM rules
+         WHERE id = ?1",
+        params![rule_id],
+        |row| {
+            Ok(Rule {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                enabled: row.get::<_, i64>(2)? != 0,
+                intend: row.get(3)?,
+                hook: row.get(4)?,
+                prompt: row.get(5)?,
+            })
+        },
+    )
+    .map_err(|err| match err {
+        rusqlite::Error::QueryReturnedNoRows => format!("Unknown rule id: {rule_id}"),
+        _ => err.to_string(),
+    })
+}
+
 pub fn load_rule_injections(
     db: &Connection,
     intend: &str,
@@ -140,6 +165,24 @@ pub fn create_rule(db: &Connection, project_id: i64, input: NewRule) -> Result<i
     .map_err(|err| err.to_string())?;
 
     Ok(db.last_insert_rowid())
+}
+
+pub fn create_rule_from_template(
+    db: &Connection,
+    project_id: i64,
+    template: &RuleTemplate,
+) -> Result<i64, String> {
+    create_rule(
+        db,
+        project_id,
+        NewRule {
+            name: template.name.clone(),
+            enabled: template.enabled,
+            intend: template.intend.clone(),
+            hook: template.hook.clone(),
+            prompt: template.prompt.clone(),
+        },
+    )
 }
 
 pub fn update_rule(db: &Connection, input: UpdateRule) -> Result<(), String> {
@@ -210,5 +253,48 @@ fn validate_hook(hook: &str) -> Result<(), String> {
             "Invalid hook '{hook}'. Expected one of: {}",
             HOOKS.join(", ")
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_rule_from_template_inserts_normal_project_rule() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE rules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                name TEXT NOT NULL DEFAULT '',
+                enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+                intend TEXT NOT NULL CHECK(intend IN ('general', 'design', 'implementation')),
+                hook TEXT NOT NULL CHECK(hook IN ('run.start', 'task.start', 'task.end', 'run.end')),
+                prompt TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );",
+        )
+        .unwrap();
+        let template = RuleTemplate {
+            id: "template-1".to_string(),
+            name: "Implementation Hook".to_string(),
+            enabled: false,
+            intend: "implementation".to_string(),
+            hook: "run.start".to_string(),
+            prompt: "Follow the design.".to_string(),
+            created_at: "1".to_string(),
+            updated_at: "1".to_string(),
+        };
+
+        let rule_id = create_rule_from_template(&db, 7, &template).unwrap();
+        let rule = load_rule(&db, rule_id).unwrap();
+
+        assert_eq!(rule.name, template.name);
+        assert_eq!(rule.enabled, template.enabled);
+        assert_eq!(rule.intend, template.intend);
+        assert_eq!(rule.hook, template.hook);
+        assert_eq!(rule.prompt, template.prompt);
     }
 }

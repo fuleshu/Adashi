@@ -24,7 +24,9 @@ use crate::fixed_hooks::FixedHookPrompt;
 use crate::memory::ProjectMemory;
 use crate::qa::{NewQaJob, QaDesignLinkInput, QaJob, QaJobQuery, QaRun, UpdateQaJob};
 use crate::rules::{NewRule, Rule, UpdateRule};
-use crate::settings::{AppSettings, ProjectSettings, WindowSettings};
+use crate::settings::{
+    AppSettings, ProjectSettings, RuleTemplate, RuleTemplateDraft, WindowSettings,
+};
 use crate::state as project_state;
 use crate::tasks::{FinishTask, NewTask, Task, TaskDesignSpecificationLinkInput, UpdateTask};
 
@@ -59,6 +61,7 @@ struct DashboardPayload {
     qa_jobs: Vec<QaJob>,
     qa_runs: Vec<QaRun>,
     rules: Vec<Rule>,
+    rule_templates: Vec<RuleTemplate>,
     fixed_hook_prompts: Vec<FixedHookPrompt>,
     memory: ProjectMemory,
 }
@@ -144,12 +147,13 @@ fn get_dashboard(
 ) -> Result<DashboardPayload, String> {
     let project = resolve_project(&state, project_id.as_deref())?;
     let db = open_project_database(&project).map_err(|err| err.to_string())?;
-    load_dashboard_payload(project, &db)
+    load_dashboard_payload(project, &db, &state)
 }
 
 fn load_dashboard_payload(
     project: ProjectSettings,
     db: &Connection,
+    state: &AppState,
 ) -> Result<DashboardPayload, String> {
     let workspace = db
         .query_row(
@@ -195,9 +199,18 @@ fn load_dashboard_payload(
         qa_jobs: qa::load_jobs(db, project_row_id, None)?,
         qa_runs: qa::load_runs(db, project_row_id, Some(20))?,
         rules: rules::load_rules(db)?,
+        rule_templates: load_rule_templates(state)?,
         fixed_hook_prompts: fixed_hooks::load_fixed_hook_prompts(db, project_row_id)?,
         memory: memory::load_memory(db, project_row_id)?,
     })
+}
+
+fn load_rule_templates(state: &AppState) -> Result<Vec<RuleTemplate>, String> {
+    state
+        .settings
+        .lock()
+        .map(|settings| settings.rule_templates.clone())
+        .map_err(|_| "Settings lock was poisoned".to_string())
 }
 
 #[derive(Serialize)]
@@ -339,6 +352,20 @@ struct UpdateRuleRequest {
     intend: String,
     hook: String,
     prompt: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveRuleTemplateRequest {
+    project_id: Option<String>,
+    rule_id: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateRuleFromTemplateRequest {
+    project_id: Option<String>,
+    template_id: String,
 }
 
 #[derive(Deserialize)]
@@ -488,7 +515,7 @@ fn create_rule(
     )?;
     project_state::bump_project_revision(&db, project_row_id)?;
 
-    load_dashboard_payload(project, &db)
+    load_dashboard_payload(project, &db, &state)
 }
 
 #[tauri::command]
@@ -512,7 +539,7 @@ fn update_rule(
     )?;
     project_state::bump_project_revision(&db, load_project_row_id(&db)?)?;
 
-    load_dashboard_payload(project, &db)
+    load_dashboard_payload(project, &db, &state)
 }
 
 #[tauri::command]
@@ -526,7 +553,72 @@ fn delete_rule(
     let project_row_id = load_project_row_id(&db)?;
     rules::delete_rule(&db, rule_id)?;
     project_state::bump_project_revision(&db, project_row_id)?;
-    load_dashboard_payload(project, &db)
+    load_dashboard_payload(project, &db, &state)
+}
+
+#[tauri::command]
+fn save_rule_template(
+    input: SaveRuleTemplateRequest,
+    state: State<'_, AppState>,
+) -> Result<AppSettings, String> {
+    let project = resolve_project(&state, input.project_id.as_deref())?;
+    let db = open_project_database(&project).map_err(|err| err.to_string())?;
+    let rule = rules::load_rule(&db, input.rule_id)?;
+    let mut settings = state
+        .settings
+        .lock()
+        .map_err(|_| "Settings lock was poisoned".to_string())?;
+
+    settings::save_rule_template(
+        &mut settings,
+        RuleTemplateDraft {
+            name: rule.name,
+            enabled: rule.enabled,
+            intend: rule.intend,
+            hook: rule.hook,
+            prompt: rule.prompt,
+        },
+    )?;
+    settings::save(&state.settings_path, &settings).map_err(|err| err.to_string())?;
+    Ok(settings.clone())
+}
+
+#[tauri::command]
+fn create_rule_from_template(
+    input: CreateRuleFromTemplateRequest,
+    state: State<'_, AppState>,
+) -> Result<DashboardPayload, String> {
+    let project = resolve_project(&state, input.project_id.as_deref())?;
+    let template = state
+        .settings
+        .lock()
+        .map_err(|_| "Settings lock was poisoned".to_string())?
+        .rule_templates
+        .iter()
+        .find(|template| template.id == input.template_id)
+        .cloned()
+        .ok_or_else(|| format!("Unknown rule template id: {}", input.template_id))?;
+    let db = open_project_database(&project).map_err(|err| err.to_string())?;
+    let project_row_id = load_project_row_id(&db)?;
+
+    rules::create_rule_from_template(&db, project_row_id, &template)?;
+    project_state::bump_project_revision(&db, project_row_id)?;
+    load_dashboard_payload(project, &db, &state)
+}
+
+#[tauri::command]
+fn delete_rule_template(
+    template_id: String,
+    state: State<'_, AppState>,
+) -> Result<AppSettings, String> {
+    let mut settings = state
+        .settings
+        .lock()
+        .map_err(|_| "Settings lock was poisoned".to_string())?;
+
+    settings::delete_rule_template(&mut settings, &template_id)?;
+    settings::save(&state.settings_path, &settings).map_err(|err| err.to_string())?;
+    Ok(settings.clone())
 }
 
 #[tauri::command]
@@ -539,7 +631,7 @@ fn update_memory_rule(
     let project_row_id = load_project_row_id(&db)?;
     memory::update_memory_rule(&db, project_row_id, input.rule)?;
     project_state::bump_project_revision(&db, project_row_id)?;
-    load_dashboard_payload(project, &db)
+    load_dashboard_payload(project, &db, &state)
 }
 
 #[tauri::command]
@@ -552,7 +644,7 @@ fn update_memory(
     let project_row_id = load_project_row_id(&db)?;
     memory::update_memory(&db, project_row_id, input.memory)?;
     project_state::bump_project_revision(&db, project_row_id)?;
-    load_dashboard_payload(project, &db)
+    load_dashboard_payload(project, &db, &state)
 }
 
 #[tauri::command]
@@ -565,7 +657,7 @@ fn update_fixed_hook_prompt(
     let project_row_id = load_project_row_id(&db)?;
     fixed_hooks::update_fixed_hook_prompt(&db, project_row_id, input.key, input.prompt)?;
     project_state::bump_project_revision(&db, project_row_id)?;
-    load_dashboard_payload(project, &db)
+    load_dashboard_payload(project, &db, &state)
 }
 
 #[tauri::command]
@@ -613,7 +705,7 @@ fn update_design_element(
         input.tags.trim(),
     )?;
     project_state::bump_project_revision(&db, project_row_id)?;
-    load_dashboard_payload(project, &db)
+    load_dashboard_payload(project, &db, &state)
 }
 
 #[tauri::command]
@@ -662,7 +754,7 @@ fn update_design_relationship(
         input.tags.trim(),
     )?;
     project_state::bump_project_revision(&db, project_row_id)?;
-    load_dashboard_payload(project, &db)
+    load_dashboard_payload(project, &db, &state)
 }
 
 #[tauri::command]
@@ -723,7 +815,7 @@ fn create_design_relationship(
         input.tags.trim(),
     )?;
     project_state::bump_project_revision(&db, project_row_id)?;
-    load_dashboard_payload(project, &db)
+    load_dashboard_payload(project, &db, &state)
 }
 
 #[tauri::command]
@@ -744,7 +836,7 @@ fn create_task(
         },
     )?;
     project_state::bump_project_revision(&db, project_row_id)?;
-    load_dashboard_payload(project, &db)
+    load_dashboard_payload(project, &db, &state)
 }
 
 #[tauri::command]
@@ -767,7 +859,7 @@ fn update_task(
         },
     )?;
     project_state::bump_project_revision(&db, project_row_id)?;
-    load_dashboard_payload(project, &db)
+    load_dashboard_payload(project, &db, &state)
 }
 
 #[tauri::command]
@@ -789,7 +881,7 @@ fn finish_task(
         },
     )?;
     project_state::bump_project_revision(&db, project_row_id)?;
-    load_dashboard_payload(project, &db)
+    load_dashboard_payload(project, &db, &state)
 }
 
 #[tauri::command]
@@ -803,7 +895,7 @@ fn confirm_task(
     let project_row_id = load_project_row_id(&db)?;
     tasks::confirm_task(&db, project_row_id, task_id)?;
     project_state::bump_project_revision(&db, project_row_id)?;
-    load_dashboard_payload(project, &db)
+    load_dashboard_payload(project, &db, &state)
 }
 
 #[tauri::command]
@@ -817,7 +909,7 @@ fn delete_task(
     let project_row_id = load_project_row_id(&db)?;
     tasks::delete_task(&db, project_row_id, task_id)?;
     project_state::bump_project_revision(&db, project_row_id)?;
-    load_dashboard_payload(project, &db)
+    load_dashboard_payload(project, &db, &state)
 }
 
 #[tauri::command]
@@ -846,7 +938,7 @@ fn create_qa_job(
         },
     )?;
     project_state::bump_project_revision(&db, project_row_id)?;
-    load_dashboard_payload(project, &db)
+    load_dashboard_payload(project, &db, &state)
 }
 
 #[tauri::command]
@@ -875,7 +967,7 @@ fn update_qa_job(
         },
     )?;
     project_state::bump_project_revision(&db, project_row_id)?;
-    load_dashboard_payload(project, &db)
+    load_dashboard_payload(project, &db, &state)
 }
 
 #[tauri::command]
@@ -889,7 +981,7 @@ fn delete_qa_job(
     let project_row_id = load_project_row_id(&db)?;
     qa::delete_job(&db, project_row_id, qa_job_id)?;
     project_state::bump_project_revision(&db, project_row_id)?;
-    load_dashboard_payload(project, &db)
+    load_dashboard_payload(project, &db, &state)
 }
 
 #[tauri::command]
@@ -908,7 +1000,7 @@ fn run_qa_jobs(
         input.trigger_source.as_deref().unwrap_or("dashboard"),
     )?;
     project_state::bump_project_revision(&db, project_row_id)?;
-    load_dashboard_payload(project, &db)
+    load_dashboard_payload(project, &db, &state)
 }
 
 pub fn run_mcp() -> Result<(), Box<dyn std::error::Error>> {
@@ -940,9 +1032,11 @@ pub fn run() {
             confirm_task,
             create_qa_job,
             create_rule,
+            create_rule_from_template,
             create_task,
             delete_qa_job,
             delete_rule,
+            delete_rule_template,
             create_design_relationship,
             delete_project,
             delete_task,
@@ -951,6 +1045,7 @@ pub fn run() {
             get_dashboard,
             get_project_revision,
             set_active_project,
+            save_rule_template,
             update_design_element,
             update_design_relationship,
             update_fixed_hook_prompt,
