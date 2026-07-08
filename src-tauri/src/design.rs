@@ -1,5 +1,5 @@
 use crate::state;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -668,8 +668,217 @@ fn apply_change(db: &Connection, workspace_id: i64, change: &DesignChange) -> Re
             )
             .map_err(|err| err.to_string())?;
         }
+        "delete_element" => {
+            let external_id = required(change.external_id.as_deref(), "externalId")?;
+            delete_element_subtree(db, workspace_id, external_id.trim())?;
+        }
+        "delete_relationship" => {
+            let external_id = required(change.external_id.as_deref(), "externalId")?;
+            delete_relationship(db, workspace_id, external_id.trim(), true)?;
+        }
+        "delete_uml" => {
+            let key = required(change.key.as_deref(), "key")?;
+            delete_uml_artifact(db, workspace_id, key.trim(), true)?;
+        }
+        "delete_binding" => {
+            let design_external_id =
+                required(change.design_external_id.as_deref(), "designExternalId")?;
+            let target_type = required(change.target_type.as_deref(), "targetType")?;
+            let target = required(change.target.as_deref(), "target")?;
+            delete_binding(
+                db,
+                workspace_id,
+                design_external_id.trim(),
+                target_type.trim(),
+                target.trim(),
+            )?;
+        }
         _ => return Err(format!("Unknown design save op: {}", change.op)),
     }
+
+    Ok(())
+}
+
+fn delete_element_subtree(
+    db: &Connection,
+    workspace_id: i64,
+    external_id: &str,
+) -> Result<(), String> {
+    let elements = load_elements(db, workspace_id)?;
+    if !elements
+        .iter()
+        .any(|element| element.external_id == external_id)
+    {
+        return Err(format!("Cannot delete unknown C4 element '{external_id}'."));
+    }
+
+    let element_ids = collect_descendants(&elements, external_id, None);
+    let relationships = load_relationships(db, workspace_id)?;
+    let relationship_ids = relationships
+        .iter()
+        .filter(|relationship| {
+            element_ids.contains(&relationship.source_external_id)
+                || element_ids.contains(&relationship.destination_external_id)
+        })
+        .map(|relationship| relationship.external_id.clone())
+        .collect::<Vec<_>>();
+
+    for relationship_id in relationship_ids {
+        delete_relationship(db, workspace_id, &relationship_id, false)?;
+    }
+
+    let element_ids = element_ids.into_iter().collect::<Vec<_>>();
+    for element_id in &element_ids {
+        delete_attached_uml_artifacts(db, workspace_id, element_id)?;
+        delete_bindings_for_design_id(db, workspace_id, element_id)?;
+    }
+
+    for element_id in element_ids {
+        db.execute(
+            "DELETE FROM c4_elements
+             WHERE workspace_id = ?1 AND external_id = ?2",
+            params![workspace_id, element_id],
+        )
+        .map_err(|err| err.to_string())?;
+    }
+
+    Ok(())
+}
+
+fn delete_relationship(
+    db: &Connection,
+    workspace_id: i64,
+    external_id: &str,
+    require_existing: bool,
+) -> Result<(), String> {
+    let deleted = db
+        .execute(
+            "DELETE FROM c4_relationships
+             WHERE workspace_id = ?1 AND external_id = ?2",
+            params![workspace_id, external_id],
+        )
+        .map_err(|err| err.to_string())?;
+    if require_existing && deleted == 0 {
+        return Err(format!(
+            "Cannot delete unknown C4 relationship '{external_id}'."
+        ));
+    }
+
+    delete_attached_uml_artifacts(db, workspace_id, external_id)?;
+    delete_bindings_for_design_id(db, workspace_id, external_id)?;
+
+    Ok(())
+}
+
+fn delete_uml_artifact(
+    db: &Connection,
+    workspace_id: i64,
+    key: &str,
+    require_existing: bool,
+) -> Result<(), String> {
+    let kind = db
+        .query_row(
+            "SELECT kind
+             FROM diagrams
+             WHERE workspace_id = ?1 AND key = ?2",
+            params![workspace_id, key],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|err| err.to_string())?;
+
+    let Some(kind) = kind else {
+        if require_existing {
+            return Err(format!("Cannot delete unknown UML artifact '{key}'."));
+        }
+        return Ok(());
+    };
+
+    if kind == "structurizr" {
+        return Err(format!(
+            "Cannot delete generated Structurizr artifact '{key}' through delete_uml."
+        ));
+    }
+
+    db.execute(
+        "DELETE FROM diagrams
+         WHERE workspace_id = ?1 AND key = ?2",
+        params![workspace_id, key],
+    )
+    .map_err(|err| err.to_string())?;
+    delete_bindings_for_design_id(db, workspace_id, key)?;
+
+    Ok(())
+}
+
+fn delete_binding(
+    db: &Connection,
+    workspace_id: i64,
+    design_external_id: &str,
+    target_type: &str,
+    target: &str,
+) -> Result<(), String> {
+    let deleted = db
+        .execute(
+            "DELETE FROM design_bindings
+             WHERE workspace_id = ?1
+                AND design_external_id = ?2
+                AND target_type = ?3
+                AND target = ?4",
+            params![workspace_id, design_external_id, target_type, target],
+        )
+        .map_err(|err| err.to_string())?;
+    if deleted == 0 {
+        return Err(format!(
+            "Cannot delete unknown binding '{design_external_id}' -> {target_type} '{target}'."
+        ));
+    }
+
+    Ok(())
+}
+
+fn delete_attached_uml_artifacts(
+    db: &Connection,
+    workspace_id: i64,
+    design_external_id: &str,
+) -> Result<(), String> {
+    let keys = {
+        let mut statement = db
+            .prepare(
+                "SELECT key
+                 FROM diagrams
+                 WHERE workspace_id = ?1
+                    AND kind != 'structurizr'
+                    AND attached_to_external_id = ?2",
+            )
+            .map_err(|err| err.to_string())?;
+        let rows = statement
+            .query_map(params![workspace_id, design_external_id], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|err| err.to_string())?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|err| err.to_string())?
+    };
+
+    for key in keys {
+        delete_uml_artifact(db, workspace_id, &key, false)?;
+    }
+
+    Ok(())
+}
+
+fn delete_bindings_for_design_id(
+    db: &Connection,
+    workspace_id: i64,
+    design_external_id: &str,
+) -> Result<(), String> {
+    db.execute(
+        "DELETE FROM design_bindings
+         WHERE workspace_id = ?1 AND design_external_id = ?2",
+        params![workspace_id, design_external_id],
+    )
+    .map_err(|err| err.to_string())?;
 
     Ok(())
 }
@@ -1637,4 +1846,255 @@ struct WorkspaceRecord {
     name: String,
     description: String,
     structurizr_dsl: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::{params, Connection};
+
+    #[test]
+    fn save_changes_deletes_relationship_and_uml_artifact() {
+        let (mut db, project_id, workspace_id) = setup_design_workspace();
+        insert_minimal_design(&db, workspace_id);
+
+        db.execute(
+            "INSERT INTO diagrams(workspace_id, kind, key, title, source, diagram_type, attached_to_external_id, sort_order)
+             VALUES (?1, 'mermaid', 'PlaceholderFlow', 'Placeholder flow', 'flowchart TD\n    A --> B', 'flow', 'placeholder-rel', 2)",
+            params![workspace_id],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO design_bindings(workspace_id, design_external_id, target_type, target)
+             VALUES (?1, 'PlaceholderFlow', 'symbol', 'PlaceholderFlow')",
+            params![workspace_id],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO diagrams(workspace_id, kind, key, title, source, diagram_type, attached_to_external_id, sort_order)
+             VALUES (?1, 'mermaid', 'LegacyState', 'Legacy state', 'stateDiagram-v2\n    [*] --> Old', 'state', 'container-a', 3)",
+            params![workspace_id],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO design_bindings(workspace_id, design_external_id, target_type, target)
+             VALUES (?1, 'LegacyState', 'symbol', 'LegacyState')",
+            params![workspace_id],
+        )
+        .unwrap();
+
+        let result = save_changes(
+            &mut db,
+            project_id,
+            0,
+            "Remove superseded placeholder design rows.",
+            &[
+                change("delete_relationship").with_external_id("placeholder-rel"),
+                change("delete_uml").with_key("LegacyState"),
+            ],
+        )
+        .unwrap();
+
+        assert!(result.ok);
+        assert!(result.stored);
+        assert_eq!(result.revision, 1);
+
+        let overview = load_overview(&db, project_id, None).unwrap();
+        assert!(!overview
+            .relationships
+            .iter()
+            .any(|relationship| relationship.external_id == "placeholder-rel"));
+        assert!(!overview
+            .diagrams
+            .iter()
+            .any(|diagram| diagram.key == "PlaceholderFlow" || diagram.key == "LegacyState"));
+        assert!(!overview
+            .bindings
+            .iter()
+            .any(|binding| binding.design_external_id == "PlaceholderFlow"
+                || binding.design_external_id == "LegacyState"));
+    }
+
+    #[test]
+    fn save_changes_delete_element_cascades_design_dependencies() {
+        let (mut db, project_id, workspace_id) = setup_design_workspace();
+        insert_minimal_design(&db, workspace_id);
+        db.execute(
+            "INSERT INTO diagrams(workspace_id, kind, key, title, source, diagram_type, attached_to_external_id, sort_order)
+             VALUES (?1, 'mermaid', 'ComponentSequence', 'Component sequence', 'sequenceDiagram\n    User->>Component: call', 'sequence', 'component-a', 2)",
+            params![workspace_id],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO diagrams(workspace_id, kind, key, title, source, diagram_type, attached_to_external_id, sort_order)
+             VALUES (?1, 'mermaid', 'RelationshipFlow', 'Relationship flow', 'flowchart TD\n    A --> B', 'flow', 'placeholder-rel', 3)",
+            params![workspace_id],
+        )
+        .unwrap();
+        for design_id in [
+            "component-a",
+            "placeholder-rel",
+            "ComponentSequence",
+            "RelationshipFlow",
+        ] {
+            db.execute(
+                "INSERT INTO design_bindings(workspace_id, design_external_id, target_type, target)
+                 VALUES (?1, ?2, 'symbol', ?2)",
+                params![workspace_id, design_id],
+            )
+            .unwrap();
+        }
+
+        let result = save_changes(
+            &mut db,
+            project_id,
+            0,
+            "Remove a retired component branch.",
+            &[change("delete_element").with_external_id("component-a")],
+        )
+        .unwrap();
+
+        assert!(result.ok);
+
+        let overview = load_overview(&db, project_id, None).unwrap();
+        assert!(!overview
+            .elements
+            .iter()
+            .any(|element| element.external_id == "component-a"));
+        assert!(!overview
+            .relationships
+            .iter()
+            .any(|relationship| relationship.external_id == "placeholder-rel"));
+        assert!(
+            !overview
+                .diagrams
+                .iter()
+                .any(|diagram| diagram.key == "ComponentSequence"
+                    || diagram.key == "RelationshipFlow")
+        );
+        assert!(!overview.bindings.iter().any(|binding| {
+            matches!(
+                binding.design_external_id.as_str(),
+                "component-a" | "placeholder-rel" | "ComponentSequence" | "RelationshipFlow"
+            )
+        }));
+    }
+
+    #[test]
+    fn save_changes_rejects_unknown_delete_without_bumping_revision() {
+        let (mut db, project_id, workspace_id) = setup_design_workspace();
+        insert_minimal_design(&db, workspace_id);
+
+        let result = save_changes(
+            &mut db,
+            project_id,
+            0,
+            "Remove a typoed relationship.",
+            &[change("delete_relationship").with_external_id("missing-rel")],
+        )
+        .unwrap();
+
+        assert!(!result.ok);
+        assert!(!result.stored);
+        assert_eq!(result.revision, 0);
+        assert_eq!(result.errors[0].code, "save.invalid_changeset");
+        assert!(result.errors[0].message.contains("missing-rel"));
+    }
+
+    fn setup_design_workspace() -> (Connection, i64, i64) {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(include_str!("schema.sql")).unwrap();
+        db.execute(
+            "INSERT INTO projects(name, slug, repository_path)
+             VALUES ('Test Project', 'test-project', NULL)",
+            [],
+        )
+        .unwrap();
+        let project_id = db.last_insert_rowid();
+        db.execute(
+            "INSERT INTO project_state(project_id, revision)
+             VALUES (?1, 0)",
+            params![project_id],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO design_workspaces(project_id, name, description, structurizr_dsl, structurizr_json)
+             VALUES (?1, 'Test Workspace', 'Test design workspace.', '', '{}')",
+            params![project_id],
+        )
+        .unwrap();
+        let workspace_id = db.last_insert_rowid();
+        (db, project_id, workspace_id)
+    }
+
+    fn insert_minimal_design(db: &Connection, workspace_id: i64) {
+        db.execute(
+            "INSERT INTO c4_elements(workspace_id, external_id, parent_external_id, element_type, name, description, technology, tags)
+             VALUES (?1, 'system', NULL, 'Software System', 'System', 'System under design.', '', '')",
+            params![workspace_id],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO c4_elements(workspace_id, external_id, parent_external_id, element_type, name, description, technology, tags)
+             VALUES (?1, 'container-a', 'system', 'Container', 'Container A', 'Primary container.', 'Rust', '')",
+            params![workspace_id],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO c4_elements(workspace_id, external_id, parent_external_id, element_type, name, description, technology, tags)
+             VALUES (?1, 'component-a', 'container-a', 'Component', 'Component A', 'Retired component.', 'Rust', '')",
+            params![workspace_id],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO c4_relationships(workspace_id, external_id, source_external_id, destination_external_id, description, technology, tags)
+             VALUES (?1, 'placeholder-rel', 'container-a', 'component-a', 'Placeholder relationship.', '', '')",
+            params![workspace_id],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO diagrams(workspace_id, kind, key, title, source, diagram_type, attached_to_external_id, sort_order)
+             VALUES (?1, 'structurizr', 'StructurizrWorkspace', 'Structurizr workspace', '{}', 'structurizr', NULL, 1)",
+            params![workspace_id],
+        )
+        .unwrap();
+    }
+
+    fn change(op: &str) -> TestChangeBuilder {
+        TestChangeBuilder(DesignChange {
+            op: op.to_string(),
+            external_id: None,
+            parent_external_id: None,
+            element_type: None,
+            name: None,
+            description: None,
+            technology: None,
+            tags: None,
+            source_external_id: None,
+            destination_external_id: None,
+            key: None,
+            title: None,
+            language: None,
+            diagram_type: None,
+            attached_to_external_id: None,
+            source: None,
+            design_external_id: None,
+            target_type: None,
+            target: None,
+        })
+    }
+
+    struct TestChangeBuilder(DesignChange);
+
+    impl TestChangeBuilder {
+        fn with_external_id(mut self, external_id: &str) -> DesignChange {
+            self.0.external_id = Some(external_id.to_string());
+            self.0
+        }
+
+        fn with_key(mut self, key: &str) -> DesignChange {
+            self.0.key = Some(key.to_string());
+            self.0
+        }
+    }
 }

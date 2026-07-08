@@ -155,7 +155,9 @@ button {
 .rule-editor-form input,
 .rule-editor-form select,
 .task-editor-form input,
-.task-editor-form select {
+.task-editor-form select,
+.qa-editor-form input,
+.qa-editor-form select {
   background: #fffdf8;
   border: 1px solid #d4cebf;
   border-radius: 7px;
@@ -904,7 +906,8 @@ button {
   grid-template-columns: 1.2fr 1fr 1fr;
 }
 
-.task-workspace {
+.task-workspace,
+.qa-workspace {
   display: grid;
   gap: 22px;
   grid-template-columns: 340px minmax(0, 1fr);
@@ -914,7 +917,9 @@ button {
 }
 
 .task-list-panel,
-.task-detail-panel {
+.task-detail-panel,
+.qa-list-panel,
+.qa-detail-panel {
   background: #fffdf8;
   border: 1px solid #ddd8cd;
   border-radius: 8px;
@@ -922,16 +927,33 @@ button {
   min-width: 0;
 }
 
-.task-list-panel {
+.task-list-panel,
+.qa-list-panel {
   display: grid;
   gap: 12px;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
   min-height: 0;
   overflow: hidden;
   padding: 16px;
 }
 
+.task-list-panel {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
+.qa-list-panel {
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto auto;
+}
+
 .task-detail-panel {
+  align-content: start;
+  display: grid;
+  gap: 16px;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px;
+}
+
+.qa-detail-panel {
   align-content: start;
   display: grid;
   gap: 16px;
@@ -968,7 +990,9 @@ button {
 .task-section-heading button,
 .task-detail-actions button,
 .task-link-row button,
-.task-link-results button {
+.task-link-results button,
+.qa-run-actions button,
+.qa-task-link-row button {
   align-items: center;
   background: #2f6f6d;
   border: 0;
@@ -986,8 +1010,16 @@ button {
 .task-section-heading button:hover,
 .task-detail-actions button:hover,
 .task-link-row button:hover,
-.task-link-results button:hover {
+.task-link-results button:hover,
+.qa-run-actions button:hover,
+.qa-task-link-row button:hover {
   background: #255957;
+}
+
+.qa-run-actions button:disabled,
+.task-detail-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .task-detail-actions {
@@ -995,16 +1027,25 @@ button {
   gap: 8px;
 }
 
-.task-state-filters {
+.task-state-filters,
+.qa-state-filters {
   background: #e8e2d6;
   border-radius: 8px;
   display: grid;
   gap: 3px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   padding: 3px;
 }
 
-.task-state-filters label {
+.task-state-filters {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.qa-state-filters {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.task-state-filters label,
+.qa-state-filters label {
   align-items: center;
   background: transparent;
   border-radius: 6px;
@@ -1018,13 +1059,15 @@ button {
   min-height: 32px;
 }
 
-.task-state-filters label:has(input:checked) {
+.task-state-filters label:has(input:checked),
+.qa-state-filters label:has(input:checked) {
   background: #fffdf8;
   color: #163434;
   box-shadow: 0 1px 2px rgba(31, 41, 51, 0.14);
 }
 
-.task-state-filters input {
+.task-state-filters input,
+.qa-state-filters input {
   height: 14px;
   width: 14px;
 }
@@ -1090,20 +1133,30 @@ button {
   font-size: 12px;
 }
 
-.task-editor-form {
+.task-editor-form,
+.qa-editor-form {
   display: grid;
   gap: 12px 16px;
+}
+
+.task-editor-form {
   grid-template-columns: minmax(0, 1fr) 160px;
 }
 
+.qa-editor-form {
+  grid-template-columns: minmax(0, 1fr) 140px 120px 110px;
+}
+
 .task-editor-form label,
-.task-completion-grid label {
+.task-completion-grid label,
+.qa-editor-form label {
   display: grid;
   gap: 6px;
 }
 
 .task-editor-form span,
-.task-completion-grid span {
+.task-completion-grid span,
+.qa-editor-form span {
   color: #617170;
   font-size: 12px;
   font-weight: 700;
@@ -1114,7 +1167,8 @@ button {
 }
 
 .task-editor-form textarea,
-.task-completion-grid textarea {
+.task-completion-grid textarea,
+.qa-editor-form textarea {
   background: #fffdf8;
   border: 1px solid #d4cebf;
   border-radius: 7px;
@@ -1125,6 +1179,11 @@ button {
   padding: 9px 10px;
   resize: vertical;
   width: 100%;
+}
+
+.qa-enabled-row {
+  align-self: end;
+  min-height: 38px;
 }
 
 .task-detail-section {
@@ -1232,6 +1291,140 @@ button {
   display: grid;
   gap: 12px;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr) minmax(0, 0.8fr);
+}
+
+.qa-run-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.qa-link-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.qa-task-link-row {
+  align-items: center;
+  background: #fbfaf6;
+  border: 1px solid #e1dacc;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  min-height: 52px;
+  padding: 7px;
+}
+
+.qa-task-link-row button {
+  min-height: 34px;
+  padding: 0;
+}
+
+.qa-task-link-row div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.qa-task-link-row strong,
+.qa-task-link-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qa-task-link-row span {
+  color: #617170;
+  font-size: 12px;
+}
+
+.qa-history-panel {
+  border-top: 1px solid #e8e1d5;
+  display: grid;
+  gap: 12px;
+  min-height: 360px;
+  padding-top: 14px;
+}
+
+.qa-history-layout {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 220px minmax(0, 1fr);
+  min-height: 0;
+}
+
+.qa-run-list {
+  align-content: start;
+  display: grid;
+  gap: 8px;
+}
+
+.qa-run-item {
+  background: #fbfaf6;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #1f2933;
+  cursor: pointer;
+  display: grid;
+  gap: 7px;
+  min-height: 78px;
+  padding: 10px;
+  text-align: left;
+}
+
+.qa-run-item.active {
+  background: #e6f1ed;
+  border-color: #7fb0a8;
+}
+
+.qa-run-item strong,
+.qa-run-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qa-run-item small {
+  color: #617170;
+  font-size: 12px;
+}
+
+.qa-console {
+  background: #213130;
+  border-radius: 8px;
+  color: #eef7f3;
+  display: grid;
+  gap: 10px;
+  max-height: 520px;
+  min-height: 320px;
+  overflow: auto;
+  padding: 12px;
+}
+
+.qa-console article {
+  display: grid;
+  gap: 8px;
+}
+
+.qa-console article > div {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.qa-console pre {
+  background: #152221;
+  border: 1px solid rgba(238, 247, 243, 0.12);
+  border-radius: 7px;
+  color: #eef7f3;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
 }
 
 .qa-grid {
@@ -1702,6 +1895,26 @@ button {
   background: #437a45;
 }
 
+.qa-state-green,
+.qa-run-passed {
+  background: #2f7d52;
+}
+
+.qa-state-red,
+.qa-run-failed,
+.qa-run-timed_out {
+  background: #9b3b32;
+}
+
+.qa-state-needs-rerun {
+  background: #8b6f2a;
+}
+
+.qa-state-running,
+.qa-run-running {
+  background: #2c6389;
+}
+
 .command-row {
   align-items: flex-start;
   display: flex;
@@ -1733,6 +1946,9 @@ code {
   .design-browser,
   .lower-grid,
   .task-workspace,
+  .qa-workspace,
+  .qa-link-grid,
+  .qa-history-layout,
   .qa-grid,
   .settings-grid,
   .rules-grid,

@@ -4,6 +4,7 @@ use crate::design::{
 };
 use crate::fixed_hooks::{self, DESIGN_AUTHORING_HOOK_KEY, IMPLEMENTATION_GUIDANCE_HOOK_KEY};
 use crate::memory::{self, ProjectMemory};
+use crate::qa::{self, NewQaJob, QaDesignLinkInput, QaJob, QaJobQuery, QaRun, UpdateQaJob};
 use crate::rules::{self, InjectionRule, NewRule, Rule, UpdateRule};
 use crate::settings::{self, AppSettings, ProjectSettings};
 use crate::state as project_state;
@@ -134,6 +135,68 @@ struct FinishTaskParams {
     completion_memo: String,
     created_files: Option<Vec<String>>,
     changed_files: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct ListQaJobsParams {
+    project_id: Option<String>,
+    query: Option<QaJobQuery>,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct QaJobIdParams {
+    project_id: Option<String>,
+    qa_job_id: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct CreateQaJobParams {
+    project_id: Option<String>,
+    name: String,
+    description: Option<String>,
+    command: String,
+    working_directory: Option<String>,
+    shell: Option<String>,
+    timeout_seconds: Option<i64>,
+    enabled: Option<bool>,
+    design_specification_links: Option<Vec<QaDesignLinkInput>>,
+    task_ids: Option<Vec<i64>>,
+    tags: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct UpdateQaJobParams {
+    project_id: Option<String>,
+    qa_job_id: i64,
+    name: Option<String>,
+    description: Option<String>,
+    command: Option<String>,
+    working_directory: Option<String>,
+    shell: Option<String>,
+    timeout_seconds: Option<i64>,
+    enabled: Option<bool>,
+    design_specification_links: Option<Vec<QaDesignLinkInput>>,
+    task_ids: Option<Vec<i64>>,
+    tags: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct RunQaJobsParams {
+    project_id: Option<String>,
+    query: QaJobQuery,
+    trigger_source: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct ListQaRunsParams {
+    project_id: Option<String>,
+    limit: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
@@ -290,6 +353,51 @@ struct DeleteTaskResult {
     project_name: String,
     revision: i64,
     deleted_task_id: i64,
+}
+
+#[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct QaJobListResult {
+    project_id: String,
+    project_name: String,
+    revision: i64,
+    jobs: Vec<QaJob>,
+}
+
+#[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct QaJobResult {
+    project_id: String,
+    project_name: String,
+    revision: i64,
+    job: QaJob,
+}
+
+#[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct DeleteQaJobResult {
+    project_id: String,
+    project_name: String,
+    revision: i64,
+    deleted_qa_job_id: i64,
+}
+
+#[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct QaRunResult {
+    project_id: String,
+    project_name: String,
+    revision: i64,
+    run: QaRun,
+}
+
+#[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct QaRunListResult {
+    project_id: String,
+    project_name: String,
+    revision: i64,
+    runs: Vec<QaRun>,
 }
 
 #[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
@@ -659,6 +767,201 @@ impl AdashiMcpServer {
     }
 
     #[tool(
+        name = "adashi_list_qa_jobs",
+        description = "List project-local QA jobs with derived state and optional filters by state, tag, task link, design link, enabled flag, or explicit job ids."
+    )]
+    fn list_qa_jobs(
+        &self,
+        Parameters(params): Parameters<ListQaJobsParams>,
+    ) -> Result<Json<QaJobListResult>, ErrorData> {
+        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        let revision =
+            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
+        let jobs = qa::load_jobs(&db, project_row_id, params.query.as_ref()).map_err(tool_error)?;
+
+        Ok(Json(QaJobListResult {
+            project_id: project.id,
+            project_name: project.name,
+            revision: revision.revision,
+            jobs,
+        }))
+    }
+
+    #[tool(
+        name = "adashi_get_qa_job",
+        description = "Read one project-local QA job with links, tags, latest evidence, and derived state."
+    )]
+    fn get_qa_job(
+        &self,
+        Parameters(params): Parameters<QaJobIdParams>,
+    ) -> Result<Json<QaJobResult>, ErrorData> {
+        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        let revision =
+            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
+        let job = qa::load_job(&db, project_row_id, params.qa_job_id).map_err(tool_error)?;
+
+        Ok(Json(QaJobResult {
+            project_id: project.id,
+            project_name: project.name,
+            revision: revision.revision,
+            job,
+        }))
+    }
+
+    #[tool(
+        name = "adashi_create_qa_job",
+        description = "Create a reusable project-local QA job definition with optional design links, task links, and tags. The write bumps project revision."
+    )]
+    fn create_qa_job(
+        &self,
+        Parameters(params): Parameters<CreateQaJobParams>,
+    ) -> Result<Json<QaJobResult>, ErrorData> {
+        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        let job = qa::create_job(
+            &db,
+            project_row_id,
+            NewQaJob {
+                name: params.name,
+                description: params.description,
+                command: params.command,
+                working_directory: params.working_directory,
+                shell: params.shell,
+                timeout_seconds: params.timeout_seconds,
+                enabled: params.enabled,
+                created_by: Some("codex".to_string()),
+                design_specification_links: params.design_specification_links,
+                task_ids: params.task_ids,
+                tags: params.tags,
+            },
+        )
+        .map_err(tool_error)?;
+        let revision =
+            project_state::bump_project_revision(&db, project_row_id).map_err(tool_error)?;
+
+        Ok(Json(QaJobResult {
+            project_id: project.id,
+            project_name: project.name,
+            revision: revision.revision,
+            job,
+        }))
+    }
+
+    #[tool(
+        name = "adashi_update_qa_job",
+        description = "Update a QA job definition, replacing provided design links, task links, or tags when those arrays are present. The write bumps project revision."
+    )]
+    fn update_qa_job(
+        &self,
+        Parameters(params): Parameters<UpdateQaJobParams>,
+    ) -> Result<Json<QaJobResult>, ErrorData> {
+        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        let job = qa::update_job(
+            &db,
+            project_row_id,
+            UpdateQaJob {
+                qa_job_id: params.qa_job_id,
+                name: params.name,
+                description: params.description,
+                command: params.command,
+                working_directory: params.working_directory,
+                shell: params.shell,
+                timeout_seconds: params.timeout_seconds,
+                enabled: params.enabled,
+                design_specification_links: params.design_specification_links,
+                task_ids: params.task_ids,
+                tags: params.tags,
+            },
+        )
+        .map_err(tool_error)?;
+        let revision =
+            project_state::bump_project_revision(&db, project_row_id).map_err(tool_error)?;
+
+        Ok(Json(QaJobResult {
+            project_id: project.id,
+            project_name: project.name,
+            revision: revision.revision,
+            job,
+        }))
+    }
+
+    #[tool(
+        name = "adashi_delete_qa_job",
+        description = "Delete a reusable project-local QA job definition. Historical run groups remain, but deleted job evidence is cascaded with the job definition in v1."
+    )]
+    fn delete_qa_job(
+        &self,
+        Parameters(params): Parameters<QaJobIdParams>,
+    ) -> Result<Json<DeleteQaJobResult>, ErrorData> {
+        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        qa::delete_job(&db, project_row_id, params.qa_job_id).map_err(tool_error)?;
+        let revision =
+            project_state::bump_project_revision(&db, project_row_id).map_err(tool_error)?;
+
+        Ok(Json(DeleteQaJobResult {
+            project_id: project.id,
+            project_name: project.name,
+            revision: revision.revision,
+            deleted_qa_job_id: params.qa_job_id,
+        }))
+    }
+
+    #[tool(
+        name = "adashi_run_qa_jobs",
+        description = "Run enabled QA jobs selected by explicit ids or query filters. Creates an immutable ad hoc run group and per-job evidence; v1 does not persist batch definitions."
+    )]
+    fn run_qa_jobs(
+        &self,
+        Parameters(params): Parameters<RunQaJobsParams>,
+    ) -> Result<Json<QaRunResult>, ErrorData> {
+        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        let run = qa::run_jobs(
+            &db,
+            project_row_id,
+            &project.folder,
+            params.query,
+            params.trigger_source.as_deref().unwrap_or("mcp"),
+        )
+        .map_err(tool_error)?;
+        let revision =
+            project_state::bump_project_revision(&db, project_row_id).map_err(tool_error)?;
+
+        Ok(Json(QaRunResult {
+            project_id: project.id,
+            project_name: project.name,
+            revision: revision.revision,
+            run,
+        }))
+    }
+
+    #[tool(
+        name = "adashi_list_qa_runs",
+        description = "List immutable QA execution groups with per-job run evidence, newest first."
+    )]
+    fn list_qa_runs(
+        &self,
+        Parameters(params): Parameters<ListQaRunsParams>,
+    ) -> Result<Json<QaRunListResult>, ErrorData> {
+        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        let revision =
+            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
+        let runs = qa::load_runs(&db, project_row_id, params.limit).map_err(tool_error)?;
+
+        Ok(Json(QaRunListResult {
+            project_id: project.id,
+            project_name: project.name,
+            revision: revision.revision,
+            runs,
+        }))
+    }
+
+    #[tool(
         name = "adashi_update_memory",
         description = "Replace the current SQL-backed Adashi project memory after a successful task or major discussion. The write bumps the project revision so the desktop UI can merge the changed memory automatically."
     )]
@@ -798,7 +1101,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_design_save",
-        description = "Transactionally save a formal C4/UML design changeset. Use upsert_uml with diagramType and attachedToExternalId for typed Mermaid artifacts such as class/structure, sequence, flow, and state. The save validates revision, containment, relationships, UML syntax, attachments, and bindings; invalid input returns correction errors and is not stored."
+        description = "Transactionally save a formal C4/UML design changeset. Supports upsert_element, upsert_relationship, upsert_uml, upsert_binding, delete_element, delete_relationship, delete_uml, and delete_binding. Use upsert_uml with diagramType and attachedToExternalId for typed Mermaid artifacts such as class/structure, sequence, flow, and state. Deletes clean dependent design attachments and bindings where needed. The save validates revision, containment, relationships, UML syntax, attachments, and bindings; invalid input returns correction errors and is not stored."
     )]
     fn design_save(
         &self,

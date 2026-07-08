@@ -7,6 +7,7 @@ pub fn migrate(db: &mut Connection) -> rusqlite::Result<()> {
     ensure_design_bindings_table(db)?;
     ensure_fixed_hook_prompts_table(db)?;
     ensure_task_system_tables(db)?;
+    ensure_qa_system_tables(db)?;
     crate::state::ensure_project_state(db)?;
     ensure_project_memory_rows(db)?;
     Ok(())
@@ -234,6 +235,115 @@ fn add_task_column_if_missing(
 
     db.execute(
         &format!("ALTER TABLE agent_tasks ADD COLUMN {column_name} {column_sql}"),
+        [],
+    )?;
+    Ok(())
+}
+
+fn ensure_qa_system_tables(db: &Connection) -> rusqlite::Result<()> {
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS qa_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            number INTEGER NOT NULL DEFAULT 0,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            command TEXT NOT NULL,
+            working_directory TEXT NOT NULL DEFAULT '',
+            shell TEXT NOT NULL DEFAULT 'powershell',
+            timeout_seconds INTEGER NOT NULL DEFAULT 120,
+            enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+            created_by TEXT NOT NULL DEFAULT 'user',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(project_id, number)
+        );
+
+        CREATE TABLE IF NOT EXISTS qa_job_design_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            qa_job_id INTEGER NOT NULL REFERENCES qa_jobs(id) ON DELETE CASCADE,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            target_type TEXT NOT NULL CHECK(target_type IN ('element', 'relationship', 'uml')),
+            design_external_id TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(qa_job_id, design_external_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_qa_job_design_links_job_order
+            ON qa_job_design_links(qa_job_id, sort_order);
+
+        CREATE INDEX IF NOT EXISTS idx_qa_job_design_links_target
+            ON qa_job_design_links(design_external_id);
+
+        CREATE TABLE IF NOT EXISTS qa_job_task_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            qa_job_id INTEGER NOT NULL REFERENCES qa_jobs(id) ON DELETE CASCADE,
+            task_id INTEGER NOT NULL REFERENCES agent_tasks(id) ON DELETE CASCADE,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(qa_job_id, task_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_qa_job_task_links_job_order
+            ON qa_job_task_links(qa_job_id, sort_order);
+
+        CREATE TABLE IF NOT EXISTS qa_job_tags (
+            qa_job_id INTEGER NOT NULL REFERENCES qa_jobs(id) ON DELETE CASCADE,
+            tag TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY(qa_job_id, tag)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_qa_job_tags_tag
+            ON qa_job_tags(tag);
+
+        CREATE TABLE IF NOT EXISTS qa_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            trigger_source TEXT NOT NULL DEFAULT 'user',
+            query_snapshot TEXT NOT NULL DEFAULT '{}',
+            status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running', 'passed', 'failed')),
+            started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            finished_at TEXT,
+            summary TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS qa_job_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            qa_run_id INTEGER NOT NULL REFERENCES qa_runs(id) ON DELETE CASCADE,
+            qa_job_id INTEGER NOT NULL REFERENCES qa_jobs(id) ON DELETE CASCADE,
+            command_snapshot TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running', 'passed', 'failed', 'timed_out')),
+            exit_code INTEGER,
+            started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            finished_at TEXT,
+            duration_ms INTEGER,
+            output TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_qa_job_runs_job_latest
+            ON qa_job_runs(qa_job_id, id DESC);",
+    )?;
+
+    db.execute(
+        "INSERT INTO qa_jobs(project_id, number, name, description, command, enabled, created_by)
+         SELECT
+            q.project_id,
+            ROW_NUMBER() OVER (PARTITION BY q.project_id ORDER BY q.id),
+            q.label,
+            'Migrated from legacy QA gate.',
+            q.command,
+            q.required,
+            'migration'
+         FROM qa_checks q
+         WHERE NOT EXISTS (
+            SELECT 1 FROM qa_jobs j WHERE j.project_id = q.project_id
+         )",
+        [],
+    )?;
+
+    db.execute(
+        "INSERT OR IGNORE INTO schema_migrations(version) VALUES (9)",
         [],
     )?;
     Ok(())

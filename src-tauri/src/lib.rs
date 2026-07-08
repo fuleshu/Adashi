@@ -2,6 +2,7 @@ mod design;
 mod fixed_hooks;
 mod mcp;
 mod memory;
+mod qa;
 mod rules;
 mod schema;
 mod seed;
@@ -21,6 +22,7 @@ use tauri::{Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow, Windo
 use crate::design::DesignArtifactTypeRecord;
 use crate::fixed_hooks::FixedHookPrompt;
 use crate::memory::ProjectMemory;
+use crate::qa::{NewQaJob, QaDesignLinkInput, QaJob, QaJobQuery, QaRun, UpdateQaJob};
 use crate::rules::{NewRule, Rule, UpdateRule};
 use crate::settings::{AppSettings, ProjectSettings, WindowSettings};
 use crate::state as project_state;
@@ -51,6 +53,8 @@ struct DashboardPayload {
     guidelines: Vec<Guideline>,
     post_task_commands: Vec<PostTaskCommand>,
     qa_checks: Vec<QaCheck>,
+    qa_jobs: Vec<QaJob>,
+    qa_runs: Vec<QaRun>,
     rules: Vec<Rule>,
     fixed_hook_prompts: Vec<FixedHookPrompt>,
     memory: ProjectMemory,
@@ -185,6 +189,8 @@ fn load_dashboard_payload(
         guidelines: load_guidelines(&db)?,
         post_task_commands: load_post_task_commands(&db)?,
         qa_checks: load_qa_checks(&db)?,
+        qa_jobs: qa::load_jobs(db, project_row_id, None)?,
+        qa_runs: qa::load_runs(db, project_row_id, Some(20))?,
         rules: rules::load_rules(db)?,
         fixed_hook_prompts: fixed_hooks::load_fixed_hook_prompts(db, project_row_id)?,
         memory: memory::load_memory(db, project_row_id)?,
@@ -414,6 +420,47 @@ struct FinishTaskRequest {
     completion_memo: String,
     created_files: Vec<String>,
     changed_files: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateQaJobRequest {
+    project_id: Option<String>,
+    name: String,
+    description: Option<String>,
+    command: String,
+    working_directory: Option<String>,
+    shell: Option<String>,
+    timeout_seconds: Option<i64>,
+    enabled: Option<bool>,
+    design_specification_links: Option<Vec<QaDesignLinkInput>>,
+    task_ids: Option<Vec<i64>>,
+    tags: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateQaJobRequest {
+    project_id: Option<String>,
+    qa_job_id: i64,
+    name: Option<String>,
+    description: Option<String>,
+    command: Option<String>,
+    working_directory: Option<String>,
+    shell: Option<String>,
+    timeout_seconds: Option<i64>,
+    enabled: Option<bool>,
+    design_specification_links: Option<Vec<QaDesignLinkInput>>,
+    task_ids: Option<Vec<i64>>,
+    tags: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RunQaJobsRequest {
+    project_id: Option<String>,
+    query: QaJobQuery,
+    trigger_source: Option<String>,
 }
 
 #[tauri::command]
@@ -770,6 +817,97 @@ fn delete_task(
     load_dashboard_payload(project, &db)
 }
 
+#[tauri::command]
+fn create_qa_job(
+    input: CreateQaJobRequest,
+    state: State<'_, AppState>,
+) -> Result<DashboardPayload, String> {
+    let project = resolve_project(&state, input.project_id.as_deref())?;
+    let db = open_project_database(&project).map_err(|err| err.to_string())?;
+    let project_row_id = load_project_row_id(&db)?;
+    qa::create_job(
+        &db,
+        project_row_id,
+        NewQaJob {
+            name: input.name,
+            description: input.description,
+            command: input.command,
+            working_directory: input.working_directory,
+            shell: input.shell,
+            timeout_seconds: input.timeout_seconds,
+            enabled: input.enabled,
+            created_by: Some("user".to_string()),
+            design_specification_links: input.design_specification_links,
+            task_ids: input.task_ids,
+            tags: input.tags,
+        },
+    )?;
+    project_state::bump_project_revision(&db, project_row_id)?;
+    load_dashboard_payload(project, &db)
+}
+
+#[tauri::command]
+fn update_qa_job(
+    input: UpdateQaJobRequest,
+    state: State<'_, AppState>,
+) -> Result<DashboardPayload, String> {
+    let project = resolve_project(&state, input.project_id.as_deref())?;
+    let db = open_project_database(&project).map_err(|err| err.to_string())?;
+    let project_row_id = load_project_row_id(&db)?;
+    qa::update_job(
+        &db,
+        project_row_id,
+        UpdateQaJob {
+            qa_job_id: input.qa_job_id,
+            name: input.name,
+            description: input.description,
+            command: input.command,
+            working_directory: input.working_directory,
+            shell: input.shell,
+            timeout_seconds: input.timeout_seconds,
+            enabled: input.enabled,
+            design_specification_links: input.design_specification_links,
+            task_ids: input.task_ids,
+            tags: input.tags,
+        },
+    )?;
+    project_state::bump_project_revision(&db, project_row_id)?;
+    load_dashboard_payload(project, &db)
+}
+
+#[tauri::command]
+fn delete_qa_job(
+    project_id: Option<String>,
+    qa_job_id: i64,
+    state: State<'_, AppState>,
+) -> Result<DashboardPayload, String> {
+    let project = resolve_project(&state, project_id.as_deref())?;
+    let db = open_project_database(&project).map_err(|err| err.to_string())?;
+    let project_row_id = load_project_row_id(&db)?;
+    qa::delete_job(&db, project_row_id, qa_job_id)?;
+    project_state::bump_project_revision(&db, project_row_id)?;
+    load_dashboard_payload(project, &db)
+}
+
+#[tauri::command]
+fn run_qa_jobs(
+    input: RunQaJobsRequest,
+    state: State<'_, AppState>,
+) -> Result<DashboardPayload, String> {
+    let project = resolve_project(&state, input.project_id.as_deref())?;
+    let db = open_project_database(&project).map_err(|err| err.to_string())?;
+    let project_row_id = load_project_row_id(&db)?;
+    qa::run_jobs(
+        &db,
+        project_row_id,
+        &project.folder,
+        input.query,
+        input.trigger_source.as_deref().unwrap_or("dashboard"),
+    )?;
+    project_state::bump_project_revision(&db, project_row_id)?;
+    load_dashboard_payload(project, &db)
+}
+
 pub fn run_mcp() -> Result<(), Box<dyn std::error::Error>> {
     mcp::run_stdio_server()
 }
@@ -797,8 +935,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             add_project,
             confirm_task,
+            create_qa_job,
             create_rule,
             create_task,
+            delete_qa_job,
             delete_rule,
             create_design_relationship,
             delete_project,
@@ -813,8 +953,10 @@ pub fn run() {
             update_fixed_hook_prompt,
             update_memory,
             update_memory_rule,
+            update_qa_job,
             update_rule,
-            update_task
+            update_task,
+            run_qa_jobs
         ])
         .run(tauri::generate_context!())
         .expect("error while running Adashi");

@@ -200,6 +200,80 @@ type QaCheck = {
   required: boolean;
 };
 
+type QaDerivedState = "green" | "red" | "needs-rerun" | "running";
+
+type QaJobDesignLink = {
+  id: number;
+  qaJobId: number;
+  sortOrder: number;
+  targetType: "element" | "relationship" | "uml";
+  designExternalId: string;
+  title: string;
+};
+
+type QaJobTaskLink = {
+  id: number;
+  qaJobId: number;
+  taskId: number;
+  sortOrder: number;
+  title: string;
+  number: number;
+  state: TaskState;
+};
+
+type QaJobRun = {
+  id: number;
+  qaRunId: number;
+  qaJobId: number;
+  commandSnapshot: string;
+  status: "running" | "passed" | "failed" | "timed_out";
+  exitCode?: number | null;
+  startedAt: string;
+  finishedAt?: string | null;
+  durationMs?: number | null;
+  output: string;
+};
+
+type QaRun = {
+  id: number;
+  triggerSource: string;
+  querySnapshot: string;
+  status: "running" | "passed" | "failed";
+  startedAt: string;
+  finishedAt?: string | null;
+  summary: string;
+  jobRuns: QaJobRun[];
+};
+
+type QaJob = {
+  id: number;
+  number: number;
+  name: string;
+  description: string;
+  command: string;
+  workingDirectory: string;
+  shell: string;
+  timeoutSeconds: number;
+  enabled: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  derivedState: QaDerivedState;
+  designSpecificationLinks: QaJobDesignLink[];
+  taskLinks: QaJobTaskLink[];
+  tags: string[];
+  latestRun?: QaJobRun | null;
+};
+
+type QaJobQuery = {
+  jobIds?: number[];
+  states?: QaDerivedState[];
+  tags?: string[];
+  taskIds?: number[];
+  designExternalIds?: string[];
+  enabled?: boolean;
+};
+
 type RuleIntend = "general" | "design" | "implementation";
 type RuleHook = "run.start" | "task.start" | "task.end" | "run.end";
 
@@ -262,6 +336,8 @@ type DashboardPayload = {
   guidelines: Guideline[];
   postTaskCommands: Command[];
   qaChecks: QaCheck[];
+  qaJobs: QaJob[];
+  qaRuns: QaRun[];
   rules: Rule[];
   fixedHookPrompts: FixedHookPrompt[];
   memory: ProjectMemory;
@@ -552,7 +628,40 @@ function App() {
             }}
           />
         ) : activeView === "qa" ? (
-          <QaView qaChecks={payload.qaChecks} />
+          <QaView
+            projectId={payload.projectId}
+            qaChecks={payload.qaChecks}
+            qaJobs={payload.qaJobs}
+            qaRuns={payload.qaRuns}
+            tasks={payload.tasks}
+            designElements={payload.designElements}
+            designRelationships={payload.designRelationships}
+            diagrams={payload.diagrams}
+            onChange={(updatedPayload) => {
+              setPayload((currentPayload) =>
+                currentPayload ? mergeDashboardPayload(currentPayload, updatedPayload) : updatedPayload,
+              );
+            }}
+            onError={setError}
+            onOpenDesignLink={(link) => {
+              const target =
+                link.targetType === "uml"
+                  ? payload.diagrams.find((diagram) => diagram.key === link.designExternalId)
+                  : null;
+              const externalId =
+                link.targetType === "uml"
+                  ? target?.attachedToExternalId ?? link.designExternalId
+                  : link.designExternalId;
+              const entityType =
+                link.targetType === "relationship" || target?.attachedToTargetType === "relationship"
+                  ? "relationship"
+                  : "element";
+
+              setSelectedDesignEntity({ type: entityType, externalId });
+              setActiveDesignLevel(link.targetType === "uml" || entityType === "relationship" ? "features" : "components");
+              setActiveView("design");
+            }}
+          />
         ) : (
           <DesignBrowser
             activeLevel={activeDesignLevel}
@@ -584,6 +693,8 @@ function mergeDashboardPayload(current: DashboardPayload, next: DashboardPayload
     guidelines: reconcileById(current.guidelines, next.guidelines),
     postTaskCommands: reconcileById(current.postTaskCommands, next.postTaskCommands),
     qaChecks: reconcileById(current.qaChecks, next.qaChecks),
+    qaJobs: reconcileById(current.qaJobs, next.qaJobs),
+    qaRuns: reconcileById(current.qaRuns, next.qaRuns),
     rules: reconcileById(current.rules, next.rules),
     fixedHookPrompts: reconcileByKey(current.fixedHookPrompts, next.fixedHookPrompts),
   };
@@ -2520,22 +2631,557 @@ function splitLines(value: string): string[] {
     .filter(Boolean);
 }
 
-function QaView({ qaChecks }: { qaChecks: QaCheck[] }) {
+function QaView({
+  projectId,
+  qaChecks,
+  qaJobs,
+  qaRuns,
+  tasks,
+  designElements,
+  designRelationships,
+  diagrams,
+  onChange,
+  onError,
+  onOpenDesignLink,
+}: {
+  projectId: string;
+  qaChecks: QaCheck[];
+  qaJobs: QaJob[];
+  qaRuns: QaRun[];
+  tasks: Task[];
+  designElements: DesignElement[];
+  designRelationships: DesignRelationship[];
+  diagrams: DesignDiagram[];
+  onChange: (payload: DashboardPayload) => void;
+  onError: (message: string) => void;
+  onOpenDesignLink: (link: QaJobDesignLink) => void;
+}) {
+  const [selectedJobId, setSelectedJobId] = React.useState<number | null>(qaJobs[0]?.id ?? null);
+  const [visibleStates, setVisibleStates] = React.useState<Record<QaDerivedState, boolean>>({
+    green: true,
+    red: true,
+    "needs-rerun": true,
+    running: true,
+  });
+  const [showDisabled, setShowDisabled] = React.useState(false);
+  const [tagFilter, setTagFilter] = React.useState("");
+  const [designQuery, setDesignQuery] = React.useState("");
+  const [taskQuery, setTaskQuery] = React.useState("");
+  const [selectedRunId, setSelectedRunId] = React.useState<number | null>(qaRuns[0]?.id ?? null);
+  const [running, setRunning] = React.useState(false);
+
+  const tagTerms = tagFilter
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  const visibleJobs = qaJobs.filter((job) => {
+    if (!visibleStates[job.derivedState]) {
+      return false;
+    }
+    if (!showDisabled && !job.enabled) {
+      return false;
+    }
+    return tagTerms.every((term) => job.tags.some((tag) => tag.toLowerCase().includes(term)));
+  });
+  const selectedJob =
+    qaJobs.find((job) => job.id === selectedJobId && visibleJobs.some((visibleJob) => visibleJob.id === job.id)) ??
+    visibleJobs[0] ??
+    null;
+  const selectedRun = qaRuns.find((run) => run.id === selectedRunId) ?? qaRuns[0] ?? null;
+  const designLinkOptions = React.useMemo(
+    () => buildTaskDesignLinkOptions(designElements, designRelationships, diagrams, designQuery),
+    [designElements, designRelationships, diagrams, designQuery],
+  );
+  const taskLinkOptions = React.useMemo(() => buildQaTaskLinkOptions(tasks, taskQuery), [tasks, taskQuery]);
+
+  React.useEffect(() => {
+    if (!selectedJob && visibleJobs[0]) {
+      setSelectedJobId(visibleJobs[0].id);
+    }
+  }, [selectedJob, visibleJobs]);
+
+  React.useEffect(() => {
+    if (!selectedRun && qaRuns[0]) {
+      setSelectedRunId(qaRuns[0].id);
+    }
+  }, [selectedRun, qaRuns]);
+
+  function addJob() {
+    invoke<DashboardPayload>("create_qa_job", {
+      input: {
+        projectId,
+        name: "New QA Job",
+        description: "",
+        command: "cargo check --manifest-path src-tauri/Cargo.toml",
+        workingDirectory: "",
+        shell: "powershell",
+        timeoutSeconds: 120,
+        enabled: true,
+        designSpecificationLinks: [],
+        taskIds: [],
+        tags: ["local"],
+      },
+    })
+      .then((updatedPayload) => {
+        const newestJob = updatedPayload.qaJobs.reduce<QaJob | null>(
+          (newest, job) => (!newest || job.number > newest.number ? job : newest),
+          null,
+        );
+        setSelectedJobId(newestJob?.id ?? null);
+        onChange(updatedPayload);
+      })
+      .catch((reason) => onError(String(reason)));
+  }
+
+  function updateJob(
+    job: QaJob,
+    changes: Partial<
+      Pick<QaJob, "name" | "description" | "command" | "workingDirectory" | "shell" | "timeoutSeconds" | "enabled">
+    > & {
+      designSpecificationLinks?: Array<Pick<QaJobDesignLink, "targetType" | "designExternalId">>;
+      taskIds?: number[];
+      tags?: string[];
+    },
+  ) {
+    invoke<DashboardPayload>("update_qa_job", {
+      input: {
+        projectId,
+        qaJobId: job.id,
+        ...changes,
+      },
+    })
+      .then((updatedPayload) => {
+        setSelectedJobId(job.id);
+        onChange(updatedPayload);
+      })
+      .catch((reason) => onError(String(reason)));
+  }
+
+  function deleteSelectedJob(job: QaJob) {
+    if (!window.confirm(`Delete QA job #${job.number}: ${job.name}?`)) {
+      return;
+    }
+
+    invoke<DashboardPayload>("delete_qa_job", { projectId, qaJobId: job.id })
+      .then((updatedPayload) => {
+        setSelectedJobId(updatedPayload.qaJobs.find((candidate) => candidate.enabled || showDisabled)?.id ?? null);
+        onChange(updatedPayload);
+      })
+      .catch((reason) => onError(String(reason)));
+  }
+
+  function runQuery(query: QaJobQuery) {
+    setRunning(true);
+    invoke<DashboardPayload>("run_qa_jobs", {
+      input: {
+        projectId,
+        query,
+        triggerSource: "dashboard",
+      },
+    })
+      .then((updatedPayload) => {
+        setSelectedRunId(updatedPayload.qaRuns[0]?.id ?? null);
+        onChange(updatedPayload);
+      })
+      .catch((reason) => onError(String(reason)))
+      .finally(() => setRunning(false));
+  }
+
+  function addDesignLink(job: QaJob, option: TaskDesignLinkOption) {
+    if (job.designSpecificationLinks.some((link) => link.designExternalId === option.designExternalId)) {
+      return;
+    }
+
+    updateJob(job, {
+      designSpecificationLinks: [
+        ...job.designSpecificationLinks.map(qaDesignLinkToInput),
+        { targetType: option.targetType, designExternalId: option.designExternalId },
+      ],
+    });
+    setDesignQuery("");
+  }
+
+  function removeDesignLink(job: QaJob, designExternalId: string) {
+    updateJob(job, {
+      designSpecificationLinks: job.designSpecificationLinks
+        .filter((link) => link.designExternalId !== designExternalId)
+        .map(qaDesignLinkToInput),
+    });
+  }
+
+  function moveDesignLink(job: QaJob, index: number, direction: -1 | 1) {
+    const nextLinks = job.designSpecificationLinks.map(qaDesignLinkToInput);
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= nextLinks.length) {
+      return;
+    }
+    [nextLinks[index], nextLinks[nextIndex]] = [nextLinks[nextIndex], nextLinks[index]];
+    updateJob(job, { designSpecificationLinks: nextLinks });
+  }
+
+  function addTaskLink(job: QaJob, task: Task) {
+    if (job.taskLinks.some((link) => link.taskId === task.id)) {
+      return;
+    }
+
+    updateJob(job, { taskIds: [...job.taskLinks.map((link) => link.taskId), task.id] });
+    setTaskQuery("");
+  }
+
+  function removeTaskLink(job: QaJob, taskId: number) {
+    updateJob(job, { taskIds: job.taskLinks.filter((link) => link.taskId !== taskId).map((link) => link.taskId) });
+  }
+
   return (
-    <section className="qa-grid">
-      <Panel title="QA Gates">
-        {qaChecks.map((check) => (
-          <div className="command-row" key={check.id}>
-            <CheckCircle2 size={17} />
-            <div>
-              <span>{check.label}</span>
-              <code>{check.command}</code>
+    <section className="qa-workspace">
+      <section className="qa-list-panel">
+        <div className="task-panel-heading">
+          <h3>QA Jobs</h3>
+          <button aria-label="Create QA job" onClick={addJob} title="Create QA job" type="button">
+            <Plus size={17} />
+          </button>
+        </div>
+
+        <div className="qa-state-filters" aria-label="QA state filters">
+          {(["green", "red", "needs-rerun", "running"] as QaDerivedState[]).map((state) => (
+            <label key={state}>
+              <input
+                checked={visibleStates[state]}
+                onChange={(event) => setVisibleStates((current) => ({ ...current, [state]: event.target.checked }))}
+                type="checkbox"
+              />
+              <span>{state}</span>
+            </label>
+          ))}
+        </div>
+
+        <label className="task-link-search">
+          <Search size={16} />
+          <input value={tagFilter} onChange={(event) => setTagFilter(event.target.value)} placeholder="Filter tags" />
+        </label>
+
+        <label className="settings-toggle-row">
+          <input checked={showDisabled} onChange={(event) => setShowDisabled(event.target.checked)} type="checkbox" />
+          <span>disabled</span>
+        </label>
+
+        <div className="task-list">
+          {visibleJobs.length === 0 ? (
+            <div className="empty-state">No QA jobs match the current filters</div>
+          ) : (
+            visibleJobs.map((job) => (
+              <button
+                className={selectedJob?.id === job.id ? "task-list-item active" : "task-list-item"}
+                key={job.id}
+                onClick={() => setSelectedJobId(job.id)}
+                type="button"
+              >
+                <span className={`pill qa-state-${job.derivedState}`}>{job.derivedState}</span>
+                <strong>#{job.number} {job.name}</strong>
+                <small>{job.tags.join(", ") || "untagged"}</small>
+              </button>
+            ))
+          )}
+        </div>
+
+        <div className="qa-run-actions">
+          <button disabled={running || visibleJobs.length === 0} onClick={() => runQuery({ jobIds: visibleJobs.map((job) => job.id) })} type="button">
+            <PlayCircle size={16} />
+            Visible
+          </button>
+          <button disabled={running} onClick={() => runQuery({ states: ["red", "needs-rerun"] })} type="button">
+            <Activity size={16} />
+            Red/Stale
+          </button>
+        </div>
+
+        <section className="post-task-command-panel">
+          <h4>Legacy Gates</h4>
+          {qaChecks.map((check) => (
+            <div className="command-row compact" key={check.id}>
+              <CheckCircle2 size={16} />
+              <div>
+                <span>{check.label}</span>
+                <code>{check.command}</code>
+              </div>
+            </div>
+          ))}
+        </section>
+      </section>
+
+      <section className="qa-detail-panel">
+        {selectedJob ? (
+          <>
+            <div className="task-detail-heading">
+              <div>
+                <p className="eyebrow">QA #{selectedJob.number}</p>
+                <h3>{selectedJob.name}</h3>
+              </div>
+              <div className="task-detail-actions">
+                <button disabled={running} onClick={() => runQuery({ jobIds: [selectedJob.id] })} title="Run QA job" type="button">
+                  <PlayCircle size={17} />
+                </button>
+                <button
+                  aria-label={`Delete QA job #${selectedJob.number}`}
+                  className="danger-icon-button"
+                  onClick={() => deleteSelectedJob(selectedJob)}
+                  title="Delete QA job"
+                  type="button"
+                >
+                  <Trash2 size={17} />
+                </button>
+              </div>
+            </div>
+
+            <div className="qa-editor-form">
+              <label>
+                <span>Name</span>
+                <input
+                  defaultValue={selectedJob.name}
+                  key={`qa-name-${selectedJob.id}`}
+                  onBlur={(event) => updateJob(selectedJob, { name: event.target.value })}
+                />
+              </label>
+              <label>
+                <span>Shell</span>
+                <select
+                  value={selectedJob.shell}
+                  onChange={(event) => updateJob(selectedJob, { shell: event.target.value })}
+                >
+                  <option value="powershell">powershell</option>
+                  <option value="cmd">cmd</option>
+                  <option value="pwsh">pwsh</option>
+                  <option value="sh">sh</option>
+                  <option value="bash">bash</option>
+                </select>
+              </label>
+              <label>
+                <span>Timeout</span>
+                <input
+                  defaultValue={selectedJob.timeoutSeconds}
+                  key={`qa-timeout-${selectedJob.id}`}
+                  min={1}
+                  onBlur={(event) => updateJob(selectedJob, { timeoutSeconds: Number(event.target.value) || 120 })}
+                  type="number"
+                />
+              </label>
+              <label className="settings-toggle-row qa-enabled-row">
+                <input
+                  checked={selectedJob.enabled}
+                  onChange={(event) => updateJob(selectedJob, { enabled: event.target.checked })}
+                  type="checkbox"
+                />
+                <span>enabled</span>
+              </label>
+              <label className="task-description-label">
+                <span>Command</span>
+                <textarea
+                  defaultValue={selectedJob.command}
+                  key={`qa-command-${selectedJob.id}`}
+                  onBlur={(event) => updateJob(selectedJob, { command: event.target.value })}
+                />
+              </label>
+              <label>
+                <span>Working Directory</span>
+                <input
+                  defaultValue={selectedJob.workingDirectory}
+                  key={`qa-cwd-${selectedJob.id}`}
+                  onBlur={(event) => updateJob(selectedJob, { workingDirectory: event.target.value })}
+                  placeholder="project root"
+                />
+              </label>
+              <label>
+                <span>Tags</span>
+                <input
+                  defaultValue={selectedJob.tags.join(", ")}
+                  key={`qa-tags-${selectedJob.id}`}
+                  onBlur={(event) => updateJob(selectedJob, { tags: splitCommaList(event.target.value) })}
+                />
+              </label>
+              <label className="task-description-label">
+                <span>Description</span>
+                <textarea
+                  defaultValue={selectedJob.description}
+                  key={`qa-description-${selectedJob.id}`}
+                  onBlur={(event) => updateJob(selectedJob, { description: event.target.value })}
+                />
+              </label>
+            </div>
+
+            <section className="qa-link-grid">
+              <section className="task-detail-section">
+                <div className="task-section-heading">
+                  <h4>Design Links</h4>
+                </div>
+                <div className="task-link-list">
+                  {selectedJob.designSpecificationLinks.length === 0 ? (
+                    <div className="empty-state compact">No design specifications linked</div>
+                  ) : (
+                    selectedJob.designSpecificationLinks.map((link, index) => (
+                      <div className="task-link-row" key={link.id}>
+                        <button onClick={() => onOpenDesignLink(link)} title="Open in Design" type="button">
+                          <ExternalLink size={16} />
+                        </button>
+                        <div>
+                          <strong>{link.title}</strong>
+                          <span>{link.targetType} / {link.designExternalId}</span>
+                        </div>
+                        <button disabled={index === 0} onClick={() => moveDesignLink(selectedJob, index, -1)} title="Move up" type="button">
+                          <ArrowUp size={16} />
+                        </button>
+                        <button
+                          disabled={index === selectedJob.designSpecificationLinks.length - 1}
+                          onClick={() => moveDesignLink(selectedJob, index, 1)}
+                          title="Move down"
+                          type="button"
+                        >
+                          <ArrowDown size={16} />
+                        </button>
+                        <button onClick={() => removeDesignLink(selectedJob, link.designExternalId)} title="Remove link" type="button">
+                          <X size={16} />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <label className="task-link-search">
+                  <Search size={16} />
+                  <input value={designQuery} onChange={(event) => setDesignQuery(event.target.value)} placeholder="Search design" />
+                </label>
+                {designQuery.trim() ? (
+                  <div className="task-link-results">
+                    {designLinkOptions.map((option) => (
+                      <button key={`${option.targetType}-${option.designExternalId}`} onClick={() => addDesignLink(selectedJob, option)} type="button">
+                        <Link2 size={15} />
+                        <span>{option.title}</span>
+                        <code>{option.targetType}</code>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+
+              <section className="task-detail-section">
+                <div className="task-section-heading">
+                  <h4>Task Links</h4>
+                </div>
+                <div className="task-link-list">
+                  {selectedJob.taskLinks.length === 0 ? (
+                    <div className="empty-state compact">No tasks linked</div>
+                  ) : (
+                    selectedJob.taskLinks.map((link) => (
+                      <div className="qa-task-link-row" key={link.id}>
+                        <div>
+                          <strong>#{link.number} {link.title}</strong>
+                          <span>{link.state}</span>
+                        </div>
+                        <button onClick={() => removeTaskLink(selectedJob, link.taskId)} title="Remove task" type="button">
+                          <X size={16} />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <label className="task-link-search">
+                  <Search size={16} />
+                  <input value={taskQuery} onChange={(event) => setTaskQuery(event.target.value)} placeholder="Search tasks" />
+                </label>
+                {taskQuery.trim() ? (
+                  <div className="task-link-results">
+                    {taskLinkOptions.map((task) => (
+                      <button key={task.id} onClick={() => addTaskLink(selectedJob, task)} type="button">
+                        <Link2 size={15} />
+                        <span>#{task.number} {task.title}</span>
+                        <code>{task.state}</code>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+            </section>
+          </>
+        ) : (
+          <div className="empty-state">Create or reveal a QA job to start editing</div>
+        )}
+
+        <section className="qa-history-panel">
+          <div className="task-section-heading">
+            <h4>Run History</h4>
+          </div>
+          <div className="qa-history-layout">
+            <div className="qa-run-list">
+              {qaRuns.length === 0 ? (
+                <div className="empty-state compact">No QA runs recorded</div>
+              ) : (
+                qaRuns.map((run) => (
+                  <button
+                    className={selectedRun?.id === run.id ? "qa-run-item active" : "qa-run-item"}
+                    key={run.id}
+                    onClick={() => setSelectedRunId(run.id)}
+                    type="button"
+                  >
+                    <span className={`pill qa-run-${run.status}`}>{run.status}</span>
+                    <strong>Run #{run.id}</strong>
+                    <small>{run.summary || run.startedAt}</small>
+                  </button>
+                ))
+              )}
+            </div>
+            <div className="qa-console">
+              {selectedRun ? (
+                selectedRun.jobRuns.map((jobRun) => (
+                  <article key={jobRun.id}>
+                    <div>
+                      <span className={`pill qa-run-${jobRun.status}`}>{jobRun.status}</span>
+                      <strong>{qaJobs.find((job) => job.id === jobRun.qaJobId)?.name ?? `Job ${jobRun.qaJobId}`}</strong>
+                      <small>{jobRun.durationMs ?? 0} ms</small>
+                    </div>
+                    <pre>{jobRun.output || "(no output)"}</pre>
+                  </article>
+                ))
+              ) : (
+                <div className="empty-state compact">No console output</div>
+              )}
             </div>
           </div>
-        ))}
-      </Panel>
+        </section>
+      </section>
     </section>
   );
+}
+
+function buildQaTaskLinkOptions(tasks: Task[], query: string): Task[] {
+  const terms = query
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (terms.length === 0) {
+    return [];
+  }
+
+  return tasks
+    .filter((task) => {
+      const haystack = `#${task.number} ${task.title} ${task.description} ${task.state}`.toLowerCase();
+      return terms.every((term) => haystack.includes(term));
+    })
+    .slice(0, 12);
+}
+
+function qaDesignLinkToInput(link: QaJobDesignLink): Pick<QaJobDesignLink, "targetType" | "designExternalId"> {
+  return {
+    targetType: link.targetType,
+    designExternalId: link.designExternalId,
+  };
+}
+
+function splitCommaList(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function RulesView({

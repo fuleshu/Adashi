@@ -137,6 +137,35 @@ pub fn seed_initial_data(db: &mut Connection, project: &ProjectSettings) -> rusq
         params![project_id, "TypeScript build", "npm run build"],
     )?;
 
+    tx.execute(
+        "INSERT INTO qa_jobs(project_id, number, name, description, command, shell, timeout_seconds, enabled, created_by)
+         VALUES (?1, 1, ?2, ?3, ?4, 'powershell', 120, 1, 'seed')",
+        params![
+            project_id,
+            "Tauri compile check",
+            "Default Rust compile verification for this project.",
+            "cargo check --manifest-path src-tauri/Cargo.toml"
+        ],
+    )?;
+    tx.execute(
+        "INSERT INTO qa_job_tags(qa_job_id, tag) VALUES (?1, 'rust')",
+        params![tx.last_insert_rowid()],
+    )?;
+    tx.execute(
+        "INSERT INTO qa_jobs(project_id, number, name, description, command, shell, timeout_seconds, enabled, created_by)
+         VALUES (?1, 2, ?2, ?3, ?4, 'powershell', 120, 1, 'seed')",
+        params![
+            project_id,
+            "TypeScript build",
+            "Default frontend build verification for this project.",
+            "npm run build"
+        ],
+    )?;
+    tx.execute(
+        "INSERT INTO qa_job_tags(qa_job_id, tag) VALUES (?1, 'frontend')",
+        params![tx.last_insert_rowid()],
+    )?;
+
     tx.commit()
 }
 
