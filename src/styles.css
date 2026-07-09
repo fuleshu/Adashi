@@ -1636,6 +1636,17 @@ button {
   gap: 6px;
 }
 
+.folder-picker-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.folder-picker-row button {
+  min-height: 38px;
+  white-space: nowrap;
+}
+
 .checkbox-row {
   align-items: center;
   display: flex;

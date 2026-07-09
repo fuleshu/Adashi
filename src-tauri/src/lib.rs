@@ -17,7 +17,10 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{Manager, Monitor, PhysicalPosition, PhysicalSize, State, WebviewWindow, WindowEvent};
+use tauri::{
+    AppHandle, Manager, Monitor, PhysicalPosition, PhysicalSize, State, WebviewWindow, WindowEvent,
+};
+use tauri_plugin_dialog::DialogExt;
 
 use crate::design::DesignArtifactTypeRecord;
 use crate::fixed_hooks::FixedHookPrompt;
@@ -177,6 +180,19 @@ fn load_dashboard_payload(
 
     let project_row_id = load_project_row_id(db)?;
     let revision = project_state::load_project_revision(db, project_row_id)?.revision;
+    let structurizr_view_key = db
+        .query_row(
+            "SELECT key
+             FROM diagrams
+             WHERE kind = 'structurizr'
+             ORDER BY sort_order, id
+             LIMIT 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|err| err.to_string())?
+        .unwrap_or_else(|| "ProjectContext".to_string());
 
     Ok(DashboardPayload {
         project_id: project.id,
@@ -187,7 +203,7 @@ fn load_dashboard_payload(
         workspace_description: workspace.1,
         structurizr_dsl: workspace.2,
         structurizr_workspace: workspace.3,
-        structurizr_view_key: "AdashiContainers".to_string(),
+        structurizr_view_key,
         design_elements: load_design_elements(&db)?,
         design_relationships: load_design_relationships(&db)?,
         uml_artifact_types: design::supported_uml_artifact_types(),
@@ -238,6 +254,39 @@ fn get_project_revision(
 }
 
 #[tauri::command]
+async fn pick_project_folder(
+    current_folder: Option<String>,
+    app: AppHandle,
+) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut dialog = app.dialog().file().set_title("Select project folder");
+        if let Some(folder) = current_folder
+            .as_deref()
+            .map(str::trim)
+            .filter(|folder| !folder.is_empty())
+        {
+            let folder = PathBuf::from(folder);
+            if folder.is_dir() {
+                dialog = dialog.set_directory(folder);
+            }
+        }
+
+        let folder = dialog.blocking_pick_folder();
+        folder
+            .map(|folder| {
+                folder
+                    .simplified()
+                    .into_path()
+                    .map(|path| settings::normalize_project_folder_path(&path))
+                    .map_err(|err| err.to_string())
+            })
+            .transpose()
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
 fn set_active_project(
     project_id: String,
     state: State<'_, AppState>,
@@ -277,13 +326,28 @@ fn add_project(
         return Err("Project folder is required".to_string());
     }
 
-    let mut project = settings::new_project(trimmed_name.to_string(), trimmed_folder.to_string());
-    let canonical_folder = PathBuf::from(&project.folder)
-        .canonicalize()
-        .unwrap_or_else(|_| PathBuf::from(&project.folder));
-    project.folder = canonical_folder.to_string_lossy().to_string();
+    let project = settings::new_project(
+        trimmed_name.to_string(),
+        settings::normalize_project_folder(trimmed_folder),
+    );
 
-    open_project_database(&project).map_err(|err| err.to_string())?;
+    let settings = state
+        .settings
+        .lock()
+        .map_err(|_| "Settings lock was poisoned".to_string())?;
+
+    if settings
+        .projects
+        .iter()
+        .any(|existing| existing.folder.eq_ignore_ascii_case(&project.folder))
+    {
+        return Err("That project folder is already registered".to_string());
+    }
+
+    drop(settings);
+
+    let db = open_project_database(&project).map_err(|err| err.to_string())?;
+    verify_project_database(&db)?;
 
     let mut settings = state
         .settings
@@ -1010,6 +1074,7 @@ pub fn run_mcp() -> Result<(), Box<dyn std::error::Error>> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let settings_path = settings::settings_path();
             let settings = Arc::new(Mutex::new(
@@ -1044,6 +1109,7 @@ pub fn run() {
             get_app_settings,
             get_dashboard,
             get_project_revision,
+            pick_project_folder,
             set_active_project,
             save_rule_template,
             update_design_element,
@@ -1101,6 +1167,23 @@ pub(crate) fn open_project_database(
     seed::seed_initial_data(&mut db, project)?;
     fixed_hooks::ensure_fixed_hook_prompts(&db).map_err(std::io::Error::other)?;
     Ok(db)
+}
+
+fn verify_project_database(db: &Connection) -> Result<(), String> {
+    let project_row_id = load_project_row_id(db)?;
+    project_state::load_project_revision(db, project_row_id)?;
+    memory::load_memory(db, project_row_id)?;
+
+    if fixed_hooks::load_fixed_hook_prompts(db, project_row_id)?.len() < 2 {
+        return Err("Project database is missing default fixed hook prompts".to_string());
+    }
+
+    db.query_row("SELECT id FROM design_workspaces LIMIT 1", [], |row| {
+        row.get::<_, i64>(0)
+    })
+    .map_err(|err| format!("Project database is missing the default design workspace: {err}"))?;
+
+    Ok(())
 }
 
 fn load_project_row_id(db: &Connection) -> Result<i64, String> {
@@ -1759,4 +1842,145 @@ fn load_qa_checks(db: &Connection) -> Result<Vec<QaCheck>, String> {
 
     rows.collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|err| err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_project_database_creates_seeded_project_store() {
+        let folder = temp_project_folder("adashi-project-init");
+        fs::create_dir_all(&folder).unwrap();
+        let project = settings::new_project(
+            "RaySplatter".to_string(),
+            folder.to_string_lossy().to_string(),
+        );
+
+        let db = open_project_database(&project).unwrap();
+
+        verify_project_database(&db).unwrap();
+        assert!(settings::project_database_path(&project).exists());
+        assert_eq!(
+            db.query_row("SELECT repository_path FROM projects LIMIT 1", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap(),
+            project.folder
+        );
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM project_memory", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM fixed_hook_prompts", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            2
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT name FROM c4_elements WHERE external_id = '1'",
+                [],
+                |row| { row.get::<_, String>(0) }
+            )
+            .unwrap(),
+            "RaySplatter"
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT COUNT(*) FROM c4_elements WHERE name = 'Adashi'",
+                [],
+                |row| { row.get::<_, i64>(0) }
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM agent_tasks", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM qa_jobs", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            0
+        );
+
+        drop(db);
+        let _ = fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn open_project_database_repairs_non_adashi_demo_seed() {
+        let folder = temp_project_folder("adashi-project-repair");
+        fs::create_dir_all(&folder).unwrap();
+        let bad_seed_project = ProjectSettings {
+            id: "adashi".to_string(),
+            name: "Adashi".to_string(),
+            folder: folder.to_string_lossy().to_string(),
+        };
+        let ray_project = ProjectSettings {
+            id: "raysplatter".to_string(),
+            name: "RaySplatter".to_string(),
+            folder: folder.to_string_lossy().to_string(),
+        };
+
+        drop(open_project_database(&bad_seed_project).unwrap());
+        let db = open_project_database(&ray_project).unwrap();
+
+        assert_eq!(
+            db.query_row(
+                "SELECT name FROM c4_elements WHERE external_id = '1'",
+                [],
+                |row| { row.get::<_, String>(0) }
+            )
+            .unwrap(),
+            "RaySplatter"
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT COUNT(*) FROM c4_elements WHERE name = 'Adashi'",
+                [],
+                |row| { row.get::<_, i64>(0) }
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT key FROM diagrams WHERE kind = 'structurizr'",
+                [],
+                |row| { row.get::<_, String>(0) }
+            )
+            .unwrap(),
+            "ProjectContext"
+        );
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM agent_tasks", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            0
+        );
+
+        drop(db);
+        let _ = fs::remove_dir_all(folder);
+    }
+
+    fn temp_project_folder(label: &str) -> PathBuf {
+        let millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        std::env::temp_dir().join(format!("{label}-{}-{millis}", std::process::id()))
+    }
 }

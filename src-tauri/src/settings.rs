@@ -86,7 +86,11 @@ pub fn load_or_init(path: &Path) -> Result<AppSettings, Box<dyn std::error::Erro
     if path.exists() {
         let text = fs::read_to_string(path)?;
         match serde_json::from_str::<AppSettings>(text.trim_start_matches('\u{feff}')) {
-            Ok(settings) => return Ok(normalize(settings)),
+            Ok(settings) => {
+                let settings = normalize(settings);
+                save(path, &settings)?;
+                return Ok(settings);
+            }
             Err(_) => {
                 let backup_path = path.with_extension("json.invalid");
                 let _ = fs::copy(path, backup_path);
@@ -107,7 +111,8 @@ pub fn save(path: &Path, settings: &AppSettings) -> Result<(), Box<dyn std::erro
         fs::create_dir_all(parent)?;
     }
 
-    let text = serde_json::to_string_pretty(settings)?;
+    let settings = normalize(settings.clone());
+    let text = serde_json::to_string_pretty(&settings)?;
     fs::write(path, format!("{text}\n"))?;
     Ok(())
 }
@@ -122,7 +127,36 @@ pub fn project_database_path(project: &ProjectSettings) -> PathBuf {
 
 pub fn new_project(name: String, folder: String) -> ProjectSettings {
     let id = make_project_id(&name);
-    ProjectSettings { id, name, folder }
+    ProjectSettings {
+        id,
+        name,
+        folder: normalize_project_folder_text(&folder),
+    }
+}
+
+pub fn normalize_project_folder(folder: &str) -> String {
+    let folder = PathBuf::from(folder)
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(folder));
+    normalize_project_folder_path(&folder)
+}
+
+pub fn normalize_project_folder_path(path: &Path) -> String {
+    normalize_project_folder_text(&path.to_string_lossy())
+}
+
+pub fn normalize_project_folder_text(folder: &str) -> String {
+    let folder = folder.trim();
+
+    #[cfg(windows)]
+    {
+        normalize_windows_project_folder(folder)
+    }
+
+    #[cfg(not(windows))]
+    {
+        folder.to_string()
+    }
 }
 
 pub fn save_rule_template(
@@ -179,6 +213,11 @@ fn normalize(mut settings: AppSettings) -> AppSettings {
         settings.projects.push(default_project());
     }
 
+    for project in &mut settings.projects {
+        project.name = project.name.trim().to_string();
+        project.folder = normalize_project_folder_text(&project.folder);
+    }
+
     let last_id_is_valid = settings
         .last_active_project_id
         .as_ref()
@@ -214,12 +253,12 @@ fn default_project() -> ProjectSettings {
 
 fn default_project_folder() -> String {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or(manifest_dir)
-        .to_string_lossy()
-        .to_string()
+    normalize_project_folder_path(
+        &manifest_dir
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or(manifest_dir),
+    )
 }
 
 fn make_project_id(name: &str) -> String {
@@ -266,6 +305,38 @@ fn normalize_rule_templates(templates: &mut [RuleTemplate]) {
             template.updated_at = template.created_at.clone();
         }
     }
+}
+
+#[cfg(windows)]
+fn normalize_windows_project_folder(folder: &str) -> String {
+    let mut folder = folder.replace('/', "\\");
+
+    if let Some(rest) = folder.strip_prefix(r"\\?\UNC\") {
+        folder = format!(r"\\{rest}");
+    } else if let Some(rest) = folder.strip_prefix(r"\\?\") {
+        folder = rest.to_string();
+    }
+
+    collapse_windows_separators(&folder)
+}
+
+#[cfg(windows)]
+fn collapse_windows_separators(folder: &str) -> String {
+    let preserves_unc_prefix = folder.starts_with(r"\\");
+    let mut normalized = String::with_capacity(folder.len());
+
+    for character in folder.chars() {
+        if character == '\\' {
+            let can_preserve_unc_prefix = preserves_unc_prefix && normalized == r"\";
+            if !normalized.ends_with('\\') || can_preserve_unc_prefix {
+                normalized.push(character);
+            }
+        } else {
+            normalized.push(character);
+        }
+    }
+
+    normalized
 }
 
 fn make_rule_template_id(name: &str) -> String {
@@ -366,6 +437,24 @@ mod tests {
 
         delete_rule_template(&mut settings, &template.id).unwrap();
         assert!(settings.rule_templates.is_empty());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn normalizes_windows_verbatim_project_folder() {
+        assert_eq!(
+            normalize_project_folder_text(r"\\?\C:\Unreal\RaySplatter"),
+            r"C:\Unreal\RaySplatter"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn normalizes_duplicate_windows_drive_separators() {
+        assert_eq!(
+            normalize_project_folder_text(r"C:\\src\\MyProject"),
+            r"C:\src\MyProject"
+        );
     }
 
     fn test_settings_path(label: &str) -> PathBuf {

@@ -1,13 +1,41 @@
 use crate::settings::ProjectSettings;
 use rusqlite::{params, Connection};
+use serde_json::json;
 
 pub fn seed_initial_data(db: &mut Connection, project: &ProjectSettings) -> rusqlite::Result<()> {
     let project_count: i64 = db.query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))?;
     if project_count > 0 {
+        db.execute(
+            "UPDATE projects
+             SET name = ?1,
+                 slug = ?2,
+                 repository_path = ?3,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = (
+                SELECT id
+                FROM projects
+                ORDER BY id
+                LIMIT 1
+            )",
+            params![project.name, project.id, project.folder],
+        )?;
+        if project.id != "adashi" {
+            repair_misseeded_adashi_demo(db, project)?;
+        }
         return Ok(());
     }
 
-    let tx = db.transaction()?;
+    if project.id == "adashi" {
+        return seed_adashi_demo_data(db, project);
+    }
+
+    seed_clean_project_data(db, project)
+}
+
+fn seed_project_header(
+    tx: &rusqlite::Transaction<'_>,
+    project: &ProjectSettings,
+) -> rusqlite::Result<i64> {
     tx.execute(
         "INSERT INTO projects(name, slug, repository_path) VALUES (?1, ?2, ?3)",
         params![project.name, project.id, project.folder],
@@ -23,6 +51,242 @@ pub fn seed_initial_data(db: &mut Connection, project: &ProjectSettings) -> rusq
         "INSERT INTO project_memory(project_id, protocol_rule, memory_body) VALUES (?1, ?2, '')",
         params![project_id, crate::memory::DEFAULT_MEMORY_RULE],
     )?;
+
+    Ok(project_id)
+}
+
+fn seed_clean_project_data(db: &mut Connection, project: &ProjectSettings) -> rusqlite::Result<()> {
+    let tx = db.transaction()?;
+    let project_id = seed_project_header(&tx, project)?;
+    seed_clean_workspace(&tx, project_id, project)?;
+
+    tx.commit()
+}
+
+fn seed_clean_workspace(
+    tx: &rusqlite::Transaction<'_>,
+    project_id: i64,
+    project: &ProjectSettings,
+) -> rusqlite::Result<()> {
+    let workspace_seed = CleanWorkspaceSeed::new(project);
+
+    tx.execute(
+        "INSERT INTO design_workspaces(project_id, name, description, structurizr_dsl, structurizr_json)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            project_id,
+            format!("{} Architecture Workspace", project.name),
+            "C4 and UML design workspace for Codex-driven project planning and execution.",
+            workspace_seed.structurizr_dsl,
+            workspace_seed.structurizr_json,
+        ],
+    )?;
+    let workspace_id = tx.last_insert_rowid();
+
+    tx.execute(
+        "INSERT INTO diagrams(workspace_id, kind, key, title, source, diagram_type, attached_to_external_id, sort_order)
+         VALUES (?1, 'structurizr', ?2, ?3, ?4, 'context', '1', 1)",
+        params![
+            workspace_id,
+            workspace_seed.view_key,
+            format!("{} context view", project.name),
+            workspace_seed.structurizr_json,
+        ],
+    )?;
+
+    tx.execute(
+        "INSERT INTO c4_elements(workspace_id, external_id, parent_external_id, element_type, name, description, technology, tags)
+         VALUES (?1, '1', NULL, 'Software System', ?2, ?3, '', 'Element,Software System')",
+        params![workspace_id, project.name, workspace_seed.system_description],
+    )?;
+
+    Ok(())
+}
+
+fn repair_misseeded_adashi_demo(
+    db: &mut Connection,
+    project: &ProjectSettings,
+) -> rusqlite::Result<()> {
+    let project_id = db.query_row("SELECT id FROM projects ORDER BY id LIMIT 1", [], |row| {
+        row.get::<_, i64>(0)
+    })?;
+
+    if !looks_like_untouched_adashi_demo_seed(db, project_id)? {
+        return Ok(());
+    }
+
+    let tx = db.transaction()?;
+    tx.execute(
+        "DELETE FROM design_bindings
+         WHERE workspace_id IN (
+            SELECT id FROM design_workspaces WHERE project_id = ?1
+         )",
+        params![project_id],
+    )?;
+    tx.execute(
+        "DELETE FROM diagrams
+         WHERE workspace_id IN (
+            SELECT id FROM design_workspaces WHERE project_id = ?1
+         )",
+        params![project_id],
+    )?;
+    tx.execute(
+        "DELETE FROM c4_relationships
+         WHERE workspace_id IN (
+            SELECT id FROM design_workspaces WHERE project_id = ?1
+         )",
+        params![project_id],
+    )?;
+    tx.execute(
+        "DELETE FROM c4_elements
+         WHERE workspace_id IN (
+            SELECT id FROM design_workspaces WHERE project_id = ?1
+         )",
+        params![project_id],
+    )?;
+    tx.execute(
+        "DELETE FROM design_workspaces WHERE project_id = ?1",
+        params![project_id],
+    )?;
+    tx.execute(
+        "DELETE FROM task_design_specification_links
+         WHERE task_id IN (
+            SELECT id FROM agent_tasks WHERE project_id = ?1
+         )",
+        params![project_id],
+    )?;
+    tx.execute(
+        "DELETE FROM task_qa_entries
+         WHERE task_id IN (
+            SELECT id FROM agent_tasks WHERE project_id = ?1
+         )",
+        params![project_id],
+    )?;
+    tx.execute(
+        "DELETE FROM agent_tasks WHERE project_id = ?1",
+        params![project_id],
+    )?;
+    tx.execute(
+        "DELETE FROM coding_guidelines WHERE project_id = ?1",
+        params![project_id],
+    )?;
+    tx.execute(
+        "DELETE FROM post_task_commands WHERE project_id = ?1",
+        params![project_id],
+    )?;
+    tx.execute(
+        "DELETE FROM qa_checks WHERE project_id = ?1",
+        params![project_id],
+    )?;
+    tx.execute(
+        "DELETE FROM qa_job_design_links
+         WHERE qa_job_id IN (
+            SELECT id FROM qa_jobs WHERE project_id = ?1
+         )",
+        params![project_id],
+    )?;
+    tx.execute(
+        "DELETE FROM qa_job_task_links
+         WHERE qa_job_id IN (
+            SELECT id FROM qa_jobs WHERE project_id = ?1
+         )",
+        params![project_id],
+    )?;
+    tx.execute(
+        "DELETE FROM qa_job_tags
+         WHERE qa_job_id IN (
+            SELECT id FROM qa_jobs WHERE project_id = ?1
+         )",
+        params![project_id],
+    )?;
+    tx.execute(
+        "DELETE FROM qa_job_runs
+         WHERE qa_run_id IN (
+            SELECT id FROM qa_runs WHERE project_id = ?1
+         )
+         OR qa_job_id IN (
+            SELECT id FROM qa_jobs WHERE project_id = ?1
+         )",
+        params![project_id],
+    )?;
+    tx.execute(
+        "DELETE FROM qa_jobs WHERE project_id = ?1",
+        params![project_id],
+    )?;
+    tx.execute(
+        "DELETE FROM qa_runs WHERE project_id = ?1",
+        params![project_id],
+    )?;
+
+    seed_clean_workspace(&tx, project_id, project)?;
+    tx.commit()
+}
+
+fn looks_like_untouched_adashi_demo_seed(
+    db: &Connection,
+    project_id: i64,
+) -> rusqlite::Result<bool> {
+    let matching_workspaces: i64 = db.query_row(
+        "SELECT COUNT(*)
+         FROM design_workspaces
+         WHERE project_id = ?1
+           AND structurizr_dsl = ?2
+           AND structurizr_json = ?3",
+        params![project_id, STRUCTURIZR_DSL, STRUCTURIZR_JSON],
+        |row| row.get(0),
+    )?;
+    if matching_workspaces != 1 {
+        return Ok(false);
+    }
+
+    let adashi_elements: i64 = db.query_row(
+        "SELECT COUNT(*)
+         FROM c4_elements e
+         JOIN design_workspaces w ON w.id = e.workspace_id
+         WHERE w.project_id = ?1
+           AND e.external_id = '2'
+           AND e.name = 'Adashi'",
+        params![project_id],
+        |row| row.get(0),
+    )?;
+    let default_tasks: i64 = db.query_row(
+        "SELECT COUNT(*)
+         FROM agent_tasks
+         WHERE project_id = ?1
+           AND title IN ('Expose design workspace over MCP', 'Add task injection workflow')",
+        params![project_id],
+        |row| row.get(0),
+    )?;
+    let all_tasks: i64 = db.query_row(
+        "SELECT COUNT(*) FROM agent_tasks WHERE project_id = ?1",
+        params![project_id],
+        |row| row.get(0),
+    )?;
+    let seeded_jobs: i64 = db.query_row(
+        "SELECT COUNT(*)
+         FROM qa_jobs
+         WHERE project_id = ?1
+           AND created_by = 'seed'
+           AND name IN ('Tauri compile check', 'TypeScript build')",
+        params![project_id],
+        |row| row.get(0),
+    )?;
+    let all_jobs: i64 = db.query_row(
+        "SELECT COUNT(*) FROM qa_jobs WHERE project_id = ?1",
+        params![project_id],
+        |row| row.get(0),
+    )?;
+
+    Ok(adashi_elements == 1
+        && default_tasks == 2
+        && all_tasks == 2
+        && seeded_jobs == 2
+        && all_jobs == 2)
+}
+
+fn seed_adashi_demo_data(db: &mut Connection, project: &ProjectSettings) -> rusqlite::Result<()> {
+    let tx = db.transaction()?;
+    let project_id = seed_project_header(&tx, project)?;
 
     tx.execute(
         "INSERT INTO design_workspaces(project_id, name, description, structurizr_dsl, structurizr_json)
@@ -167,6 +431,104 @@ pub fn seed_initial_data(db: &mut Connection, project: &ProjectSettings) -> rusq
     )?;
 
     tx.commit()
+}
+
+struct CleanWorkspaceSeed {
+    view_key: String,
+    system_description: String,
+    structurizr_dsl: String,
+    structurizr_json: String,
+}
+
+impl CleanWorkspaceSeed {
+    fn new(project: &ProjectSettings) -> Self {
+        let view_key = "ProjectContext".to_string();
+        let system_description = format!("{} project workspace.", project.name);
+        let dsl_name = escape_structurizr_string(&project.name);
+        let dsl_description = escape_structurizr_string(&system_description);
+        let structurizr_dsl = format!(
+            r#"workspace "{dsl_name}" "{dsl_description}" {{
+    model {{
+        project = softwareSystem "{dsl_name}" "{dsl_description}"
+    }}
+
+    views {{
+        systemContext project "{view_key}" {{
+            include *
+            autolayout lr
+        }}
+    }}
+}}"#
+        );
+        let structurizr_json = json!({
+            "id": 1,
+            "name": project.name,
+            "description": system_description,
+            "model": {
+                "people": [],
+                "softwareSystems": [
+                    {
+                        "id": "1",
+                        "tags": "Element,Software System",
+                        "name": project.name,
+                        "description": system_description,
+                        "relationships": [],
+                        "location": "Internal",
+                        "containers": [],
+                        "type": "Software System",
+                        "canonicalName": format!("/{}", project.name),
+                    }
+                ]
+            },
+            "views": {
+                "systemContextViews": [
+                    {
+                        "softwareSystemId": "1",
+                        "key": view_key,
+                        "description": format!("System context view for {}.", project.name),
+                        "elements": [
+                            { "id": "1", "x": 520, "y": 260, "width": 450, "height": 300, "relationships": [] }
+                        ],
+                        "animations": [],
+                        "automaticLayout": {
+                            "implementation": "Dagre",
+                            "rankDirection": "LeftRight",
+                            "rankSeparation": 300,
+                            "nodeSeparation": 300,
+                            "edgeSeparation": 50,
+                            "vertices": false
+                        }
+                    }
+                ],
+                "configuration": {
+                    "defaultView": view_key,
+                    "styles": {
+                        "elements": [
+                            { "tag": "Software System", "background": "#335c67", "color": "#ffffff" },
+                            { "tag": "Container", "background": "#fffaf0", "color": "#1f2933", "stroke": "#2f6f6d" },
+                            { "tag": "Component", "background": "#f8faf7", "color": "#1f2933", "stroke": "#7fb6ad" },
+                            { "tag": "Database", "shape": "Cylinder", "background": "#e4b363", "color": "#1f2933" }
+                        ],
+                        "relationships": [
+                            { "tag": "Relationship", "color": "#47615f", "thickness": 3 }
+                        ]
+                    }
+                }
+            }
+        })
+        .to_string();
+
+        Self {
+            view_key,
+            system_description,
+            structurizr_dsl,
+            structurizr_json,
+        }
+    }
+}
+
+fn escape_structurizr_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 struct ElementSeed {

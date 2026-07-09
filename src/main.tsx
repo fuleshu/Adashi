@@ -1468,7 +1468,7 @@ function buildBranchStructurizrWorkspace(
   fallbackViewKey: string,
   projectionMode: DesignProjectionMode,
 ): StructurizrProjection {
-  const viewKey = `Adashi-${projectionMode}-${activeLevel}-${sanitizeViewKey(activeBranchElement?.externalId ?? "root")}`;
+  const viewKey = `${sanitizeViewKey(payload.projectId)}-${projectionMode}-${activeLevel}-${sanitizeViewKey(activeBranchElement?.externalId ?? "root")}`;
   const branchIds = selectStructurizrViewElementIds(payload.designElements, activeLevel, activeBranchElement, rootElement);
   const dependencyProjection =
     projectionMode === "dependencies" && activeLevel !== "context"
@@ -2530,10 +2530,11 @@ function SettingsView({
 }) {
   const [name, setName] = React.useState("");
   const [folder, setFolder] = React.useState("");
+  const [isPickingFolder, setIsPickingFolder] = React.useState(false);
 
   function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    invoke<AppSettings>("add_project", { name, folder })
+    invoke<AppSettings>("add_project", { name: name.trim(), folder: folder.trim() })
       .then((updatedSettings) => {
         const projectId = updatedSettings.lastActiveProjectId ?? updatedSettings.projects[0]?.id;
         setName("");
@@ -2541,6 +2542,18 @@ function SettingsView({
         onAdd(updatedSettings, projectId);
       })
       .catch((reason) => onError(String(reason)));
+  }
+
+  function browseFolder() {
+    setIsPickingFolder(true);
+    invoke<string | null>("pick_project_folder", { currentFolder: folder.trim() || null })
+      .then((selectedFolder) => {
+        if (selectedFolder) {
+          setFolder(selectedFolder);
+        }
+      })
+      .catch((reason) => onError(String(reason)))
+      .finally(() => setIsPickingFolder(false));
   }
 
   function remove(projectId: string) {
@@ -2597,7 +2610,17 @@ function SettingsView({
           </label>
           <label>
             <span>Folder</span>
-            <input value={folder} onChange={(event) => setFolder(event.target.value)} placeholder="C:\\src\\MyProject" />
+            <div className="folder-picker-row">
+              <input
+                value={folder}
+                onChange={(event) => setFolder(event.target.value)}
+                placeholder="C:\src\MyProject"
+              />
+              <button disabled={isPickingFolder} onClick={browseFolder} title="Browse for project folder" type="button">
+                <Folder size={17} />
+                Browse
+              </button>
+            </div>
           </label>
           <button type="submit">
             <Plus size={17} />
