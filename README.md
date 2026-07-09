@@ -1,10 +1,12 @@
 # Adashi
 
-Adashi is a local desktop workspace for agentic coding. It gives coding agents a durable project memory, explicit lifecycle rules, formal design context, task tracking, and QA evidence without pushing that responsibility into a chat transcript or a remote service.
+Adashi is a local desktop add-on and dashboard for agentic coding workspaces such as Codex or Claude Code. It connects to the agent as an MCP server and gives that agent durable project memory, explicit lifecycle rules, formal design context, task tracking, and QA evidence without pushing that responsibility into a chat transcript or a remote service.
 
-It is built for the moment when an agent stops being a one-shot autocomplete helper and starts acting like a long-running collaborator on a real project. Small repositories can survive on the current prompt plus a few open files. Large projects need more: architecture that can be queried, decisions that survive across sessions, tasks that stay linked to the parts of the system they change, and verification commands that are repeatable.
+It is built for the moment when an agent stops being a one-shot autocomplete helper and starts acting like a long-running collaborator on a real project. The coding still happens in the agentic workspace you already use. Adashi sits beside it as the local context, design, task, and verification layer. Small repositories can survive on the current prompt plus a few open files. Large projects need more: architecture that can be queried, decisions that survive across sessions, tasks that stay linked to the parts of the system they change, and verification commands that are repeatable.
 
 Adashi provides that layer.
+
+![Adashi design dashboard](screenshots/ScreenshotDesignLevel2.jpg)
 
 ## Why It Exists
 
@@ -14,7 +16,7 @@ For developers, the failure mode is familiar: the agent forgets prior decisions,
 
 For non-developer "vibe coders", the problem is sharper. You can describe what you want, but it is hard to keep the agent aligned with the actual shape of the app, the existing product decisions, and the verification steps that prove a change worked. The bigger the project gets, the more the agent needs a map instead of vibes alone.
 
-Adashi improves agentic coding by making the important project context explicit:
+Adashi improves agentic coding by making important project context explicit and available to the agent through MCP:
 
 - Agents can read project memory before starting work.
 - Agents can receive rule injections at predictable lifecycle points.
@@ -23,25 +25,25 @@ Adashi improves agentic coding by making the important project context explicit:
 - QA jobs can be stored, linked, run, and reviewed as evidence.
 - Each project keeps its own `.adashi` database, so context travels with the repository.
 
-The goal is not to replace the coding agent. The goal is to give the agent a project-native nervous system: memory, structure, intent, and feedback.
+The goal is not to replace Codex, Claude Code, or any other coding agent. The goal is to give those agents a project-native support system: memory, structure, intent, and feedback.
 
 ## Who It Helps
 
-Adashi is useful for experienced developers who want agents to respect architecture and project rules across sessions. It is especially helpful when a repository has multiple subsystems, a non-trivial desktop or backend architecture, or recurring verification commands that should not be rediscovered every day.
+Adashi is useful for experienced developers who want agents such as Codex or Claude Code to respect architecture and project rules across sessions. It is especially helpful when a repository has multiple subsystems, a non-trivial desktop or backend architecture, or recurring verification commands that should not be rediscovered every day.
 
 It is also useful for non-developers building with AI. Adashi turns "please keep this in mind" into stored project memory, "follow this rule" into lifecycle prompts, and "this feature belongs over there" into linked design and task records the agent can read directly.
 
 ## Features
 
-### Multi-Project Local Workspace
+### Multi-Project Local Dashboard
 
-Adashi is a Tauri desktop app that manages multiple local projects. App-level settings live in the user's local application data, while each project gets its own `.adashi/adashi.sqlite3` database inside the project folder.
+Adashi is a Tauri desktop dashboard that manages context for multiple local projects. App-level settings live in the user's local application data, while each project gets its own `.adashi/adashi.sqlite3` database inside the project folder.
 
 This keeps project memory, tasks, rules, design, and QA evidence local to the repository instead of scattering it across chat history.
 
 ### First-Project Onboarding
 
-When no usable project is configured, Adashi shows a blocking onboarding flow instead of silently inventing a fake default project. You can create or select the first project folder, and Adashi initializes the local project store before opening the main workspace.
+When no usable project is configured, Adashi shows a blocking onboarding flow instead of silently inventing a fake default project. You can create or select the first project folder, and Adashi initializes the local project store before opening the dashboard.
 
 ### Project Memory
 
@@ -87,7 +89,7 @@ For agents, the important part is determinism: they can query overview, scope, s
 
 ### MCP Server For Agents
 
-Adashi includes a local stdio MCP server. It lets compatible agents access project context and mutate project state through explicit tools.
+Adashi includes a local stdio MCP server. It lets compatible coding agents access project context and mutate project state through explicit tools while the agent continues to run in its own workspace.
 
 The MCP surface includes tools for:
 
@@ -134,31 +136,15 @@ Adashi separates user-level and project-level state:
 
 This separation lets one local app manage many repositories while keeping repository-specific context near the repository.
 
-## Suggested Screenshot
+## More Screenshots
 
-For GitHub, the most useful screenshot would be a wide desktop capture of the main Adashi dashboard with:
+Tasks can be linked directly to design specifications, so implementation work keeps a visible connection to the architecture it is meant to change.
 
-- The project switcher visible in the top bar
-- The Design view open
-- A readable Structurizr or Mermaid diagram in the main viewer
-- The design tree or inspector visible
-- The left navigation showing Design, Tasks, Rules, Memory, Settings, and QA
+![Adashi task workspace](screenshots/ScreenshotTasks.jpg)
 
-That single image would communicate the core idea: Adashi is not just a prompt editor; it is a local project control room for agentic coding.
+QA jobs keep verification commands, design links, task links, and run evidence in the project instead of leaving them buried in terminal history.
 
-Recommended file path once captured:
-
-```text
-docs/screenshots/adashi-dashboard.png
-```
-
-After the screenshot exists, add it near the top of this README:
-
-```markdown
-![Adashi dashboard](docs/screenshots/adashi-dashboard.png)
-```
-
-Optional second screenshot: the Task or QA workspace with a task linked to design specifications. That would show how implementation intent and verification are connected.
+![Adashi QA workspace](screenshots/ScreenshotQA.jpg)
 
 ## Tech Stack
 
