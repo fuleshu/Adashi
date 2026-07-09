@@ -1127,6 +1127,7 @@ fn validate_mermaid(source: &str) -> Option<String> {
     }
 
     let first_line = trimmed.lines().next().unwrap_or("").trim();
+    let is_sequence_diagram = first_line.starts_with("sequenceDiagram");
     let valid_start = first_line.starts_with("sequenceDiagram")
         || first_line.starts_with("flowchart ")
         || first_line.starts_with("graph ")
@@ -1155,7 +1156,84 @@ fn validate_mermaid(source: &str) -> Option<String> {
         }
     }
 
+    if is_sequence_diagram {
+        if let Some(error) = validate_sequence_diagram_statement_separators(trimmed) {
+            return Some(error);
+        }
+    }
+
     None
+}
+
+fn validate_sequence_diagram_statement_separators(source: &str) -> Option<String> {
+    for (line_index, line) in source.lines().enumerate() {
+        let mut start_index = 0;
+
+        while let Some(relative_index) = line[start_index..].find(';') {
+            let semicolon_index = start_index + relative_index;
+            if is_mermaid_semicolon_entity(line, semicolon_index) {
+                start_index = semicolon_index + 1;
+                continue;
+            }
+
+            let following_statement = line[semicolon_index + 1..]
+                .split(';')
+                .next()
+                .unwrap_or("")
+                .trim();
+            if !following_statement.is_empty()
+                && !looks_like_sequence_diagram_statement(following_statement)
+            {
+                return Some(format!(
+                    "line {} contains a raw semicolon in sequence text; Mermaid treats ';' as a statement separator, so replace it with a period or escape it as #59;",
+                    line_index + 1
+                ));
+            }
+
+            start_index = semicolon_index + 1;
+        }
+    }
+
+    None
+}
+
+fn is_mermaid_semicolon_entity(line: &str, semicolon_index: usize) -> bool {
+    let prefix = &line[..semicolon_index];
+    prefix.ends_with("#59") || prefix.ends_with("&#59")
+}
+
+fn looks_like_sequence_diagram_statement(statement: &str) -> bool {
+    let lower = statement.to_ascii_lowercase();
+    let keyword = lower.split_whitespace().next().unwrap_or("");
+    matches!(
+        keyword,
+        "actor"
+            | "and"
+            | "alt"
+            | "autonumber"
+            | "activate"
+            | "box"
+            | "break"
+            | "critical"
+            | "create"
+            | "deactivate"
+            | "destroy"
+            | "else"
+            | "end"
+            | "loop"
+            | "note"
+            | "opt"
+            | "option"
+            | "par"
+            | "participant"
+            | "rect"
+    ) || statement.contains("->")
+        || statement.contains("-->")
+        || statement.contains("-->>")
+        || statement.contains("-x")
+        || statement.contains("--x")
+        || statement.contains("-)")
+        || statement.contains("--)")
 }
 
 pub fn supported_uml_artifact_types() -> Vec<DesignArtifactTypeRecord> {
@@ -1854,6 +1932,37 @@ mod tests {
     use rusqlite::{params, Connection};
 
     #[test]
+    fn validate_mermaid_rejects_sequence_note_raw_semicolon_text() {
+        let source = "sequenceDiagram
+    participant Pipeline
+    participant Session
+    Note over Pipeline,Session: The subsystem never serializes a parallel model; Save delegates to the live USD stage session.";
+
+        let error = validate_mermaid(source).unwrap();
+
+        assert!(error.contains("line 4"));
+        assert!(error.contains("raw semicolon"));
+    }
+
+    #[test]
+    fn validate_mermaid_accepts_sequence_note_escaped_semicolon_text() {
+        let source = "sequenceDiagram
+    participant Pipeline
+    participant Session
+    Note over Pipeline,Session: The subsystem never serializes a parallel model#59; Save delegates to the live USD stage session.";
+
+        assert_eq!(validate_mermaid(source), None);
+    }
+
+    #[test]
+    fn validate_mermaid_accepts_sequence_semicolon_statement_separator() {
+        let source = "sequenceDiagram
+    A->>B: one; B-->>A: two";
+
+        assert_eq!(validate_mermaid(source), None);
+    }
+
+    #[test]
     fn save_changes_deletes_relationship_and_uml_artifact() {
         let (mut db, project_id, workspace_id) = setup_design_workspace();
         insert_minimal_design(&db, workspace_id);
@@ -2001,6 +2110,46 @@ mod tests {
         assert!(result.errors[0].message.contains("missing-rel"));
     }
 
+    #[test]
+    fn save_changes_rejects_unrenderable_sequence_uml_without_bumping_revision() {
+        let (mut db, project_id, workspace_id) = setup_design_workspace();
+        insert_minimal_design(&db, workspace_id);
+
+        let result = save_changes(
+            &mut db,
+            project_id,
+            0,
+            "Store sequence diagram.",
+            &[change("upsert_uml").with_sequence_uml(
+                "SaveSequence",
+                "Project save sequence",
+                "container-a",
+                "sequenceDiagram
+    participant Pipeline
+    participant Session
+    Note over Pipeline,Session: The subsystem never serializes a parallel model; Save delegates to the live USD stage session.",
+            )],
+        )
+        .unwrap();
+
+        assert!(!result.ok);
+        assert!(!result.stored);
+        assert_eq!(result.revision, 0);
+        assert_eq!(result.errors[0].code, "uml.syntax_error");
+        assert!(result.errors[0].message.contains("raw semicolon"));
+
+        let stored_count: i64 = db
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM diagrams
+                 WHERE workspace_id = ?1 AND key = 'SaveSequence'",
+                params![workspace_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored_count, 0);
+    }
+
     fn setup_design_workspace() -> (Connection, i64, i64) {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(include_str!("schema.sql")).unwrap();
@@ -2094,6 +2243,22 @@ mod tests {
 
         fn with_key(mut self, key: &str) -> DesignChange {
             self.0.key = Some(key.to_string());
+            self.0
+        }
+
+        fn with_sequence_uml(
+            mut self,
+            key: &str,
+            title: &str,
+            attached_to_external_id: &str,
+            source: &str,
+        ) -> DesignChange {
+            self.0.key = Some(key.to_string());
+            self.0.title = Some(title.to_string());
+            self.0.language = Some("mermaid".to_string());
+            self.0.diagram_type = Some("sequence".to_string());
+            self.0.attached_to_external_id = Some(attached_to_external_id.to_string());
+            self.0.source = Some(source.to_string());
             self.0
         }
     }
