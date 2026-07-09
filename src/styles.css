@@ -44,6 +44,73 @@ button {
   justify-content: center;
 }
 
+.onboarding-shell {
+  align-items: center;
+  background: #f3f0e8;
+  display: flex;
+  height: 100vh;
+  justify-content: center;
+  overflow: auto;
+  padding: 28px;
+}
+
+.onboarding-panel {
+  background: #fffdf8;
+  border: 1px solid #ddd8cd;
+  border-radius: 8px;
+  box-shadow: 0 16px 44px rgba(31, 41, 51, 0.12);
+  display: grid;
+  gap: 20px;
+  max-width: 560px;
+  padding: 26px;
+  width: min(560px, 100%);
+}
+
+.onboarding-heading {
+  display: grid;
+  gap: 7px;
+}
+
+.onboarding-heading h2,
+.onboarding-heading p {
+  margin: 0;
+}
+
+.onboarding-heading h2 {
+  color: #1d2a2a;
+  font-size: 28px;
+  line-height: 1.15;
+}
+
+.onboarding-heading p {
+  color: #617170;
+  line-height: 1.45;
+}
+
+.form-error {
+  background: #fff3ed;
+  border: 1px solid #f0b69d;
+  border-radius: 7px;
+  color: #8f3517;
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.secondary-action {
+  align-items: center;
+  background: transparent;
+  border: 1px solid #d4cebf;
+  border-radius: 7px;
+  color: #43514f;
+  cursor: pointer;
+  display: flex;
+  gap: 7px;
+  justify-content: center;
+  min-height: 38px;
+}
+
 .spin {
   animation: spin 1.2s linear infinite;
 }
@@ -588,22 +655,38 @@ button {
   padding: 0 9px;
 }
 
-.zoom-control {
+.viewer-slider-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.diagram-range-control {
   align-items: center;
   color: #617170;
   display: grid;
   gap: 6px;
-  grid-template-columns: auto minmax(110px, 160px) auto auto auto;
   min-width: 0;
 }
 
-.zoom-control input {
+.zoom-control {
+  grid-template-columns: auto minmax(110px, 160px) auto auto auto;
+}
+
+.font-control {
+  grid-template-columns: auto minmax(100px, 150px) auto;
+}
+
+.diagram-range-control input {
   accent-color: #2f6f6d;
   min-width: 0;
   width: 100%;
 }
 
-.zoom-control button {
+.diagram-range-control button {
   background: #fffdf8;
   border: 1px solid #d4cebf;
   border-radius: 6px;
@@ -616,12 +699,12 @@ button {
   padding: 0 8px;
 }
 
-.zoom-control button:hover {
+.diagram-range-control button:hover {
   background: #e6f1ed;
   border-color: #b7cdc6;
 }
 
-.zoom-control span {
+.diagram-range-control span {
   color: #43514f;
   font-size: 11px;
   font-weight: 760;
@@ -913,16 +996,45 @@ button {
 }
 
 .mermaid-host {
-  align-items: center;
+  align-items: flex-start;
   display: flex;
-  justify-content: center;
-  overflow: auto;
-  padding: 18px;
+  justify-content: flex-start;
+  overflow: hidden;
+  padding: 0;
+}
+
+.mermaid-host.pannable {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.mermaid-host.panning {
+  cursor: grabbing;
+}
+
+.mermaid-content {
+  color: #33403f;
+  flex: 0 0 auto;
+  line-height: 1.35;
+  transform-origin: 0 0;
 }
 
 .mermaid-host svg {
   height: auto;
-  max-width: 100%;
+  max-width: none;
+}
+
+.mermaid-content svg text,
+.mermaid-content svg .label,
+.mermaid-content svg .nodeLabel,
+.mermaid-content svg .edgeLabel,
+.mermaid-content svg .messageText,
+.mermaid-content svg .actor,
+.mermaid-content svg .loopText,
+.mermaid-content svg .stateLabel,
+.mermaid-content svg span {
+  font-size: var(--mermaid-font-size) !important;
 }
 
 .brief-panel {
@@ -1626,9 +1738,14 @@ button {
   background: #a93226;
 }
 
-.project-row button:disabled {
+.project-row button:disabled,
+.settings-form button:disabled {
   cursor: not-allowed;
   opacity: 0.4;
+}
+
+.secondary-action:hover {
+  background: #f2ede4;
 }
 
 .settings-form label {

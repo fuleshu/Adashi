@@ -46,7 +46,74 @@
       let currentDiagram;
       let fitTimer;
       let currentZoomPercent = 100;
+      let currentFontSize = 20;
+      let lastWorkspacePayload = null;
       let pendingZoomPercent = null;
+
+      const minimumFontSize = 12;
+      const maximumFontSize = 28;
+      const relationshipFontRatio = 0.8;
+
+      function clampFontSize(fontSize) {
+        if (typeof fontSize !== "number" || !Number.isFinite(fontSize)) {
+          return currentFontSize;
+        }
+
+        return Math.max(minimumFontSize, Math.min(maximumFontSize, Math.round(fontSize)));
+      }
+
+      function cloneWorkspace(workspace) {
+        return JSON.parse(JSON.stringify(workspace));
+      }
+
+      function findStyle(styles, tag) {
+        return styles.find(function (style) {
+          return style && style.tag === tag;
+        });
+      }
+
+      function ensureStyle(styles, tag) {
+        let style = findStyle(styles, tag);
+
+        if (!style) {
+          style = { tag };
+          styles.push(style);
+        }
+
+        return style;
+      }
+
+      function applyFontSize(workspace, fontSize) {
+        const adjustedWorkspace = cloneWorkspace(workspace);
+        const configuration = adjustedWorkspace.views && adjustedWorkspace.views.configuration;
+
+        if (!configuration) {
+          return adjustedWorkspace;
+        }
+
+        configuration.styles = configuration.styles || {};
+        configuration.styles.elements = configuration.styles.elements || [];
+        configuration.styles.relationships = configuration.styles.relationships || [];
+
+        const elementFontSize = clampFontSize(fontSize);
+        const relationshipFontSize = Math.max(10, Math.round(elementFontSize * relationshipFontRatio));
+
+        ensureStyle(configuration.styles.elements, "Element").fontSize = elementFontSize;
+        configuration.styles.elements.forEach(function (style) {
+          if (style && typeof style.tag === "string" && !style.tag.startsWith("Diagram:")) {
+            style.fontSize = elementFontSize;
+          }
+        });
+
+        ensureStyle(configuration.styles.relationships, "Relationship").fontSize = relationshipFontSize;
+        configuration.styles.relationships.forEach(function (style) {
+          if (style) {
+            style.fontSize = relationshipFontSize;
+          }
+        });
+
+        return adjustedWorkspace;
+      }
 
       function fitDiagram() {
         if (!currentDiagram) {
@@ -117,7 +184,18 @@
       }
 
       function renderWorkspace(payload) {
-        const workspace = typeof payload.workspace === "string" ? JSON.parse(payload.workspace) : payload.workspace;
+        lastWorkspacePayload = {
+          workspace: payload.workspace,
+          viewKey: payload.viewKey,
+        };
+
+        currentFontSize = clampFontSize(payload.fontSize);
+        if (typeof payload.zoomPercent === "number" && Number.isFinite(payload.zoomPercent)) {
+          pendingZoomPercent = payload.zoomPercent;
+        }
+
+        const workspaceSource = typeof payload.workspace === "string" ? JSON.parse(payload.workspace) : payload.workspace;
+        const workspace = applyFontSize(workspaceSource, currentFontSize);
         const viewKey = payload.viewKey || workspace?.views?.configuration?.defaultView;
         const host = document.getElementById("diagram");
 
@@ -167,6 +245,21 @@
         });
       }
 
+      function setFontSize(fontSize, zoomPercent) {
+        currentFontSize = clampFontSize(fontSize);
+
+        if (typeof zoomPercent === "number" && Number.isFinite(zoomPercent)) {
+          pendingZoomPercent = zoomPercent;
+        }
+
+        if (lastWorkspacePayload) {
+          renderWorkspace({
+            ...lastWorkspacePayload,
+            fontSize: currentFontSize,
+          });
+        }
+      }
+
       if ("ResizeObserver" in window) {
         const observer = new ResizeObserver(fitDiagram);
         observer.observe(document.getElementById("diagram"));
@@ -199,6 +292,10 @@
 
         if (event.data && event.data.type === "adashi:structurizr-zoom") {
           setZoomPercent(event.data.zoomPercent);
+        }
+
+        if (event.data && event.data.type === "adashi:structurizr-font-size") {
+          setFontSize(event.data.fontSize, event.data.zoomPercent);
         }
 
         if (event.data && event.data.type === "adashi:structurizr-fit") {

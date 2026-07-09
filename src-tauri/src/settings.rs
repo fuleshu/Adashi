@@ -52,15 +52,6 @@ pub struct RuleTemplateDraft {
     pub prompt: String,
 }
 
-impl AppSettings {
-    pub fn active_project(&self) -> Option<&ProjectSettings> {
-        self.last_active_project_id
-            .as_deref()
-            .and_then(|id| self.projects.iter().find(|project| project.id == id))
-            .or_else(|| self.projects.first())
-    }
-}
-
 impl Default for WindowSettings {
     fn default() -> Self {
         Self {
@@ -209,10 +200,6 @@ fn normalize(mut settings: AppSettings) -> AppSettings {
         settings.window.height = 940;
     }
 
-    if settings.projects.is_empty() {
-        settings.projects.push(default_project());
-    }
-
     for project in &mut settings.projects {
         project.name = project.name.trim().to_string();
         project.folder = normalize_project_folder_text(&project.folder);
@@ -225,8 +212,7 @@ fn normalize(mut settings: AppSettings) -> AppSettings {
         .unwrap_or(false);
 
     if !last_id_is_valid {
-        settings.last_active_project_id =
-            settings.projects.first().map(|project| project.id.clone());
+        settings.last_active_project_id = None;
     }
 
     normalize_rule_templates(&mut settings.rule_templates);
@@ -234,31 +220,12 @@ fn normalize(mut settings: AppSettings) -> AppSettings {
 }
 
 fn default_settings() -> AppSettings {
-    let project = default_project();
     AppSettings {
         window: WindowSettings::default(),
-        last_active_project_id: Some(project.id.clone()),
-        projects: vec![project],
+        last_active_project_id: None,
+        projects: Vec::new(),
         rule_templates: Vec::new(),
     }
-}
-
-fn default_project() -> ProjectSettings {
-    ProjectSettings {
-        id: "adashi".to_string(),
-        name: "Adashi".to_string(),
-        folder: default_project_folder(),
-    }
-}
-
-fn default_project_folder() -> String {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    normalize_project_folder_path(
-        &manifest_dir
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or(manifest_dir),
-    )
 }
 
 fn make_project_id(name: &str) -> String {
@@ -409,6 +376,65 @@ mod tests {
         let settings = load_or_init(&path).unwrap();
 
         assert!(settings.rule_templates.is_empty());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn missing_settings_loads_empty_project_list_for_onboarding() {
+        let path = test_settings_path("missing-settings");
+        let _ = fs::remove_file(&path);
+
+        let settings = load_or_init(&path).unwrap();
+
+        assert!(settings.projects.is_empty());
+        assert_eq!(settings.last_active_project_id, None);
+        assert!(path.exists());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn empty_project_list_stays_empty_for_onboarding() {
+        let path = test_settings_path("empty-project-list");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            r#"{
+  "window": { "width": 1024, "height": 768, "x": null, "y": null },
+  "projects": [],
+  "lastActiveProjectId": null,
+  "ruleTemplates": []
+}
+"#,
+        )
+        .unwrap();
+
+        let settings = load_or_init(&path).unwrap();
+
+        assert!(settings.projects.is_empty());
+        assert_eq!(settings.last_active_project_id, None);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn invalid_active_project_id_is_cleared_for_onboarding() {
+        let path = test_settings_path("invalid-active-project");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            r#"{
+  "window": { "width": 1024, "height": 768, "x": null, "y": null },
+  "projects": [{ "id": "adashi", "name": "Adashi", "folder": "C:\\src\\Adashi" }],
+  "lastActiveProjectId": "missing-project",
+  "ruleTemplates": []
+}
+"#,
+        )
+        .unwrap();
+
+        let settings = load_or_init(&path).unwrap();
+
+        assert_eq!(settings.projects.len(), 1);
+        assert_eq!(settings.last_active_project_id, None);
         let _ = fs::remove_file(path);
     }
 

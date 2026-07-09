@@ -52,13 +52,13 @@ impl AdashiMcpServer {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct ProjectParams {
-    project_id: Option<String>,
+    project_id: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct RuleInjectionParams {
-    project_id: Option<String>,
+    project_id: String,
     intend: String,
     hook: String,
 }
@@ -66,7 +66,7 @@ struct RuleInjectionParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct CreateRuleParams {
-    project_id: Option<String>,
+    project_id: String,
     name: String,
     enabled: bool,
     intend: String,
@@ -77,7 +77,7 @@ struct CreateRuleParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct UpdateRuleParams {
-    project_id: Option<String>,
+    project_id: String,
     rule_id: i64,
     name: String,
     enabled: bool,
@@ -89,14 +89,14 @@ struct UpdateRuleParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct DeleteRuleParams {
-    project_id: Option<String>,
+    project_id: String,
     rule_id: i64,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct CreateTaskParams {
-    project_id: Option<String>,
+    project_id: String,
     title: String,
     description: Option<String>,
     design_specification_links: Option<Vec<TaskDesignSpecificationLinkInput>>,
@@ -105,7 +105,7 @@ struct CreateTaskParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct UpdateTaskParams {
-    project_id: Option<String>,
+    project_id: String,
     task_id: i64,
     title: Option<String>,
     description: Option<String>,
@@ -116,21 +116,21 @@ struct UpdateTaskParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct ListTasksParams {
-    project_id: Option<String>,
+    project_id: String,
     states: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct TaskIdParams {
-    project_id: Option<String>,
+    project_id: String,
     task_id: i64,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct FinishTaskParams {
-    project_id: Option<String>,
+    project_id: String,
     task_id: i64,
     completion_memo: String,
     created_files: Option<Vec<String>>,
@@ -140,21 +140,21 @@ struct FinishTaskParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct ListQaJobsParams {
-    project_id: Option<String>,
+    project_id: String,
     query: Option<QaJobQuery>,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct QaJobIdParams {
-    project_id: Option<String>,
+    project_id: String,
     qa_job_id: i64,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct CreateQaJobParams {
-    project_id: Option<String>,
+    project_id: String,
     name: String,
     description: Option<String>,
     command: String,
@@ -170,7 +170,7 @@ struct CreateQaJobParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct UpdateQaJobParams {
-    project_id: Option<String>,
+    project_id: String,
     qa_job_id: i64,
     name: Option<String>,
     description: Option<String>,
@@ -187,7 +187,7 @@ struct UpdateQaJobParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct RunQaJobsParams {
-    project_id: Option<String>,
+    project_id: String,
     query: QaJobQuery,
     trigger_source: Option<String>,
 }
@@ -195,35 +195,35 @@ struct RunQaJobsParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct ListQaRunsParams {
-    project_id: Option<String>,
+    project_id: String,
     limit: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct UpdateMemoryParams {
-    project_id: Option<String>,
+    project_id: String,
     memory: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct UpdateMemoryRuleParams {
-    project_id: Option<String>,
+    project_id: String,
     rule: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct DesignOverviewParams {
-    project_id: Option<String>,
+    project_id: String,
     max_depth: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct DesignScopeParams {
-    project_id: Option<String>,
+    project_id: String,
     element_id: String,
     include_ancestors: Option<bool>,
     children_depth: Option<usize>,
@@ -233,7 +233,7 @@ struct DesignScopeParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct DesignSearchParams {
-    project_id: Option<String>,
+    project_id: String,
     query: String,
     kinds: Option<Vec<String>>,
     limit: Option<usize>,
@@ -242,14 +242,14 @@ struct DesignSearchParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct DesignByIdsParams {
-    project_id: Option<String>,
+    project_id: String,
     ids: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct DesignBindingsParams {
-    project_id: Option<String>,
+    project_id: String,
     files: Option<Vec<String>>,
     symbols: Option<Vec<String>>,
 }
@@ -257,7 +257,7 @@ struct DesignBindingsParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct DesignSaveParams {
-    project_id: Option<String>,
+    project_id: String,
     expected_revision: i64,
     change_intent: String,
     changes: Vec<DesignChange>,
@@ -419,7 +419,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<ProjectParams>,
     ) -> Result<Json<RuleListResult>, ErrorData> {
-        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let rules = rules::load_rules(&db).map_err(tool_error)?;
         Ok(Json(RuleListResult {
             project_id: project.id,
@@ -436,7 +436,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<RuleInjectionParams>,
     ) -> Result<Json<RuleInjectionResult>, ErrorData> {
-        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let rules =
             rules::load_rule_injections(&db, &params.intend, &params.hook).map_err(tool_error)?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
@@ -497,7 +497,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<ListTasksParams>,
     ) -> Result<Json<TaskListResult>, ErrorData> {
-        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let revision =
             project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
@@ -520,7 +520,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<TaskIdParams>,
     ) -> Result<Json<TaskReadResult>, ErrorData> {
-        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let revision =
             project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
@@ -545,7 +545,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<ProjectParams>,
     ) -> Result<Json<MemoryResult>, ErrorData> {
-        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let revision =
             project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
@@ -567,7 +567,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<CreateRuleParams>,
     ) -> Result<Json<CreateRuleResult>, ErrorData> {
-        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let rule_id = rules::create_rule(
             &db,
@@ -596,7 +596,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<UpdateRuleParams>,
     ) -> Result<Json<UpdateRuleResult>, ErrorData> {
-        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         rules::update_rule(
             &db,
@@ -627,7 +627,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DeleteRuleParams>,
     ) -> Result<Json<DeleteRuleResult>, ErrorData> {
-        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         rules::delete_rule(&db, params.rule_id).map_err(tool_error)?;
         let revision =
@@ -647,7 +647,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<CreateTaskParams>,
     ) -> Result<Json<TaskMutationResult>, ErrorData> {
-        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let task = tasks::create_task(
             &db,
@@ -681,7 +681,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<UpdateTaskParams>,
     ) -> Result<Json<TaskMutationResult>, ErrorData> {
-        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let task = tasks::update_task(
             &db,
@@ -717,7 +717,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<FinishTaskParams>,
     ) -> Result<Json<TaskMutationResult>, ErrorData> {
-        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let task = tasks::finish_task(
             &db,
@@ -752,7 +752,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<TaskIdParams>,
     ) -> Result<Json<DeleteTaskResult>, ErrorData> {
-        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         tasks::delete_task(&db, project_row_id, params.task_id).map_err(tool_error)?;
         let revision =
@@ -774,7 +774,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<ListQaJobsParams>,
     ) -> Result<Json<QaJobListResult>, ErrorData> {
-        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let revision =
             project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
@@ -796,7 +796,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<QaJobIdParams>,
     ) -> Result<Json<QaJobResult>, ErrorData> {
-        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let revision =
             project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
@@ -818,7 +818,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<CreateQaJobParams>,
     ) -> Result<Json<QaJobResult>, ErrorData> {
-        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let job = qa::create_job(
             &db,
@@ -857,7 +857,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<UpdateQaJobParams>,
     ) -> Result<Json<QaJobResult>, ErrorData> {
-        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let job = qa::update_job(
             &db,
@@ -896,7 +896,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<QaJobIdParams>,
     ) -> Result<Json<DeleteQaJobResult>, ErrorData> {
-        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         qa::delete_job(&db, project_row_id, params.qa_job_id).map_err(tool_error)?;
         let revision =
@@ -918,7 +918,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<RunQaJobsParams>,
     ) -> Result<Json<QaRunResult>, ErrorData> {
-        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let run = qa::run_jobs(
             &db,
@@ -947,7 +947,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<ListQaRunsParams>,
     ) -> Result<Json<QaRunListResult>, ErrorData> {
-        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let revision =
             project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
@@ -969,7 +969,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<UpdateMemoryParams>,
     ) -> Result<Json<MemoryResult>, ErrorData> {
-        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let memory =
             memory::update_memory(&db, project_row_id, params.memory).map_err(tool_error)?;
@@ -992,7 +992,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<UpdateMemoryRuleParams>,
     ) -> Result<Json<MemoryResult>, ErrorData> {
-        let (project, db) = self.open_project(params.project_id.as_deref())?;
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let memory =
             memory::update_memory_rule(&db, project_row_id, params.rule).map_err(tool_error)?;
@@ -1015,7 +1015,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DesignOverviewParams>,
     ) -> Result<Json<DesignOverviewResult>, ErrorData> {
-        let (_project, db) = self.open_project(params.project_id.as_deref())?;
+        let (_project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let overview =
             design::load_overview(&db, project_row_id, params.max_depth).map_err(tool_error)?;
@@ -1030,7 +1030,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DesignScopeParams>,
     ) -> Result<Json<DesignScopeResult>, ErrorData> {
-        let (_project, db) = self.open_project(params.project_id.as_deref())?;
+        let (_project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let scope = design::load_scope(
             &db,
@@ -1052,7 +1052,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DesignSearchParams>,
     ) -> Result<Json<DesignSearchResult>, ErrorData> {
-        let (_project, db) = self.open_project(params.project_id.as_deref())?;
+        let (_project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let result = design::search(
             &db,
@@ -1073,7 +1073,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DesignByIdsParams>,
     ) -> Result<Json<DesignByIdsResult>, ErrorData> {
-        let (_project, db) = self.open_project(params.project_id.as_deref())?;
+        let (_project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let result = design::load_by_ids(&db, project_row_id, &params.ids).map_err(tool_error)?;
         Ok(Json(result))
@@ -1087,7 +1087,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DesignBindingsParams>,
     ) -> Result<Json<DesignBindingsResult>, ErrorData> {
-        let (_project, db) = self.open_project(params.project_id.as_deref())?;
+        let (_project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let result = design::load_by_bindings(
             &db,
@@ -1107,7 +1107,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DesignSaveParams>,
     ) -> Result<Json<DesignSaveResult>, ErrorData> {
-        let (_project, mut db) = self.open_project(params.project_id.as_deref())?;
+        let (_project, mut db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let result = design::save_changes(
             &mut db,

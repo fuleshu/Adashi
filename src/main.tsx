@@ -25,6 +25,7 @@ import {
   Settings,
   ServerCog,
   Trash2,
+  Type,
   Wand2,
   X,
   ZoomIn,
@@ -38,6 +39,18 @@ type DiagramKind = "mermaid" | "structurizr";
 type DesignLevel = "context" | "components" | "features";
 type DesignEntityType = "element" | "relationship";
 type DesignProjectionMode = "branch" | "dependencies";
+
+const DEFAULT_STRUCTURIZR_FONT_SIZE = 20;
+const MIN_STRUCTURIZR_FONT_SIZE = 12;
+const MAX_STRUCTURIZR_FONT_SIZE = 28;
+const STRUCTURIZR_RELATIONSHIP_FONT_RATIO = 0.8;
+const DEFAULT_MERMAID_FONT_SIZE = DEFAULT_STRUCTURIZR_FONT_SIZE;
+const MIN_MERMAID_FONT_SIZE = MIN_STRUCTURIZR_FONT_SIZE;
+const MAX_MERMAID_FONT_SIZE = MAX_STRUCTURIZR_FONT_SIZE;
+const MIN_MERMAID_ZOOM = 25;
+const MAX_MERMAID_ZOOM = 220;
+const MERMAID_ZOOM_STEP = 5;
+const MERMAID_FIT_PADDING = 36;
 
 type DesignDiagram = {
   id: number;
@@ -376,20 +389,31 @@ type ProjectRevision = {
   updatedAt: string;
 };
 
-mermaid.initialize({
-  startOnLoad: false,
-  securityLevel: "strict",
-  theme: "base",
-  themeVariables: {
-    primaryColor: "#f7f7f2",
-    primaryTextColor: "#1f2933",
-    primaryBorderColor: "#2f6f6d",
-    lineColor: "#47615f",
-    secondaryColor: "#dce7e3",
-    tertiaryColor: "#fffaf0",
-    fontFamily: "Inter, Segoe UI, sans-serif",
-  },
-});
+const MERMAID_THEME_VARIABLES = {
+  primaryColor: "#f7f7f2",
+  primaryTextColor: "#1f2933",
+  primaryBorderColor: "#2f6f6d",
+  lineColor: "#47615f",
+  secondaryColor: "#dce7e3",
+  tertiaryColor: "#fffaf0",
+  fontFamily: "Inter, Segoe UI, sans-serif",
+};
+
+function initializeMermaid(fontSize: number) {
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: "strict",
+    theme: "base",
+    themeVariables: {
+      ...MERMAID_THEME_VARIABLES,
+      fontSize: `${fontSize}px`,
+    },
+  });
+}
+
+initializeMermaid(DEFAULT_MERMAID_FONT_SIZE);
+
+let mermaidRenderCounter = 0;
 
 function App() {
   const [settings, setSettings] = React.useState<AppSettings | null>(null);
@@ -401,6 +425,7 @@ function App() {
   } | null>(null);
   const [activeView, setActiveView] = React.useState<"design" | "tasks" | "rules" | "memory" | "qa" | "settings">("design");
   const [error, setError] = React.useState<string | null>(null);
+  const [onboardingReason, setOnboardingReason] = React.useState<string | null>(null);
   const payloadRef = React.useRef<DashboardPayload | null>(null);
   const refreshInFlightRef = React.useRef(false);
 
@@ -408,27 +433,49 @@ function App() {
     payloadRef.current = payload;
   }, [payload]);
 
-  const loadDashboard = React.useCallback((projectId?: string | null, mode: "replace" | "merge" = "replace") => {
+  const loadDashboard = React.useCallback((
+    projectId?: string | null,
+    mode: "replace" | "merge" = "replace",
+    options?: { useOnboardingOnError?: boolean },
+  ) => {
     if (mode === "replace") {
       setPayload(null);
     }
 
     return invoke<DashboardPayload>("get_dashboard", { projectId })
       .then((loadedPayload) => {
+        setError(null);
+        setOnboardingReason(null);
         setPayload((currentPayload) =>
           mode === "merge" && currentPayload?.projectId === loadedPayload.projectId
             ? mergeDashboardPayload(currentPayload, loadedPayload)
             : loadedPayload,
         );
       })
-      .catch((reason) => setError(String(reason)));
+      .catch((reason) => {
+        const message = String(reason);
+        if (options?.useOnboardingOnError) {
+          setPayload(null);
+          setOnboardingReason(message);
+        } else {
+          setError(message);
+        }
+      });
   }, []);
 
   React.useEffect(() => {
     invoke<AppSettings>("get_app_settings")
       .then((loadedSettings) => {
         setSettings(loadedSettings);
-        loadDashboard(loadedSettings.lastActiveProjectId);
+        if (!loadedSettings.lastActiveProjectId) {
+          setPayload(null);
+          setOnboardingReason(
+            loadedSettings.projects.length === 0 ? "No project is configured yet." : "No active project is configured.",
+          );
+          return;
+        }
+
+        loadDashboard(loadedSettings.lastActiveProjectId, "replace", { useOnboardingOnError: true });
       })
       .catch((reason) => setError(String(reason)));
   }, [loadDashboard]);
@@ -484,6 +531,20 @@ function App() {
         <h1>Adashi</h1>
         <p>{error}</p>
       </main>
+    );
+  }
+
+  if (settings && onboardingReason) {
+    return (
+      <FirstProjectOnboarding
+        reason={onboardingReason}
+        onCreated={(updatedSettings, projectId) => {
+          setSettings(updatedSettings);
+          setActiveView("design");
+          loadDashboard(projectId);
+        }}
+        onError={setError}
+      />
     );
   }
 
@@ -831,6 +892,9 @@ function DesignBrowser({
   const [activeArtifactKey, setActiveArtifactKey] = React.useState<string | null>(null);
   const [projectionMode, setProjectionMode] = React.useState<DesignProjectionMode>("branch");
   const [structurizrZoom, setStructurizrZoom] = React.useState(0);
+  const [structurizrFontSize, setStructurizrFontSize] = React.useState(DEFAULT_STRUCTURIZR_FONT_SIZE);
+  const [mermaidZoom, setMermaidZoom] = React.useState(0);
+  const [mermaidFontSize, setMermaidFontSize] = React.useState(DEFAULT_MERMAID_FONT_SIZE);
   const designMainRef = React.useRef<HTMLElement | null>(null);
   const designTree = React.useMemo(() => buildDesignTree(payload.designElements), [payload.designElements]);
   const rootElement =
@@ -1022,9 +1086,45 @@ function DesignBrowser({
               <h3>{viewerTitle}</h3>
             </div>
             {activeLevel === "features" ? (
-              <div className="status-strip compact">
-                <span>{artifactTarget?.type ?? "artifact"}</span>
-                <span>{activeUmlArtifact?.key ?? "No attached UML"}</span>
+              <div className="viewer-controls">
+                <div className="status-strip compact">
+                  <span>{artifactTarget?.type ?? "artifact"}</span>
+                  <span>{activeUmlArtifact?.key ?? "No attached UML"}</span>
+                </div>
+                <div className="viewer-slider-row">
+                  <div className="diagram-range-control zoom-control">
+                    <ZoomOut size={15} />
+                    <input
+                      aria-label="Mermaid zoom"
+                      max={MAX_MERMAID_ZOOM}
+                      min={MIN_MERMAID_ZOOM}
+                      onChange={(event) => setMermaidZoom(Number(event.target.value))}
+                      step={MERMAID_ZOOM_STEP}
+                      title="Diagram zoom"
+                      type="range"
+                      value={mermaidZoom === 0 ? 100 : mermaidZoom}
+                    />
+                    <ZoomIn size={15} />
+                    <button onClick={() => setMermaidZoom(0)} title="Fit diagram" type="button">
+                      Fit
+                    </button>
+                    <span>{mermaidZoom === 0 ? "Fit" : `${mermaidZoom}%`}</span>
+                  </div>
+                  <div className="diagram-range-control font-control">
+                    <Type size={15} />
+                    <input
+                      aria-label="Mermaid font size"
+                      max={MAX_MERMAID_FONT_SIZE}
+                      min={MIN_MERMAID_FONT_SIZE}
+                      onChange={(event) => setMermaidFontSize(Number(event.target.value))}
+                      step={1}
+                      title="Diagram font size"
+                      type="range"
+                      value={mermaidFontSize}
+                    />
+                    <span>{mermaidFontSize}px</span>
+                  </div>
+                </div>
               </div>
             ) : (
               <div className="viewer-controls">
@@ -1059,22 +1159,39 @@ function DesignBrowser({
                     <span>{branchStructurizr.hiddenRelationshipCount} hidden</span>
                   ) : null}
                 </div>
-                <div className="zoom-control">
-                  <ZoomOut size={15} />
-                  <input
-                    aria-label="Structurizr zoom"
-                    max={220}
-                    min={25}
-                    onChange={(event) => setStructurizrZoom(Number(event.target.value))}
-                    step={5}
-                    type="range"
-                    value={structurizrZoom === 0 ? 100 : structurizrZoom}
-                  />
-                  <ZoomIn size={15} />
-                  <button onClick={() => setStructurizrZoom(0)} title="Fit diagram" type="button">
-                    Fit
-                  </button>
-                  <span>{structurizrZoom === 0 ? "Fit" : `${structurizrZoom}%`}</span>
+                <div className="viewer-slider-row">
+                  <div className="diagram-range-control zoom-control">
+                    <ZoomOut size={15} />
+                    <input
+                      aria-label="Structurizr zoom"
+                      max={220}
+                      min={25}
+                      onChange={(event) => setStructurizrZoom(Number(event.target.value))}
+                      step={5}
+                      title="Diagram zoom"
+                      type="range"
+                      value={structurizrZoom === 0 ? 100 : structurizrZoom}
+                    />
+                    <ZoomIn size={15} />
+                    <button onClick={() => setStructurizrZoom(0)} title="Fit diagram" type="button">
+                      Fit
+                    </button>
+                    <span>{structurizrZoom === 0 ? "Fit" : `${structurizrZoom}%`}</span>
+                  </div>
+                  <div className="diagram-range-control font-control">
+                    <Type size={15} />
+                    <input
+                      aria-label="Structurizr font size"
+                      max={MAX_STRUCTURIZR_FONT_SIZE}
+                      min={MIN_STRUCTURIZR_FONT_SIZE}
+                      onChange={(event) => setStructurizrFontSize(Number(event.target.value))}
+                      step={1}
+                      title="Diagram font size"
+                      type="range"
+                      value={structurizrFontSize}
+                    />
+                    <span>{structurizrFontSize}px</span>
+                  </div>
                 </div>
               </div>
             )}
@@ -1087,11 +1204,17 @@ function DesignBrowser({
                 artifacts={umlArtifacts}
                 onSelect={setActiveArtifactKey}
               />
-              <MermaidPanel diagram={activeUmlArtifact?.source ?? ""} />
+              <MermaidPanel
+                diagram={activeUmlArtifact?.source ?? ""}
+                fontSize={mermaidFontSize}
+                onZoomChange={setMermaidZoom}
+                zoomPercent={mermaidZoom}
+              />
             </div>
           ) : (
             <StructurizrFrame
               workspace={branchStructurizr.workspace}
+              fontSize={structurizrFontSize}
               viewKey={branchStructurizr.viewKey}
               zoomPercent={structurizrZoom}
               onZoomChange={setStructurizrZoom}
@@ -1527,15 +1650,57 @@ function buildBranchStructurizrWorkspace(
         defaultView: view.key,
         styles: {
           elements: [
-            { tag: "Element", fontSize: 14 },
-            { tag: "Person", shape: "Person", background: "#2f6f6d", color: "#ffffff", fontSize: 14 },
-            { tag: "Software System", background: "#335c67", color: "#ffffff", fontSize: 14 },
-            { tag: "Container", background: "#fffaf0", color: "#1f2933", stroke: "#2f6f6d", fontSize: 14 },
-            { tag: "Component", background: "#f8faf7", color: "#1f2933", stroke: "#7fb6ad", fontSize: 14 },
-            { tag: "Database", shape: "Cylinder", background: "#e4b363", color: "#1f2933", fontSize: 14 },
-            { tag: "Placeholder", background: "#f7efe3", color: "#1f2933", stroke: "#c89f5d", fontSize: 14 },
+            { tag: "Element", fontSize: DEFAULT_STRUCTURIZR_FONT_SIZE },
+            {
+              tag: "Person",
+              shape: "Person",
+              background: "#2f6f6d",
+              color: "#ffffff",
+              fontSize: DEFAULT_STRUCTURIZR_FONT_SIZE,
+            },
+            {
+              tag: "Software System",
+              background: "#335c67",
+              color: "#ffffff",
+              fontSize: DEFAULT_STRUCTURIZR_FONT_SIZE,
+            },
+            {
+              tag: "Container",
+              background: "#fffaf0",
+              color: "#1f2933",
+              stroke: "#2f6f6d",
+              fontSize: DEFAULT_STRUCTURIZR_FONT_SIZE,
+            },
+            {
+              tag: "Component",
+              background: "#f8faf7",
+              color: "#1f2933",
+              stroke: "#7fb6ad",
+              fontSize: DEFAULT_STRUCTURIZR_FONT_SIZE,
+            },
+            {
+              tag: "Database",
+              shape: "Cylinder",
+              background: "#e4b363",
+              color: "#1f2933",
+              fontSize: DEFAULT_STRUCTURIZR_FONT_SIZE,
+            },
+            {
+              tag: "Placeholder",
+              background: "#f7efe3",
+              color: "#1f2933",
+              stroke: "#c89f5d",
+              fontSize: DEFAULT_STRUCTURIZR_FONT_SIZE,
+            },
           ],
-          relationships: [{ tag: "Relationship", color: "#47615f", fontSize: 11, thickness: 2 }],
+          relationships: [
+            {
+              tag: "Relationship",
+              color: "#47615f",
+              fontSize: Math.round(DEFAULT_STRUCTURIZR_FONT_SIZE * STRUCTURIZR_RELATIONSHIP_FONT_RATIO),
+              thickness: 2,
+            },
+          ],
         },
       },
     },
@@ -2511,6 +2676,129 @@ function SourcePanel({ diagram, source, sourceKind }: { diagram?: DesignDiagram;
   );
 }
 
+function FirstProjectOnboarding({
+  reason,
+  onCreated,
+  onError,
+}: {
+  reason: string;
+  onCreated: (settings: AppSettings, projectId: string) => void;
+  onError: (message: string) => void;
+}) {
+  const [creationError, setCreationError] = React.useState<string | null>(null);
+
+  function closeApp() {
+    invoke<void>("close_app").catch((reason) => onError(String(reason)));
+  }
+
+  return (
+    <main className="onboarding-shell">
+      <section className="onboarding-panel">
+        <div className="brand-block">
+          <div className="brand-mark">
+            <Bot size={24} />
+          </div>
+          <div>
+            <h1>Adashi</h1>
+            <p>Senior agent dashboard</p>
+          </div>
+        </div>
+
+        <div className="onboarding-heading">
+          <p className="eyebrow">Project setup</p>
+          <h2>Create your first project</h2>
+          <p>{reason}</p>
+        </div>
+
+        {creationError ? <p className="form-error">{creationError}</p> : null}
+
+        <ProjectCreationForm
+          buttonLabel="Create"
+          onCreated={(updatedSettings, projectId) => {
+            setCreationError(null);
+            onCreated(updatedSettings, projectId);
+          }}
+          onError={setCreationError}
+        />
+
+        <button className="secondary-action" onClick={closeApp} type="button">
+          <X size={17} />
+          Cancel
+        </button>
+      </section>
+    </main>
+  );
+}
+
+function ProjectCreationForm({
+  buttonLabel,
+  onCreated,
+  onError,
+}: {
+  buttonLabel: string;
+  onCreated: (settings: AppSettings, projectId: string) => void;
+  onError: (message: string) => void;
+}) {
+  const [name, setName] = React.useState("");
+  const [folder, setFolder] = React.useState("");
+  const [isPickingFolder, setIsPickingFolder] = React.useState(false);
+  const [isCreating, setIsCreating] = React.useState(false);
+
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsCreating(true);
+    invoke<AppSettings>("add_project", { name: name.trim(), folder: folder.trim() })
+      .then((updatedSettings) => {
+        const projectId = updatedSettings.lastActiveProjectId ?? updatedSettings.projects[0]?.id;
+        if (!projectId) {
+          onError("Project was created but no active project was selected.");
+          return;
+        }
+
+        setName("");
+        setFolder("");
+        onCreated(updatedSettings, projectId);
+      })
+      .catch((reason) => onError(String(reason)))
+      .finally(() => setIsCreating(false));
+  }
+
+  function browseFolder() {
+    setIsPickingFolder(true);
+    invoke<string | null>("pick_project_folder", { currentFolder: folder.trim() || null })
+      .then((selectedFolder) => {
+        if (selectedFolder) {
+          setFolder(selectedFolder);
+        }
+      })
+      .catch((reason) => onError(String(reason)))
+      .finally(() => setIsPickingFolder(false));
+  }
+
+  return (
+    <form className="settings-form" onSubmit={submit}>
+      <label>
+        <span>Name</span>
+        <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Project name" />
+      </label>
+      <label>
+        <span>Folder</span>
+        <div className="folder-picker-row">
+          <input value={folder} onChange={(event) => setFolder(event.target.value)} placeholder="C:\src\MyProject" />
+          <button disabled={isPickingFolder || isCreating} onClick={browseFolder} title="Browse for project folder" type="button">
+            <Folder size={17} />
+            Browse
+          </button>
+        </div>
+      </label>
+      <button disabled={isCreating} type="submit">
+        <Plus size={17} />
+        {buttonLabel}
+      </button>
+    </form>
+  );
+}
+
 function SettingsView({
   activeProjectId,
   fixedHookPrompts,
@@ -2528,34 +2816,6 @@ function SettingsView({
   onDelete: (settings: AppSettings) => void;
   onError: (message: string) => void;
 }) {
-  const [name, setName] = React.useState("");
-  const [folder, setFolder] = React.useState("");
-  const [isPickingFolder, setIsPickingFolder] = React.useState(false);
-
-  function submit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    invoke<AppSettings>("add_project", { name: name.trim(), folder: folder.trim() })
-      .then((updatedSettings) => {
-        const projectId = updatedSettings.lastActiveProjectId ?? updatedSettings.projects[0]?.id;
-        setName("");
-        setFolder("");
-        onAdd(updatedSettings, projectId);
-      })
-      .catch((reason) => onError(String(reason)));
-  }
-
-  function browseFolder() {
-    setIsPickingFolder(true);
-    invoke<string | null>("pick_project_folder", { currentFolder: folder.trim() || null })
-      .then((selectedFolder) => {
-        if (selectedFolder) {
-          setFolder(selectedFolder);
-        }
-      })
-      .catch((reason) => onError(String(reason)))
-      .finally(() => setIsPickingFolder(false));
-  }
-
   function remove(projectId: string) {
     invoke<AppSettings>("delete_project", { projectId })
       .then(onDelete)
@@ -2603,30 +2863,7 @@ function SettingsView({
 
       <section className="data-panel settings-panel">
         <h3>Add Project</h3>
-        <form className="settings-form" onSubmit={submit}>
-          <label>
-            <span>Name</span>
-            <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Project name" />
-          </label>
-          <label>
-            <span>Folder</span>
-            <div className="folder-picker-row">
-              <input
-                value={folder}
-                onChange={(event) => setFolder(event.target.value)}
-                placeholder="C:\src\MyProject"
-              />
-              <button disabled={isPickingFolder} onClick={browseFolder} title="Browse for project folder" type="button">
-                <Folder size={17} />
-                Browse
-              </button>
-            </div>
-          </label>
-          <button type="submit">
-            <Plus size={17} />
-            Add
-          </button>
-        </form>
+        <ProjectCreationForm buttonLabel="Add" onCreated={onAdd} onError={onError} />
       </section>
 
       <section className="data-panel settings-panel settings-design-protocol-panel">
@@ -4149,6 +4386,7 @@ function Panel({ title, children }: React.PropsWithChildren<{ title: string }>) 
 
 function StructurizrFrame({
   workspace,
+  fontSize,
   viewKey,
   zoomPercent,
   onZoomChange,
@@ -4156,6 +4394,7 @@ function StructurizrFrame({
   onSelect,
 }: {
   workspace: string;
+  fontSize: number;
   viewKey: string;
   zoomPercent: number;
   onZoomChange: (zoomPercent: number) => void;
@@ -4163,13 +4402,25 @@ function StructurizrFrame({
   onSelect?: (externalId: string) => void;
 }) {
   const frameRef = React.useRef<HTMLIFrameElement>(null);
+  const fontSizeRef = React.useRef(fontSize);
+  const zoomPercentRef = React.useRef(zoomPercent);
+
+  React.useEffect(() => {
+    fontSizeRef.current = fontSize;
+  }, [fontSize]);
+
+  React.useEffect(() => {
+    zoomPercentRef.current = zoomPercent;
+  }, [zoomPercent]);
 
   const postWorkspace = React.useCallback(() => {
     frameRef.current?.contentWindow?.postMessage(
       {
         type: "adashi:structurizr-workspace",
+        fontSize: fontSizeRef.current,
         workspace,
         viewKey,
+        zoomPercent: zoomPercentRef.current,
       },
       "*",
     );
@@ -4196,6 +4447,17 @@ function StructurizrFrame({
   React.useEffect(() => {
     postZoom();
   }, [postZoom]);
+
+  React.useEffect(() => {
+    frameRef.current?.contentWindow?.postMessage(
+      {
+        type: "adashi:structurizr-font-size",
+        fontSize,
+        zoomPercent: zoomPercentRef.current,
+      },
+      "*",
+    );
+  }, [fontSize]);
 
   React.useEffect(() => {
     function receiveMessage(event: MessageEvent) {
@@ -4237,42 +4499,281 @@ function StructurizrFrame({
   );
 }
 
-function MermaidPanel({ diagram }: { diagram: string }) {
-  const ref = React.useRef<HTMLDivElement>(null);
+function MermaidPanel({
+  diagram,
+  fontSize,
+  onZoomChange,
+  zoomPercent,
+}: {
+  diagram: string;
+  fontSize: number;
+  onZoomChange: (zoomPercent: number) => void;
+  zoomPercent: number;
+}) {
+  const viewportRef = React.useRef<HTMLDivElement>(null);
+  const contentRef = React.useRef<HTMLDivElement>(null);
+  const dragRef = React.useRef<{
+    panX: number;
+    panY: number;
+    pointerId: number;
+    startX: number;
+    startY: number;
+  } | null>(null);
+  const viewRef = React.useRef<{ pan: { x: number; y: number }; scale: number } | null>(null);
+  const [bounds, setBounds] = React.useState({
+    contentHeight: 0,
+    contentWidth: 0,
+    viewportHeight: 0,
+    viewportWidth: 0,
+  });
+  const [pan, setPan] = React.useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = React.useState(false);
+  const isZoomed = zoomPercent !== 0;
+  const fitScale = calculateMermaidFitScale(bounds);
+  const scale = isZoomed ? zoomPercent / 100 : fitScale;
+
+  const measure = React.useCallback(() => {
+    const viewport = viewportRef.current;
+    const svg = contentRef.current?.querySelector<SVGSVGElement>("svg");
+
+    setBounds((currentBounds) => {
+      const nextBounds = {
+        contentHeight: svg ? Math.max(svg.viewBox.baseVal.height || svg.getBoundingClientRect().height, 1) : 0,
+        contentWidth: svg ? Math.max(svg.viewBox.baseVal.width || svg.getBoundingClientRect().width, 1) : 0,
+        viewportHeight: viewport?.clientHeight ?? 0,
+        viewportWidth: viewport?.clientWidth ?? 0,
+      };
+
+      return shallowEqualRecord(currentBounds, nextBounds) ? currentBounds : nextBounds;
+    });
+  }, []);
+
+  React.useEffect(() => {
+    viewRef.current = null;
+    setPan({ x: 0, y: 0 });
+  }, [diagram]);
+
+  React.useEffect(() => {
+    const nextScale = zoomPercent === 0 ? fitScale : zoomPercent / 100;
+
+    if (!bounds.contentWidth || !bounds.contentHeight || !bounds.viewportWidth || !bounds.viewportHeight || !Number.isFinite(nextScale)) {
+      return;
+    }
+
+    const viewportCenter = {
+      x: bounds.viewportWidth / 2,
+      y: bounds.viewportHeight / 2,
+    };
+    const previousView = viewRef.current;
+    const centeredPan = centerMermaidPan(bounds, nextScale);
+    const nextPan =
+      previousView && previousView.scale > 0
+        ? {
+            x: viewportCenter.x - ((viewportCenter.x - previousView.pan.x) / previousView.scale) * nextScale,
+            y: viewportCenter.y - ((viewportCenter.y - previousView.pan.y) / previousView.scale) * nextScale,
+          }
+        : centeredPan;
+    const resolvedPan = zoomPercent === 0 ? centeredPan : nextPan;
+
+    viewRef.current = { pan: resolvedPan, scale: nextScale };
+    setPan(resolvedPan);
+  }, [bounds, fitScale, zoomPercent]);
+
+  React.useEffect(() => {
+    const viewport = viewportRef.current;
+
+    if (!viewport) {
+      return;
+    }
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    measure();
+
+    return () => observer.disconnect();
+  }, [measure]);
 
   React.useEffect(() => {
     let cancelled = false;
 
     async function render() {
-      if (!ref.current) {
+      if (!contentRef.current) {
         return;
       }
 
       if (!diagram) {
-        ref.current.textContent = "No UML artifact is attached to this selection.";
+        contentRef.current.textContent = "No UML artifact is attached to this selection.";
         return;
       }
 
-      const id = `mermaid-${Date.now()}`;
+      initializeMermaid(fontSize);
+      const id = `mermaid-${++mermaidRenderCounter}`;
       const result = await mermaid.render(id, diagram);
 
-      if (!cancelled && ref.current) {
-        ref.current.innerHTML = result.svg;
+      if (!cancelled && contentRef.current) {
+        contentRef.current.innerHTML = result.svg;
+        normalizeMermaidSvg(contentRef.current);
+        window.requestAnimationFrame(measure);
       }
     }
 
     render().catch((reason) => {
-      if (ref.current) {
-        ref.current.textContent = String(reason);
+      if (contentRef.current) {
+        contentRef.current.textContent = String(reason);
       }
     });
 
     return () => {
       cancelled = true;
     };
-  }, [diagram]);
+  }, [diagram, fontSize, measure]);
 
-  return <div className="mermaid-host" ref={ref} />;
+  function startPan(event: React.PointerEvent<HTMLDivElement>) {
+    if (!isZoomed || event.button !== 0) {
+      return;
+    }
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = {
+      panX: pan.x,
+      panY: pan.y,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+    };
+    setIsPanning(true);
+  }
+
+  function updatePan(event: React.PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const nextPan = {
+      x: drag.panX + event.clientX - drag.startX,
+      y: drag.panY + event.clientY - drag.startY,
+    };
+
+    setPan(nextPan);
+    viewRef.current = {
+      pan: nextPan,
+      scale,
+    };
+  }
+
+  function stopPan(event: React.PointerEvent<HTMLDivElement>) {
+    if (dragRef.current?.pointerId === event.pointerId) {
+      dragRef.current = null;
+    }
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    setIsPanning(false);
+  }
+
+  function zoomWithWheel(event: React.WheelEvent<HTMLDivElement>) {
+    if (!event.ctrlKey) {
+      return;
+    }
+
+    event.preventDefault();
+    const currentZoom = zoomPercent === 0 ? Math.round(fitScale * 100) : zoomPercent;
+    const direction = event.deltaY < 0 ? 1 : -1;
+    const nextZoom = clampNumber(
+      roundToStep(currentZoom + direction * MERMAID_ZOOM_STEP, MERMAID_ZOOM_STEP),
+      MIN_MERMAID_ZOOM,
+      MAX_MERMAID_ZOOM,
+    );
+
+    onZoomChange(nextZoom);
+  }
+
+  const contentStyle = {
+    "--mermaid-font-size": `${fontSize}px`,
+    transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
+  } as React.CSSProperties;
+
+  return (
+    <div
+      className={`mermaid-host${isZoomed ? " pannable" : ""}${isPanning ? " panning" : ""}`}
+      onPointerCancel={stopPan}
+      onPointerDown={startPan}
+      onPointerMove={updatePan}
+      onPointerUp={stopPan}
+      onWheel={zoomWithWheel}
+      ref={viewportRef}
+      title={isZoomed ? "Drag diagram to pan" : undefined}
+    >
+      <div className="mermaid-content" ref={contentRef} style={contentStyle} />
+    </div>
+  );
+}
+
+function calculateMermaidFitScale(bounds: {
+  contentHeight: number;
+  contentWidth: number;
+  viewportHeight: number;
+  viewportWidth: number;
+}): number {
+  if (!bounds.contentHeight || !bounds.contentWidth || !bounds.viewportHeight || !bounds.viewportWidth) {
+    return 1;
+  }
+
+  const availableWidth = Math.max(bounds.viewportWidth - MERMAID_FIT_PADDING, 1);
+  const availableHeight = Math.max(bounds.viewportHeight - MERMAID_FIT_PADDING, 1);
+  return Math.min(availableWidth / bounds.contentWidth, availableHeight / bounds.contentHeight);
+}
+
+function centerMermaidPan(
+  bounds: {
+    contentHeight: number;
+    contentWidth: number;
+    viewportHeight: number;
+    viewportWidth: number;
+  },
+  scale: number,
+): { x: number; y: number } {
+  return {
+    x: (bounds.viewportWidth - bounds.contentWidth * scale) / 2,
+    y: (bounds.viewportHeight - bounds.contentHeight * scale) / 2,
+  };
+}
+
+function clampNumber(value: number, minimum: number, maximum: number): number {
+  return Math.min(Math.max(value, minimum), maximum);
+}
+
+function roundToStep(value: number, step: number): number {
+  return Math.round(value / step) * step;
+}
+
+function normalizeMermaidSvg(host: HTMLDivElement) {
+  const svg = host.querySelector<SVGSVGElement>("svg");
+
+  if (!svg) {
+    return;
+  }
+
+  try {
+    const bounds = svg.getBBox();
+
+    if (!bounds.width || !bounds.height) {
+      return;
+    }
+
+    const padding = 8;
+    const width = bounds.width + padding * 2;
+    const height = bounds.height + padding * 2;
+    svg.setAttribute("viewBox", `${bounds.x - padding} ${bounds.y - padding} ${width} ${height}`);
+    svg.setAttribute("width", String(Math.ceil(width)));
+    svg.setAttribute("height", String(Math.ceil(height)));
+  } catch {
+    // Some SVGs can reject getBBox until fonts/layout settle; the existing viewBox remains usable.
+  }
 }
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

@@ -254,6 +254,12 @@ fn get_project_revision(
 }
 
 #[tauri::command]
+fn close_app(app: AppHandle) -> Result<(), String> {
+    app.exit(0);
+    Ok(())
+}
+
+#[tauri::command]
 async fn pick_project_folder(
     current_folder: Option<String>,
     app: AppHandle,
@@ -314,6 +320,14 @@ fn add_project(
     name: String,
     folder: String,
     state: State<'_, AppState>,
+) -> Result<AppSettings, String> {
+    add_project_to_settings(name, folder, &state)
+}
+
+fn add_project_to_settings(
+    name: String,
+    folder: String,
+    state: &AppState,
 ) -> Result<AppSettings, String> {
     let trimmed_name = name.trim();
     let trimmed_folder = folder.trim();
@@ -1094,6 +1108,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             add_project,
+            close_app,
             confirm_task,
             create_qa_job,
             create_rule,
@@ -1140,20 +1155,21 @@ fn resolve_project(
 
 pub(crate) fn resolve_project_from_settings(
     settings: &AppSettings,
-    project_id: Option<&str>,
+    project_ref: Option<&str>,
 ) -> Result<ProjectSettings, String> {
-    let project = if let Some(project_id) = project_id {
-        settings
-            .projects
-            .iter()
-            .find(|project| project.id == project_id)
-    } else {
-        settings.active_project()
-    };
+    let project_ref = project_ref
+        .map(str::trim)
+        .filter(|project_ref| !project_ref.is_empty())
+        .ok_or_else(|| {
+            "projectId is required and must be a configured project id or project name".to_string()
+        })?;
 
-    project
+    settings
+        .projects
+        .iter()
+        .find(|project| project.id == project_ref || project.name.eq_ignore_ascii_case(project_ref))
         .cloned()
-        .ok_or_else(|| "No active project is configured".to_string())
+        .ok_or_else(|| format!("Unknown project id or name: {project_ref}"))
 }
 
 pub(crate) fn open_project_database(
@@ -1847,6 +1863,124 @@ fn load_qa_checks(db: &Connection) -> Result<Vec<QaCheck>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolve_project_without_project_input_returns_explicit_error() {
+        let settings = AppSettings {
+            window: WindowSettings::default(),
+            projects: Vec::new(),
+            last_active_project_id: None,
+            rule_templates: Vec::new(),
+        };
+
+        let error = resolve_project_from_settings(&settings, None).unwrap_err();
+
+        assert_eq!(
+            error,
+            "projectId is required and must be a configured project id or project name"
+        );
+    }
+
+    #[test]
+    fn resolve_project_with_blank_project_input_returns_explicit_error() {
+        let settings = AppSettings {
+            window: WindowSettings::default(),
+            projects: vec![ProjectSettings {
+                id: "adashi".to_string(),
+                name: "Adashi".to_string(),
+                folder: "C:\\src\\Adashi".to_string(),
+            }],
+            last_active_project_id: Some("adashi".to_string()),
+            rule_templates: Vec::new(),
+        };
+
+        let error = resolve_project_from_settings(&settings, Some("   ")).unwrap_err();
+
+        assert_eq!(
+            error,
+            "projectId is required and must be a configured project id or project name"
+        );
+    }
+
+    #[test]
+    fn resolve_project_with_unknown_project_input_returns_clean_error() {
+        let settings = AppSettings {
+            window: WindowSettings::default(),
+            projects: vec![ProjectSettings {
+                id: "adashi".to_string(),
+                name: "Adashi".to_string(),
+                folder: "C:\\src\\Adashi".to_string(),
+            }],
+            last_active_project_id: Some("adashi".to_string()),
+            rule_templates: Vec::new(),
+        };
+
+        let error = resolve_project_from_settings(&settings, Some("raysplatter")).unwrap_err();
+
+        assert_eq!(error, "Unknown project id or name: raysplatter");
+    }
+
+    #[test]
+    fn resolve_project_matches_id_or_case_insensitive_name() {
+        let settings = AppSettings {
+            window: WindowSettings::default(),
+            projects: vec![
+                ProjectSettings {
+                    id: "adashi".to_string(),
+                    name: "Adashi".to_string(),
+                    folder: "C:\\src\\Adashi".to_string(),
+                },
+                ProjectSettings {
+                    id: "raysplatter-12345".to_string(),
+                    name: "RaySplatter".to_string(),
+                    folder: "C:\\Unreal\\RaySplatter".to_string(),
+                },
+            ],
+            last_active_project_id: Some("adashi".to_string()),
+            rule_templates: Vec::new(),
+        };
+
+        let by_id = resolve_project_from_settings(&settings, Some("raysplatter-12345")).unwrap();
+        let by_name = resolve_project_from_settings(&settings, Some("raysplatter")).unwrap();
+
+        assert_eq!(by_id.name, "RaySplatter");
+        assert_eq!(by_name.id, "raysplatter-12345");
+    }
+
+    #[test]
+    fn add_project_to_empty_settings_initializes_database_and_selects_project() {
+        let folder = temp_project_folder("adashi-first-project");
+        fs::create_dir_all(&folder).unwrap();
+        let settings_path = folder.join("settings.json");
+        let state = AppState {
+            settings_path,
+            settings: Arc::new(Mutex::new(AppSettings {
+                window: WindowSettings::default(),
+                projects: Vec::new(),
+                last_active_project_id: None,
+                rule_templates: Vec::new(),
+            })),
+        };
+
+        let settings = add_project_to_settings(
+            "RaySplatter".to_string(),
+            folder.to_string_lossy().to_string(),
+            &state,
+        )
+        .unwrap();
+
+        assert_eq!(settings.projects.len(), 1);
+        assert_eq!(
+            settings.last_active_project_id.as_deref(),
+            Some(settings.projects[0].id.as_str())
+        );
+        assert!(settings::project_database_path(&settings.projects[0]).exists());
+
+        let db = open_project_database(&settings.projects[0]).unwrap();
+        verify_project_database(&db).unwrap();
+        drop(db);
+        let _ = fs::remove_dir_all(folder);
+    }
 
     #[test]
     fn open_project_database_creates_seeded_project_store() {
