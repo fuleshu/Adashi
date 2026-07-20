@@ -1,4 +1,4 @@
-use crate::state;
+use crate::{mockups, state};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -90,6 +90,16 @@ pub struct DesignChange {
     pub design_external_id: Option<String>,
     pub target_type: Option<String>,
     pub target: Option<String>,
+    pub viewport_width: Option<i64>,
+    pub viewport_height: Option<i64>,
+    pub screen: Option<String>,
+    pub mockup_state: Option<String>,
+    pub fidelity: Option<String>,
+    pub schema_version: Option<i64>,
+    pub accepted_svg: Option<String>,
+    pub base_revision: Option<i64>,
+    pub proposed_svg: Option<String>,
+    pub proposed_manifest: Option<mockups::MockupManifest>,
 }
 
 #[derive(Debug, Serialize)]
@@ -105,6 +115,7 @@ pub struct DesignOverviewResult {
     pub relationships: Vec<DesignRelationshipRecord>,
     pub diagrams: Vec<DesignDiagramRecord>,
     pub bindings: Vec<DesignBindingRecord>,
+    pub mockups: Vec<mockups::MockupSummary>,
 }
 
 #[derive(Debug, Serialize)]
@@ -119,6 +130,7 @@ pub struct DesignScopeResult {
     pub relationships: Vec<DesignRelationshipRecord>,
     pub diagrams: Vec<DesignDiagramRecord>,
     pub bindings: Vec<DesignBindingRecord>,
+    pub mockups: Vec<mockups::MockupSummary>,
     pub structurizr_dsl: Option<String>,
 }
 
@@ -150,6 +162,7 @@ pub struct DesignByIdsResult {
     pub relationships: Vec<DesignRelationshipRecord>,
     pub diagrams: Vec<DesignDiagramRecord>,
     pub bindings: Vec<DesignBindingRecord>,
+    pub mockups: Vec<mockups::MockupSummary>,
 }
 
 #[derive(Debug, Serialize)]
@@ -162,6 +175,7 @@ pub struct DesignBindingsResult {
     pub elements: Vec<DesignElementRecord>,
     pub relationships: Vec<DesignRelationshipRecord>,
     pub diagrams: Vec<DesignDiagramRecord>,
+    pub mockups: Vec<mockups::MockupSummary>,
 }
 
 #[derive(Debug, Serialize)]
@@ -203,6 +217,7 @@ pub fn load_overview(
         relationships: load_relationships(db, workspace.id)?,
         diagrams: load_diagrams(db, workspace.id)?,
         bindings: load_bindings(db, workspace.id)?,
+        mockups: mockups::load_summaries(db, project_id)?,
         elements,
     })
 }
@@ -277,6 +292,10 @@ pub fn load_scope(
         .into_iter()
         .filter(|binding| scope_ids.contains(binding.design_external_id.as_str()))
         .collect::<Vec<_>>();
+    let scoped_mockups = mockups::load_summaries(db, project_id)?
+        .into_iter()
+        .filter(|mockup| scope_ids.contains(mockup.attached_to_external_id.as_str()))
+        .collect::<Vec<_>>();
 
     Ok(DesignScopeResult {
         revision,
@@ -287,6 +306,7 @@ pub fn load_scope(
         relationships: scoped_relationships,
         diagrams: scoped_diagrams,
         bindings: scoped_bindings,
+        mockups: scoped_mockups,
         structurizr_dsl: if include_source {
             Some(workspace.structurizr_dsl)
         } else {
@@ -384,6 +404,29 @@ pub fn search(
         }
     }
 
+    if any_kind || allowed.contains("mockup") {
+        for mockup in mockups::load_summaries(db, project_id)? {
+            let haystack = format!(
+                "{} {} {} {} {} {}",
+                mockup.external_id,
+                mockup.title,
+                mockup.attached_to_external_id,
+                mockup.screen,
+                mockup.state,
+                mockup.fidelity
+            )
+            .to_lowercase();
+            if matches_terms(&haystack, &terms) {
+                hits.push(DesignSearchHit {
+                    kind: "mockup".to_string(),
+                    id: mockup.external_id,
+                    title: mockup.title,
+                    summary: format!("{} - {}", mockup.status, mockup.attached_to_external_id),
+                });
+            }
+        }
+    }
+
     hits.truncate(limit.max(1));
     Ok(DesignSearchResult { revision, hits })
 }
@@ -415,6 +458,10 @@ pub fn load_by_ids(
         bindings: load_bindings(db, workspace.id)?
             .into_iter()
             .filter(|binding| ids.contains(binding.design_external_id.as_str()))
+            .collect(),
+        mockups: mockups::load_summaries(db, project_id)?
+            .into_iter()
+            .filter(|mockup| ids.contains(mockup.external_id.as_str()))
             .collect(),
     })
 }
@@ -455,6 +502,10 @@ pub fn load_by_bindings(
         diagrams: load_diagrams(db, workspace.id)?
             .into_iter()
             .filter(|diagram| design_ids.contains(diagram.key.as_str()))
+            .collect(),
+        mockups: mockups::load_summaries(db, project_id)?
+            .into_iter()
+            .filter(|mockup| design_ids.contains(mockup.external_id.as_str()))
             .collect(),
         bindings,
     })
@@ -499,7 +550,7 @@ pub fn save_changes(
     let workspace = load_workspace(&tx)?;
 
     for change in changes {
-        if let Err(message) = apply_change(&tx, workspace.id, change) {
+        if let Err(message) = apply_change(&tx, project_id, workspace.id, change) {
             return Ok(failed_save(
                 current_revision,
                 "save.invalid_changeset",
@@ -555,7 +606,12 @@ pub fn save_changes(
     }
 }
 
-fn apply_change(db: &Connection, workspace_id: i64, change: &DesignChange) -> Result<(), String> {
+fn apply_change(
+    db: &Connection,
+    project_id: i64,
+    workspace_id: i64,
+    change: &DesignChange,
+) -> Result<(), String> {
     match change.op.as_str() {
         "upsert_element" => {
             let external_id = required(change.external_id.as_deref(), "externalId")?;
@@ -668,6 +724,45 @@ fn apply_change(db: &Connection, workspace_id: i64, change: &DesignChange) -> Re
             )
             .map_err(|err| err.to_string())?;
         }
+        "upsert_mockup" => {
+            let input = mockups::CreateMockupInput {
+                external_id: required(change.external_id.as_deref(), "externalId")?.to_string(),
+                title: required(change.title.as_deref(), "title")?.to_string(),
+                attached_to_external_id: required(
+                    change.attached_to_external_id.as_deref(),
+                    "attachedToExternalId",
+                )?
+                .to_string(),
+                viewport_width: change
+                    .viewport_width
+                    .ok_or("Design save field 'viewportWidth' is required")?,
+                viewport_height: change
+                    .viewport_height
+                    .ok_or("Design save field 'viewportHeight' is required")?,
+                screen: change.screen.clone().unwrap_or_default(),
+                state: change.mockup_state.clone().unwrap_or_default(),
+                fidelity: change.fidelity.clone().unwrap_or_default(),
+                schema_version: change.schema_version,
+                accepted_svg: required(change.accepted_svg.as_deref(), "acceptedSvg")?.to_string(),
+                expected_revision: 0,
+            };
+            mockups::upsert_initial_in_transaction(db, project_id, &input)?;
+        }
+        "upsert_mockup_proposal" => {
+            let input = mockups::ProposeMockupInput {
+                external_id: required(change.external_id.as_deref(), "externalId")?.to_string(),
+                base_revision: change
+                    .base_revision
+                    .ok_or("Design save field 'baseRevision' is required")?,
+                proposed_svg: required(change.proposed_svg.as_deref(), "proposedSvg")?.to_string(),
+                proposed_manifest: change
+                    .proposed_manifest
+                    .clone()
+                    .ok_or("Design save field 'proposedManifest' is required")?,
+                expected_revision: 0,
+            };
+            mockups::upsert_proposal_in_transaction(db, project_id, &input)?;
+        }
         "delete_element" => {
             let external_id = required(change.external_id.as_deref(), "externalId")?;
             delete_element_subtree(db, workspace_id, external_id.trim())?;
@@ -692,6 +787,10 @@ fn apply_change(db: &Connection, workspace_id: i64, change: &DesignChange) -> Re
                 target_type.trim(),
                 target.trim(),
             )?;
+        }
+        "delete_mockup" => {
+            let external_id = required(change.external_id.as_deref(), "externalId")?;
+            mockups::delete_in_transaction(db, project_id, external_id.trim(), true)?;
         }
         _ => return Err(format!("Unknown design save op: {}", change.op)),
     }
@@ -730,6 +829,7 @@ fn delete_element_subtree(
     let element_ids = element_ids.into_iter().collect::<Vec<_>>();
     for element_id in &element_ids {
         delete_attached_uml_artifacts(db, workspace_id, element_id)?;
+        delete_attached_mockups(db, workspace_id, element_id)?;
         delete_bindings_for_design_id(db, workspace_id, element_id)?;
     }
 
@@ -765,8 +865,19 @@ fn delete_relationship(
     }
 
     delete_attached_uml_artifacts(db, workspace_id, external_id)?;
+    delete_attached_mockups(db, workspace_id, external_id)?;
     delete_bindings_for_design_id(db, workspace_id, external_id)?;
 
+    Ok(())
+}
+
+fn delete_attached_mockups(
+    db: &Connection,
+    workspace_id: i64,
+    design_external_id: &str,
+) -> Result<(), String> {
+    db.execute("DELETE FROM ui_mockups WHERE project_id=(SELECT project_id FROM design_workspaces WHERE id=?1) AND attached_to_external_id=?2",
+        params![workspace_id, design_external_id]).map_err(|err| err.to_string())?;
     Ok(())
 }
 
@@ -888,6 +999,17 @@ fn validate_workspace(db: &Connection, workspace_id: i64) -> Result<Vec<DesignCo
     let relationships = load_relationships(db, workspace_id)?;
     let diagrams = load_diagrams(db, workspace_id)?;
     let bindings = load_bindings(db, workspace_id)?;
+    let project_id: i64 = db
+        .query_row(
+            "SELECT project_id FROM design_workspaces WHERE id=?1",
+            params![workspace_id],
+            |row| row.get(0),
+        )
+        .map_err(|err| err.to_string())?;
+    let mockup_ids = mockups::load_summaries(db, project_id)?
+        .into_iter()
+        .map(|mockup| mockup.external_id)
+        .collect::<HashSet<_>>();
     let mut errors = Vec::new();
     let element_by_id = elements
         .iter()
@@ -1066,6 +1188,7 @@ fn validate_workspace(db: &Connection, workspace_id: i64) -> Result<Vec<DesignCo
             && !diagrams
                 .iter()
                 .any(|diagram| diagram.key == binding.design_external_id)
+            && !mockup_ids.contains(&binding.design_external_id)
         {
             errors.push(correction(
                 "binding.unknown_design_id",
@@ -2230,6 +2353,16 @@ mod tests {
             design_external_id: None,
             target_type: None,
             target: None,
+            viewport_width: None,
+            viewport_height: None,
+            screen: None,
+            mockup_state: None,
+            fidelity: None,
+            schema_version: None,
+            accepted_svg: None,
+            base_revision: None,
+            proposed_svg: None,
+            proposed_manifest: None,
         })
     }
 

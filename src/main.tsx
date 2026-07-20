@@ -34,6 +34,7 @@ import {
 import mermaid from "mermaid";
 import "easymde/dist/easymde.min.css";
 import "./styles.css";
+import { MockupEditor } from "./MockupEditor";
 
 type DiagramKind = "mermaid" | "structurizr";
 type DesignLevel = "context" | "components" | "features";
@@ -201,7 +202,7 @@ type TaskDesignSpecificationLink = {
   id: number;
   taskId: number;
   sortOrder: number;
-  targetType: "element" | "relationship" | "uml";
+  targetType: "element" | "relationship" | "uml" | "mockup";
   designExternalId: string;
   title: string;
 };
@@ -232,7 +233,7 @@ type QaJobDesignLink = {
   id: number;
   qaJobId: number;
   sortOrder: number;
-  targetType: "element" | "relationship" | "uml";
+  targetType: "element" | "relationship" | "uml" | "mockup";
   designExternalId: string;
   title: string;
 };
@@ -339,6 +340,47 @@ type ProjectMemory = {
   updatedAt: string;
 };
 
+type MockupManifest = {
+  schemaVersion: number;
+  key: string;
+  attachedToExternalId: string;
+  viewportWidth: number;
+  viewportHeight: number;
+  screen: string;
+  state: string;
+  fidelity: string;
+};
+
+type MockupSummary = {
+  externalId: string;
+  title: string;
+  attachedToExternalId: string;
+  viewportWidth: number;
+  viewportHeight: number;
+  screen: string;
+  state: string;
+  fidelity: string;
+  acceptedRevision: number;
+  status: "accepted" | "workingDraft" | "pendingAgent" | "proposed";
+};
+
+type UiMockup = {
+  id: number;
+  externalId: string;
+  title: string;
+  manifest: MockupManifest;
+  acceptedSvg: string;
+  acceptedRevision: number;
+  workingSvg?: string | null;
+  baseRevision?: number | null;
+  status: MockupSummary["status"];
+  editOperations: Array<{ sequence: number; kind: string; targetElementId?: string | null; payloadJson: string }>;
+  annotations: Array<{ externalId: string; svgPath: string; optionalText: string; sortOrder: number }>;
+  proposal?: { baseRevision: number; proposedSvg: string; proposedManifest: MockupManifest; createdAt: string } | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type ProjectSettings = {
   id: string;
   name: string;
@@ -371,6 +413,7 @@ type DashboardPayload = {
   designRelationships: DesignRelationship[];
   umlArtifactTypes: UmlArtifactType[];
   diagrams: DesignDiagram[];
+  mockups: MockupSummary[];
   tasks: Task[];
   guidelines: Guideline[];
   postTaskCommands: Command[];
@@ -415,6 +458,49 @@ initializeMermaid(DEFAULT_MERMAID_FONT_SIZE);
 
 let mermaidRenderCounter = 0;
 
+function ErrorDialog({ message, onClose }: { message: string; onClose: () => void }) {
+  const dialogRef = React.useRef<HTMLDialogElement>(null);
+  const displayMessage = message.replace(/^Error:\s*/i, "");
+
+  React.useEffect(() => {
+    const dialog = dialogRef.current;
+    if (dialog && !dialog.open) dialog.showModal();
+
+    return () => {
+      if (dialog?.open) dialog.close();
+    };
+  }, []);
+
+  const close = () => dialogRef.current?.close();
+
+  return (
+    <dialog
+      aria-describedby="error-dialog-message"
+      aria-labelledby="error-dialog-title"
+      className="error-dialog-modal"
+      onClose={onClose}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) close();
+      }}
+      ref={dialogRef}
+      role="alertdialog"
+    >
+      <section className="error-dialog">
+        <header className="error-dialog-header">
+          <h2 id="error-dialog-title">Error</h2>
+          <button aria-label="Close error dialog" autoFocus className="error-dialog-close" onClick={close} type="button">
+            <X size={18} />
+          </button>
+        </header>
+        <p id="error-dialog-message">{displayMessage}</p>
+        <footer className="error-dialog-actions">
+          <button onClick={close} type="button">Close</button>
+        </footer>
+      </section>
+    </dialog>
+  );
+}
+
 function App() {
   const [settings, setSettings] = React.useState<AppSettings | null>(null);
   const [payload, setPayload] = React.useState<DashboardPayload | null>(null);
@@ -423,11 +509,16 @@ function App() {
     type: DesignEntityType;
     externalId: string;
   } | null>(null);
+  const [designNavigationRequest, setDesignNavigationRequest] = React.useState<{
+    artifactKey: string | null;
+    requestId: number;
+  }>({ artifactKey: null, requestId: 0 });
   const [activeView, setActiveView] = React.useState<"design" | "tasks" | "rules" | "memory" | "qa" | "settings">("design");
   const [error, setError] = React.useState<string | null>(null);
   const [onboardingReason, setOnboardingReason] = React.useState<string | null>(null);
   const payloadRef = React.useRef<DashboardPayload | null>(null);
   const refreshInFlightRef = React.useRef(false);
+  const dismissError = React.useCallback(() => setError(null), []);
 
   React.useEffect(() => {
     payloadRef.current = payload;
@@ -525,40 +616,80 @@ function App() {
     [loadDashboard],
   );
 
-  if (error) {
-    return (
-      <main className="shell error-shell">
-        <h1>Adashi</h1>
-        <p>{error}</p>
-      </main>
-    );
-  }
+  const openDesignLink = React.useCallback(
+    (link: Pick<TaskDesignSpecificationLink | QaJobDesignLink, "targetType" | "designExternalId">) => {
+      if (!payload) {
+        return;
+      }
+
+      const diagram =
+        link.targetType === "uml"
+          ? payload.diagrams.find((candidate) => candidate.key === link.designExternalId)
+          : null;
+      const mockup =
+        link.targetType === "mockup"
+          ? payload.mockups.find((candidate) => candidate.externalId === link.designExternalId)
+          : null;
+      const externalId =
+        link.targetType === "uml"
+          ? diagram?.attachedToExternalId ?? link.designExternalId
+          : link.targetType === "mockup"
+            ? mockup?.attachedToExternalId ?? link.designExternalId
+            : link.designExternalId;
+      const entityType: DesignEntityType =
+        link.targetType === "relationship" ||
+        diagram?.attachedToTargetType === "relationship" ||
+        payload.designRelationships.some((relationship) => relationship.externalId === externalId)
+          ? "relationship"
+          : "element";
+
+      setSelectedDesignEntity({ type: entityType, externalId });
+      setDesignNavigationRequest((current) => ({
+        artifactKey: link.targetType === "uml" || link.targetType === "mockup" ? link.designExternalId : null,
+        requestId: current.requestId + 1,
+      }));
+      setActiveDesignLevel(
+        link.targetType === "uml" || link.targetType === "mockup" || entityType === "relationship"
+          ? "features"
+          : "components",
+      );
+      setActiveView("design");
+    },
+    [payload],
+  );
 
   if (settings && onboardingReason) {
     return (
-      <FirstProjectOnboarding
-        reason={onboardingReason}
-        onCreated={(updatedSettings, projectId) => {
-          setSettings(updatedSettings);
-          setActiveView("design");
-          loadDashboard(projectId);
-        }}
-        onError={setError}
-      />
+      <>
+        <FirstProjectOnboarding
+          reason={onboardingReason}
+          onCreated={(updatedSettings, projectId) => {
+            setSettings(updatedSettings);
+            setActiveView("design");
+            loadDashboard(projectId);
+          }}
+          onError={setError}
+        />
+        {error ? <ErrorDialog message={error} onClose={dismissError} /> : null}
+      </>
     );
   }
 
   if (!settings || !payload) {
     return (
-      <main className="shell loading-shell">
-        <Activity className="spin" />
-        <span>Loading Adashi workspace</span>
-      </main>
+      <>
+        <main className="shell loading-shell">
+          <Activity className="spin" />
+          <span>Loading Adashi workspace</span>
+        </main>
+        {error ? <ErrorDialog message={error} onClose={dismissError} /> : null}
+      </>
     );
   }
 
   return (
-    <main className="shell">
+    <>
+      <main className="shell">
       <aside className="sidebar">
         <div className="brand-block">
           <div className="brand-mark">
@@ -639,8 +770,9 @@ function App() {
           </div>
         </header>
 
-        {activeView === "settings" ? (
+        <div className="workspace-tab" hidden={activeView !== "settings"}>
           <SettingsView
+            key={`${payload.projectId}:settings`}
             activeProjectId={payload.projectId}
             fixedHookPrompts={payload.fixedHookPrompts}
             settings={settings}
@@ -660,8 +792,10 @@ function App() {
             }}
             onError={setError}
           />
-        ) : activeView === "rules" ? (
+        </div>
+        <div className="workspace-tab" hidden={activeView !== "rules"}>
           <RulesView
+            key={`${payload.projectId}:rules`}
             projectId={payload.projectId}
             rules={payload.rules}
             ruleTemplates={settings.ruleTemplates}
@@ -673,8 +807,10 @@ function App() {
             onError={setError}
             onSettingsChange={setSettings}
           />
-        ) : activeView === "memory" ? (
+        </div>
+        <div className="workspace-tab" hidden={activeView !== "memory"}>
           <MemoryView
+            key={`${payload.projectId}:memory`}
             projectId={payload.projectId}
             memory={payload.memory}
             onChange={(updatedPayload) => {
@@ -684,13 +820,16 @@ function App() {
             }}
             onError={setError}
           />
-        ) : activeView === "tasks" ? (
+        </div>
+        <div className="workspace-tab" hidden={activeView !== "tasks"}>
           <TasksView
+            key={`${payload.projectId}:tasks`}
             projectId={payload.projectId}
             tasks={payload.tasks}
             designElements={payload.designElements}
             designRelationships={payload.designRelationships}
             diagrams={payload.diagrams}
+            mockups={payload.mockups}
             postTaskCommands={payload.postTaskCommands}
             onChange={(updatedPayload) => {
               setPayload((currentPayload) =>
@@ -698,27 +837,12 @@ function App() {
               );
             }}
             onError={setError}
-            onOpenDesignLink={(link) => {
-              const target =
-                link.targetType === "uml"
-                  ? payload.diagrams.find((diagram) => diagram.key === link.designExternalId)
-                  : null;
-              const externalId =
-                link.targetType === "uml"
-                  ? target?.attachedToExternalId ?? link.designExternalId
-                  : link.designExternalId;
-              const entityType =
-                link.targetType === "relationship" || target?.attachedToTargetType === "relationship"
-                  ? "relationship"
-                  : "element";
-
-              setSelectedDesignEntity({ type: entityType, externalId });
-              setActiveDesignLevel(link.targetType === "uml" || entityType === "relationship" ? "features" : "components");
-              setActiveView("design");
-            }}
+            onOpenDesignLink={openDesignLink}
           />
-        ) : activeView === "qa" ? (
+        </div>
+        <div className="workspace-tab" hidden={activeView !== "qa"}>
           <QaView
+            key={`${payload.projectId}:qa`}
             projectId={payload.projectId}
             qaChecks={payload.qaChecks}
             qaJobs={payload.qaJobs}
@@ -726,36 +850,24 @@ function App() {
             designElements={payload.designElements}
             designRelationships={payload.designRelationships}
             diagrams={payload.diagrams}
+            mockups={payload.mockups}
             onChange={(updatedPayload) => {
               setPayload((currentPayload) =>
                 currentPayload ? mergeDashboardPayload(currentPayload, updatedPayload) : updatedPayload,
               );
             }}
             onError={setError}
-            onOpenDesignLink={(link) => {
-              const target =
-                link.targetType === "uml"
-                  ? payload.diagrams.find((diagram) => diagram.key === link.designExternalId)
-                  : null;
-              const externalId =
-                link.targetType === "uml"
-                  ? target?.attachedToExternalId ?? link.designExternalId
-                  : link.designExternalId;
-              const entityType =
-                link.targetType === "relationship" || target?.attachedToTargetType === "relationship"
-                  ? "relationship"
-                  : "element";
-
-              setSelectedDesignEntity({ type: entityType, externalId });
-              setActiveDesignLevel(link.targetType === "uml" || entityType === "relationship" ? "features" : "components");
-              setActiveView("design");
-            }}
+            onOpenDesignLink={openDesignLink}
           />
-        ) : (
+        </div>
+        <div className="workspace-tab" hidden={activeView !== "design"}>
           <DesignBrowser
+            key={`${payload.projectId}:design`}
             activeLevel={activeDesignLevel}
             payload={payload}
             selectedEntity={selectedDesignEntity}
+            requestedArtifactKey={designNavigationRequest.artifactKey}
+            requestedArtifactRequestId={designNavigationRequest.requestId}
             onChange={(updatedPayload) => {
               setPayload((currentPayload) =>
                 currentPayload ? mergeDashboardPayload(currentPayload, updatedPayload) : updatedPayload,
@@ -765,9 +877,11 @@ function App() {
             onLevelChange={setActiveDesignLevel}
             onSelect={setSelectedDesignEntity}
           />
-        )}
+        </div>
       </section>
-    </main>
+      </main>
+      {error ? <ErrorDialog message={error} onClose={dismissError} /> : null}
+    </>
   );
 }
 
@@ -778,6 +892,7 @@ function mergeDashboardPayload(current: DashboardPayload, next: DashboardPayload
     designElements: reconcileById(current.designElements, next.designElements),
     designRelationships: reconcileById(current.designRelationships, next.designRelationships),
     diagrams: reconcileById(current.diagrams, next.diagrams),
+    mockups: next.mockups,
     tasks: reconcileById(current.tasks, next.tasks),
     guidelines: reconcileById(current.guidelines, next.guidelines),
     postTaskCommands: reconcileById(current.postTaskCommands, next.postTaskCommands),
@@ -873,6 +988,8 @@ function DesignBrowser({
   activeLevel,
   payload,
   selectedEntity,
+  requestedArtifactKey,
+  requestedArtifactRequestId,
   onChange,
   onError,
   onLevelChange,
@@ -881,6 +998,8 @@ function DesignBrowser({
   activeLevel: DesignLevel;
   payload: DashboardPayload;
   selectedEntity: { type: DesignEntityType; externalId: string } | null;
+  requestedArtifactKey: string | null;
+  requestedArtifactRequestId: number;
   onChange: (payload: DashboardPayload) => void;
   onError: (message: string) => void;
   onLevelChange: (level: DesignLevel) => void;
@@ -911,7 +1030,13 @@ function DesignBrowser({
     selectedEntity?.type === "relationship"
       ? payload.designRelationships.find((relationship) => relationship.externalId === selectedEntity.externalId) ?? null
       : null;
-  const activeBranchElement = activeLevel === "context" ? rootElement : selectedElement ?? rootElement;
+  const relationshipBranchElement = selectedRelationship
+    ? payload.designElements.find((element) => element.externalId === selectedRelationship.sourceExternalId) ??
+      payload.designElements.find((element) => element.externalId === selectedRelationship.destinationExternalId) ??
+      null
+    : null;
+  const activeBranchElement =
+    activeLevel === "context" ? rootElement : selectedElement ?? relationshipBranchElement ?? rootElement;
   const branchChildren = activeBranchElement
     ? payload.designElements.filter((element) => element.parentExternalId === activeBranchElement.externalId)
     : [];
@@ -935,7 +1060,12 @@ function DesignBrowser({
     () => selectUmlArtifacts(payload.diagrams, artifactTarget),
     [artifactTarget?.externalId, artifactTarget?.type, payload.diagrams],
   );
-  const activeUmlArtifact = umlArtifacts.find((diagram) => diagram.key === activeArtifactKey) ?? umlArtifacts[0];
+  const mockupArtifacts = React.useMemo(
+    () => artifactTarget ? payload.mockups.filter((mockup) => mockup.attachedToExternalId === artifactTarget.externalId) : [],
+    [artifactTarget?.externalId, payload.mockups],
+  );
+  const activeMockupArtifact = mockupArtifacts.find((mockup) => mockup.externalId === activeArtifactKey) ?? null;
+  const activeUmlArtifact = activeMockupArtifact ? null : umlArtifacts.find((diagram) => diagram.key === activeArtifactKey) ?? umlArtifacts[0] ?? null;
   const branchStructurizr = React.useMemo(
     () =>
       buildBranchStructurizrWorkspace(
@@ -958,12 +1088,20 @@ function DesignBrowser({
       : payload.designRelationships.filter((relationship) => branchStructurizr.visibleRelationshipIds.has(relationship.externalId));
 
   React.useEffect(() => {
-    if (activeArtifactKey && umlArtifacts.some((diagram) => diagram.key === activeArtifactKey)) {
+    setQuery("");
+
+    if (requestedArtifactKey) {
+      setActiveArtifactKey(requestedArtifactKey);
+    }
+  }, [requestedArtifactKey, requestedArtifactRequestId]);
+
+  React.useEffect(() => {
+    if (activeArtifactKey && (umlArtifacts.some((diagram) => diagram.key === activeArtifactKey) || mockupArtifacts.some((mockup) => mockup.externalId === activeArtifactKey))) {
       return;
     }
 
-    setActiveArtifactKey(umlArtifacts[0]?.key ?? null);
-  }, [activeArtifactKey, umlArtifacts]);
+    setActiveArtifactKey(umlArtifacts[0]?.key ?? mockupArtifacts[0]?.externalId ?? null);
+  }, [activeArtifactKey, mockupArtifacts, umlArtifacts]);
 
   function selectLevel(level: DesignLevel) {
     onLevelChange(level);
@@ -1078,7 +1216,7 @@ function DesignBrowser({
             <div>
               <p className="eyebrow">
                 {activeLevel === "features"
-                  ? "Mermaid UML Artifacts"
+                  ? activeMockupArtifact ? "Static UI Mockup" : "Mermaid UML Artifacts"
                   : projectionMode === "dependencies"
                     ? "Structurizr Dependency View"
                     : "Structurizr C4"}
@@ -1089,9 +1227,9 @@ function DesignBrowser({
               <div className="viewer-controls">
                 <div className="status-strip compact">
                   <span>{artifactTarget?.type ?? "artifact"}</span>
-                  <span>{activeUmlArtifact?.key ?? "No attached UML"}</span>
+                  <span>{activeMockupArtifact?.externalId ?? activeUmlArtifact?.key ?? "No attached artifact"}</span>
                 </div>
-                <div className="viewer-slider-row">
+                {!activeMockupArtifact ? <div className="viewer-slider-row">
                   <div className="diagram-range-control zoom-control">
                     <ZoomOut size={15} />
                     <input
@@ -1124,7 +1262,7 @@ function DesignBrowser({
                     />
                     <span>{mermaidFontSize}px</span>
                   </div>
-                </div>
+                </div> : null}
               </div>
             ) : (
               <div className="viewer-controls">
@@ -1199,17 +1337,29 @@ function DesignBrowser({
 
           {activeLevel === "features" ? (
             <div className="uml-artifact-viewer">
-              <UmlArtifactTabs
+              <DesignArtifactTabs
                 activeKey={activeUmlArtifact?.key ?? null}
                 artifacts={umlArtifacts}
+                activeMockupKey={activeMockupArtifact?.externalId ?? null}
+                mockups={mockupArtifacts}
                 onSelect={setActiveArtifactKey}
               />
-              <MermaidPanel
-                diagram={activeUmlArtifact?.source ?? ""}
-                fontSize={mermaidFontSize}
-                onZoomChange={setMermaidZoom}
-                zoomPercent={mermaidZoom}
-              />
+              {activeMockupArtifact ? (
+                <MockupWorkspace
+                  projectId={payload.projectId}
+                  projectRevision={payload.revision}
+                  summary={activeMockupArtifact}
+                  onChange={onChange}
+                  onError={onError}
+                />
+              ) : (
+                <MermaidPanel
+                  diagram={activeUmlArtifact?.source ?? ""}
+                  fontSize={mermaidFontSize}
+                  onZoomChange={setMermaidZoom}
+                  zoomPercent={mermaidZoom}
+                />
+              )}
             </div>
           ) : (
             <StructurizrFrame
@@ -1256,17 +1406,17 @@ function DesignBrowser({
         />
 
         <SourcePanel
-          diagram={sourceDiagram}
+          diagram={sourceDiagram ?? undefined}
           source={
             activeLevel === "features"
-              ? sourceDiagram?.source ?? ""
+              ? activeMockupArtifact ? `UI Mockup ${activeMockupArtifact.externalId}\nStatus: ${activeMockupArtifact.status}\nViewport: ${activeMockupArtifact.viewportWidth} x ${activeMockupArtifact.viewportHeight}` : sourceDiagram?.source ?? ""
               : projectionMode === "dependencies"
                 ? branchStructurizr.source
                 : payload.structurizrDsl
           }
           sourceKind={
             activeLevel === "features"
-              ? activeUmlArtifact?.artifactLabel ?? "Mermaid UML"
+              ? activeMockupArtifact ? "UI Mockup Facts" : activeUmlArtifact?.artifactLabel ?? "Mermaid UML"
               : projectionMode === "dependencies"
                 ? "Dependency Projection"
                 : "Structurizr DSL"
@@ -1330,6 +1480,7 @@ function DesignTree({
 }) {
   const normalizedQuery = query.trim().toLowerCase();
   const [expandedIds, setExpandedIds] = React.useState<Set<string>>(() => new Set());
+  const treeRef = React.useRef<HTMLDivElement | null>(null);
   const branchRelationships = branchElement
     ? relationships.filter(
         (relationship) =>
@@ -1337,6 +1488,64 @@ function DesignTree({
           relationship.destinationExternalId === branchElement.externalId,
       )
     : [];
+
+  React.useEffect(() => {
+    if (!selectedEntity) {
+      return;
+    }
+
+    const revealElement =
+      selectedEntity.type === "element"
+        ? elements.find((element) => element.externalId === selectedEntity.externalId)
+        : (() => {
+            const relationship = relationships.find(
+              (candidate) => candidate.externalId === selectedEntity.externalId,
+            );
+
+            return relationship
+              ? elements.find((element) => element.externalId === relationship.sourceExternalId) ??
+                  elements.find((element) => element.externalId === relationship.destinationExternalId)
+              : undefined;
+          })();
+
+    if (!revealElement) {
+      return;
+    }
+
+    const ancestorIds = buildBreadcrumb(revealElement, elements)
+      .slice(0, -1)
+      .map((element) => element.externalId);
+
+    setExpandedIds((current) => {
+      if (ancestorIds.every((externalId) => current.has(externalId))) {
+        return current;
+      }
+
+      const next = new Set(current);
+      ancestorIds.forEach((externalId) => next.add(externalId));
+      return next;
+    });
+  }, [elements, relationships, selectedEntity]);
+
+  React.useEffect(() => {
+    if (!selectedEntity) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      const selectedNode = Array.from(
+        treeRef.current?.querySelectorAll<HTMLElement>("[data-design-entity-id]") ?? [],
+      ).find(
+        (node) =>
+          node.dataset.designEntityType === selectedEntity.type &&
+          node.dataset.designEntityId === selectedEntity.externalId,
+      );
+
+      selectedNode?.scrollIntoView({ block: "nearest" });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [expandedIds, selectedEntity]);
 
   function toggleBranch(externalId: string) {
     setExpandedIds((current) => {
@@ -1353,7 +1562,7 @@ function DesignTree({
   }
 
   return (
-    <div className="design-list">
+    <div className="design-list" ref={treeRef}>
       <div className="design-tree-heading">
         <span>{DESIGN_LEVEL_LABELS[activeLevel]}</span>
         {branchElement ? <strong>{branchElement.name}</strong> : null}
@@ -1399,6 +1608,8 @@ function DesignTree({
                 ? "design-list-item relationship active"
                 : "design-list-item relationship"
             }
+            data-design-entity-id={relationship.externalId}
+            data-design-entity-type="relationship"
             key={relationship.externalId}
             onClick={() => onSelectRelationship(relationship)}
             type="button"
@@ -1469,6 +1680,8 @@ function DesignTreeItem({
           ]
             .filter(Boolean)
             .join(" ")}
+          data-design-entity-id={node.element.externalId}
+          data-design-entity-type="element"
           onClick={() => onSelectElement(node.element)}
           type="button"
         >
@@ -2609,16 +2822,20 @@ function InspectorSection({ title, children }: React.PropsWithChildren<{ title: 
   );
 }
 
-function UmlArtifactTabs({
+function DesignArtifactTabs({
   activeKey,
   artifacts,
+  activeMockupKey,
+  mockups,
   onSelect,
 }: {
   activeKey: string | null;
   artifacts: DesignDiagram[];
+  activeMockupKey: string | null;
+  mockups: MockupSummary[];
   onSelect: (key: string) => void;
 }) {
-  if (artifacts.length <= 1) {
+  if (artifacts.length === 0 && mockups.length === 0) {
     return null;
   }
 
@@ -2642,7 +2859,115 @@ function UmlArtifactTabs({
           </button>
         );
       })}
+      {mockups.map((mockup) => (
+        <button
+          aria-selected={mockup.externalId === activeMockupKey}
+          className={mockup.externalId === activeMockupKey ? "active" : ""}
+          key={mockup.externalId}
+          onClick={() => onSelect(mockup.externalId)}
+          role="tab"
+          title={mockup.title}
+          type="button"
+        >
+          <Wand2 size={15} />
+          <span>Mockup</span>
+        </button>
+      ))}
     </div>
+  );
+}
+
+function MockupWorkspace({
+  projectId,
+  projectRevision,
+  summary,
+  onChange,
+  onError,
+}: {
+  projectId: string;
+  projectRevision: number;
+  summary: MockupSummary;
+  onChange: (payload: DashboardPayload) => void;
+  onError: (message: string) => void;
+}) {
+  const [mockup, setMockup] = React.useState<UiMockup | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const [reloadKey, setReloadKey] = React.useState(0);
+
+  React.useEffect(() => {
+    let active = true;
+    setMockup(null);
+    invoke<UiMockup>("get_mockup", { projectId, externalId: summary.externalId })
+      .then((loaded) => { if (active) setMockup(loaded); })
+      .catch((error) => { if (active) onError(String(error)); });
+    return () => { active = false; };
+  }, [onError, projectId, reloadKey, summary.externalId]);
+
+  function mutate(command: string, expectedRevision = projectRevision) {
+    setBusy(true);
+    invoke<DashboardPayload>(command, {
+      projectId,
+      input: { externalId: summary.externalId, expectedRevision },
+    })
+      .then((payload) => { onChange(payload); setReloadKey((key) => key + 1); })
+      .catch((error) => onError(String(error)))
+      .finally(() => setBusy(false));
+  }
+
+  function discardDraft() {
+    if (!window.confirm("Discard all user changes since the last accepted mockup? This removes the working SVG, edit history, red-pencil annotations, and any pending proposal.")) return;
+    mutate("discard_mockup_draft");
+  }
+
+  if (!mockup) {
+    return <div className="mockup-loading">Loading mockup…</div>;
+  }
+
+  const hasProposal = Boolean(mockup.proposal);
+  const editable = mockup.status === "accepted" || mockup.status === "workingDraft";
+
+  return (
+    <section className="mockup-workspace">
+      <header className="mockup-toolbar">
+        <div>
+          <strong>{mockup.title}</strong>
+          <span>{mockup.manifest.screen || "Screen"} · {mockup.manifest.state || "Default state"} · {mockup.manifest.viewportWidth} × {mockup.manifest.viewportHeight}</span>
+        </div>
+        <div className="mockup-actions">
+          {mockup.status === "pendingAgent" || mockup.status === "proposed" ? <button disabled={busy} onClick={() => mutate("resume_mockup_editing")} type="button">Resume editing</button> : null}
+          {mockup.status === "proposed" ? <button disabled={busy} onClick={() => mutate("accept_mockup_proposal")} type="button"><Check size={15} /> Accept</button> : null}
+          {mockup.status === "proposed" ? <button disabled={busy} onClick={() => mutate("reject_mockup_proposal")} type="button"><X size={15} /> Reject</button> : null}
+          {mockup.status !== "accepted" ? <button disabled={busy} onClick={discardDraft} title="Remove every user draft change and return to the last accepted mockup" type="button">Discard all draft changes</button> : null}
+          <button className="danger" disabled={busy} onClick={() => mutate("delete_mockup")} type="button"><Trash2 size={15} /> Delete</button>
+        </div>
+      </header>
+      {editable && !hasProposal ? <MockupEditor
+        key={`${mockup.externalId}-${mockup.acceptedRevision}-${mockup.status}`}
+        mockup={mockup}
+        onDashboardChange={(payload) => onChange(payload as DashboardPayload)}
+        onError={onError}
+        onRequestRevision={(revision) => mutate("request_mockup_revision", revision)}
+        projectId={projectId}
+        projectRevision={projectRevision}
+      /> : <div className={hasProposal ? "mockup-comparison" : "mockup-comparison single"}>
+        <article>
+          <div className="mockup-preview-heading"><span>{mockup.workingSvg ? "Working draft" : "Accepted"}</span><small>r{mockup.acceptedRevision} · {mockup.status}</small></div>
+          <div className="mockup-svg-preview" dangerouslySetInnerHTML={{ __html: mockup.workingSvg ?? mockup.acceptedSvg }} />
+        </article>
+        {mockup.proposal ? (
+          <article>
+            <div className="mockup-preview-heading"><span>AI proposal</span><small>candidate from r{mockup.proposal.baseRevision}</small></div>
+            <div className="mockup-svg-preview" dangerouslySetInnerHTML={{ __html: mockup.proposal.proposedSvg }} />
+          </article>
+        ) : null}
+      </div>}
+      <footer className="mockup-evidence-strip">
+        <span>{mockup.editOperations.length} edit operations</span>
+        <span>{mockup.annotations.length} vector annotations</span>
+        <span>{mockup.manifest.fidelity || "unspecified fidelity"}</span>
+        <span>accepted SVG is authoritative</span>
+      </footer>
+    </section>
   );
 }
 
@@ -2904,6 +3229,7 @@ function TasksView({
   designElements,
   designRelationships,
   diagrams,
+  mockups,
   postTaskCommands,
   onChange,
   onError,
@@ -2914,6 +3240,7 @@ function TasksView({
   designElements: DesignElement[];
   designRelationships: DesignRelationship[];
   diagrams: DesignDiagram[];
+  mockups: MockupSummary[];
   postTaskCommands: Command[];
   onChange: (payload: DashboardPayload) => void;
   onError: (message: string) => void;
@@ -2934,8 +3261,8 @@ function TasksView({
   const selectedTask =
     tasks.find((task) => task.id === selectedTaskId && visibleStates[task.state]) ?? visibleTasks[0] ?? null;
   const designLinkOptions = React.useMemo(
-    () => buildTaskDesignLinkOptions(designElements, designRelationships, diagrams, linkQuery),
-    [designElements, designRelationships, diagrams, linkQuery],
+    () => buildTaskDesignLinkOptions(designElements, designRelationships, diagrams, mockups, linkQuery),
+    [designElements, designRelationships, diagrams, mockups, linkQuery],
   );
 
   React.useEffect(() => {
@@ -3278,7 +3605,7 @@ function TasksView({
 }
 
 type TaskDesignLinkOption = {
-  targetType: "element" | "relationship" | "uml";
+  targetType: "element" | "relationship" | "uml" | "mockup";
   designExternalId: string;
   title: string;
   summary: string;
@@ -3288,6 +3615,7 @@ function buildTaskDesignLinkOptions(
   elements: DesignElement[],
   relationships: DesignRelationship[],
   diagrams: DesignDiagram[],
+  mockups: MockupSummary[],
   query: string,
 ): TaskDesignLinkOption[] {
   const terms = query
@@ -3321,6 +3649,12 @@ function buildTaskDesignLinkOptions(
         title: diagram.title,
         summary: `${diagram.key} ${diagram.diagramType} ${diagram.artifactLabel} ${diagram.attachedToExternalId ?? ""}`,
       })),
+    ...mockups.map((mockup) => ({
+      targetType: "mockup" as const,
+      designExternalId: mockup.externalId,
+      title: mockup.title,
+      summary: `${mockup.externalId} ${mockup.attachedToExternalId} ${mockup.screen} ${mockup.state} ${mockup.fidelity}`,
+    })),
   ];
 
   return options
@@ -3353,6 +3687,7 @@ function QaView({
   designElements,
   designRelationships,
   diagrams,
+  mockups,
   onChange,
   onError,
   onOpenDesignLink,
@@ -3364,6 +3699,7 @@ function QaView({
   designElements: DesignElement[];
   designRelationships: DesignRelationship[];
   diagrams: DesignDiagram[];
+  mockups: MockupSummary[];
   onChange: (payload: DashboardPayload) => void;
   onError: (message: string) => void;
   onOpenDesignLink: (link: QaJobDesignLink) => void;
@@ -3403,8 +3739,8 @@ function QaView({
   const selectedJobRun =
     selectedJob?.runHistory.find((jobRun) => jobRun.id === selectedJobRunId) ?? selectedJob?.runHistory[0] ?? null;
   const designLinkOptions = React.useMemo(
-    () => buildTaskDesignLinkOptions(designElements, designRelationships, diagrams, designQuery),
-    [designElements, designRelationships, diagrams, designQuery],
+    () => buildTaskDesignLinkOptions(designElements, designRelationships, diagrams, mockups, designQuery),
+    [designElements, designRelationships, diagrams, mockups, designQuery],
   );
   const taskLinkOptions = React.useMemo(() => buildQaTaskLinkOptions(tasks, taskQuery), [tasks, taskQuery]);
 

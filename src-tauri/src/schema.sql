@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS task_design_specification_links (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id INTEGER NOT NULL REFERENCES agent_tasks(id) ON DELETE CASCADE,
     sort_order INTEGER NOT NULL DEFAULT 0,
-    target_type TEXT NOT NULL CHECK(target_type IN ('element', 'relationship', 'uml')),
+    target_type TEXT NOT NULL CHECK(target_type IN ('element', 'relationship', 'uml', 'mockup')),
     design_external_id TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(task_id, design_external_id)
@@ -173,7 +173,7 @@ CREATE TABLE IF NOT EXISTS qa_job_design_links (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     qa_job_id INTEGER NOT NULL REFERENCES qa_jobs(id) ON DELETE CASCADE,
     sort_order INTEGER NOT NULL DEFAULT 0,
-    target_type TEXT NOT NULL CHECK(target_type IN ('element', 'relationship', 'uml')),
+    target_type TEXT NOT NULL CHECK(target_type IN ('element', 'relationship', 'uml', 'mockup')),
     design_external_id TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(qa_job_id, design_external_id)
@@ -233,6 +233,73 @@ CREATE TABLE IF NOT EXISTS qa_job_runs (
 
 CREATE INDEX IF NOT EXISTS idx_qa_job_runs_job_latest
     ON qa_job_runs(qa_job_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS ui_mockups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    external_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    attached_to_external_id TEXT NOT NULL,
+    viewport_width INTEGER NOT NULL,
+    viewport_height INTEGER NOT NULL,
+    screen TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL DEFAULT '',
+    fidelity TEXT NOT NULL DEFAULT '',
+    schema_version INTEGER NOT NULL DEFAULT 1,
+    accepted_svg TEXT NOT NULL,
+    accepted_revision INTEGER NOT NULL DEFAULT 1,
+    working_svg TEXT,
+    base_revision INTEGER,
+    status TEXT NOT NULL DEFAULT 'accepted' CHECK(status IN ('accepted', 'workingDraft', 'pendingAgent', 'proposed')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(project_id, external_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ui_mockups_attachment
+    ON ui_mockups(project_id, attached_to_external_id);
+
+CREATE TABLE IF NOT EXISTS ui_mockup_edit_operations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mockup_id INTEGER NOT NULL REFERENCES ui_mockups(id) ON DELETE CASCADE,
+    sequence INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    target_element_id TEXT,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(mockup_id, sequence)
+);
+
+CREATE TABLE IF NOT EXISTS ui_mockup_annotations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mockup_id INTEGER NOT NULL REFERENCES ui_mockups(id) ON DELETE CASCADE,
+    external_id TEXT NOT NULL,
+    svg_path TEXT NOT NULL,
+    optional_text TEXT NOT NULL DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(mockup_id, external_id)
+);
+
+CREATE TABLE IF NOT EXISTS ui_mockup_proposals (
+    mockup_id INTEGER PRIMARY KEY REFERENCES ui_mockups(id) ON DELETE CASCADE,
+    base_revision INTEGER NOT NULL,
+    proposed_svg TEXT NOT NULL,
+    proposed_manifest_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS ui_mockup_preview_cache (
+    mockup_id INTEGER NOT NULL REFERENCES ui_mockups(id) ON DELETE CASCADE,
+    source_revision INTEGER NOT NULL,
+    variant TEXT NOT NULL,
+    png BLOB NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(mockup_id, source_revision, variant)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ui_mockups_status
+    ON ui_mockups(project_id, status);
 
 CREATE TABLE IF NOT EXISTS rules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

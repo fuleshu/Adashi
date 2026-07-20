@@ -36,12 +36,103 @@ button {
   overflow: hidden;
 }
 
-.loading-shell,
-.error-shell {
+.loading-shell {
   align-items: center;
   display: flex;
   gap: 12px;
   justify-content: center;
+}
+
+.error-dialog-modal {
+  background: transparent;
+  border: 0;
+  max-height: none;
+  max-width: 608px;
+  padding: 24px;
+  width: calc(100% - 48px);
+}
+
+.error-dialog-modal::backdrop {
+  background: rgba(18, 35, 35, 0.42);
+}
+
+.error-dialog {
+  background: #fffdf8;
+  border: 1px solid #d7cfc0;
+  border-radius: 10px;
+  box-shadow: 0 24px 64px rgba(18, 35, 35, 0.28);
+  color: #263332;
+  display: grid;
+  gap: 18px;
+  max-height: min(70vh, 640px);
+  max-width: 560px;
+  overflow: auto;
+  padding: 22px;
+  width: 100%;
+}
+
+.error-dialog-header {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.error-dialog-header h2,
+.error-dialog p {
+  margin: 0;
+}
+
+.error-dialog-header h2 {
+  color: #8f3517;
+  font-size: 21px;
+}
+
+.error-dialog p {
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.error-dialog-close {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: #53615f;
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  min-height: 34px;
+  min-width: 34px;
+  padding: 0;
+}
+
+.error-dialog-close:hover,
+.error-dialog-close:focus-visible {
+  background: #eee9df;
+  color: #263332;
+}
+
+.error-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.error-dialog-actions button {
+  background: #285c5a;
+  border: 1px solid #285c5a;
+  border-radius: 7px;
+  color: #fff;
+  cursor: pointer;
+  min-height: 38px;
+  padding: 7px 18px;
+}
+
+.error-dialog-actions button:hover,
+.error-dialog-actions button:focus-visible {
+  background: #1d4947;
+  border-color: #1d4947;
 }
 
 .onboarding-shell {
@@ -264,6 +355,17 @@ button {
   min-width: 0;
   overflow: hidden;
   padding: 24px;
+}
+
+.workspace-tab {
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.workspace-tab[hidden] {
+  display: none;
 }
 
 .topbar {
@@ -956,6 +1058,460 @@ button {
   flex-wrap: wrap;
   gap: 6px;
   padding: 8px 12px;
+}
+
+.mockup-loading {
+  display: grid;
+  min-height: 320px;
+  place-items: center;
+  color: #68727d;
+}
+
+.mockup-workspace {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 0;
+  height: 100%;
+  background: #f5f4ee;
+}
+
+.mockup-toolbar,
+.mockup-evidence-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #d8d5cc;
+  background: #fffdf8;
+}
+
+.mockup-toolbar > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.mockup-toolbar span,
+.mockup-evidence-strip,
+.mockup-preview-heading small {
+  color: #68727d;
+  font-size: 12px;
+}
+
+.mockup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.mockup-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.mockup-actions .danger {
+  color: #a53d34;
+}
+
+.mockup-comparison {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  min-height: 0;
+  padding: 12px;
+  overflow: auto;
+}
+
+.mockup-comparison.single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.mockup-comparison article {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  border: 1px solid #d8d5cc;
+  border-radius: 9px;
+  background: white;
+  overflow: hidden;
+}
+
+.mockup-preview-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #d8d5cc;
+  background: #faf9f5;
+}
+
+.mockup-svg-preview {
+  display: grid;
+  min-height: 280px;
+  padding: 16px;
+  place-items: center;
+  overflow: auto;
+}
+
+.mockup-svg-preview > svg {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  height: auto;
+}
+
+.mockup-editor {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  outline: none;
+}
+
+.mockup-editor:focus-visible {
+  box-shadow: inset 0 0 0 2px #315f5b;
+}
+
+.mockup-editor-tools {
+  align-items: center;
+  background: #faf9f5;
+  border-bottom: 1px solid #d8d5cc;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 7px 10px;
+}
+
+.mockup-editor-tools button,
+.mockup-palette button,
+.mockup-properties button {
+  font-size: 12px;
+  min-height: 30px;
+}
+
+.mockup-editor-tools button.active {
+  background: #315f5b;
+  border-color: #315f5b;
+  color: white;
+}
+
+.mockup-zoom-control {
+  align-items: center;
+  color: #596461;
+  display: grid;
+  font-size: 11px;
+  gap: 5px;
+  grid-template-columns: auto 92px 38px;
+  margin-left: 2px;
+}
+
+.mockup-zoom-control input {
+  margin: 0;
+  width: 92px;
+}
+
+.mockup-zoom-control output {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.tool-separator {
+  background: #d8d5cc;
+  height: 24px;
+  margin: 0 3px;
+  width: 1px;
+}
+
+.mockup-save-state {
+  color: #64706d;
+  font-size: 11px;
+  margin-left: auto;
+}
+
+.mockup-save-state.dirty {
+  color: #9b5d19;
+  font-weight: 650;
+}
+
+.mockup-editor-body {
+  display: grid;
+  grid-template-columns: 132px minmax(300px, 1fr) 240px;
+  min-height: 0;
+}
+
+.mockup-palette,
+.mockup-properties {
+  align-content: start;
+  background: #fffdf8;
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
+.mockup-palette {
+  border-right: 1px solid #d8d5cc;
+}
+
+.mockup-properties {
+  border-left: 1px solid #d8d5cc;
+}
+
+.mockup-properties p {
+  color: #68727d;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.mockup-properties label,
+.mockup-property-label {
+  color: #596461;
+  display: grid;
+  font-size: 11px;
+  gap: 3px;
+}
+
+.mockup-properties input {
+  min-width: 0;
+  width: 100%;
+}
+
+.mockup-color-field {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 36px minmax(0, 1fr);
+  position: relative;
+}
+
+.mockup-color-trigger {
+  border: 1px solid #9ca7a3;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 3px #fff;
+  cursor: pointer;
+  height: 34px;
+  min-height: 34px !important;
+  padding: 3px;
+  width: 36px;
+}
+
+.mockup-color-popover {
+  background: #fffdf8;
+  border: 1px solid #c9c7bf;
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(32, 43, 40, .22);
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  width: 216px;
+  z-index: 8;
+}
+
+.mockup-color-preview {
+  border: 1px solid #aaa;
+  border-radius: 6px;
+  display: block;
+  height: 34px;
+}
+
+.mockup-color-popover input[type="range"] {
+  appearance: none;
+  border-radius: 8px;
+  cursor: pointer;
+  height: 12px;
+}
+
+.mockup-color-popover input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  background: white;
+  border: 1px solid #52606d;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .28);
+  height: 17px;
+  width: 17px;
+}
+
+.mockup-hue-range {
+  background: linear-gradient(90deg, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+}
+
+.mockup-color-presets {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(6, 1fr);
+}
+
+.mockup-color-presets button {
+  border: 1px solid #8e9995;
+  border-radius: 50%;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  width: 24px;
+}
+
+.mockup-color-popover-footer {
+  align-items: center;
+  display: grid;
+  gap: 7px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.mockup-color-popover-footer button {
+  background: #315f5b;
+  border-color: #315f5b;
+  color: white;
+  min-height: 31px;
+}
+
+.mockup-tool-explanation {
+  background: #fff5f3;
+  border: 1px solid #f0c4bd;
+  border-radius: 7px;
+  color: #7f342d !important;
+  padding: 8px;
+}
+
+.mockup-structural-actions {
+  border-top: 1px solid #e1ddd4;
+  display: grid;
+  gap: 5px;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 5px;
+  padding-top: 10px;
+}
+
+.mockup-geometry-fields {
+  display: grid;
+  gap: 5px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.mockup-edit-canvas {
+  align-items: center;
+  background-color: #e8e9e5;
+  background-image: linear-gradient(45deg, #dde0dc 25%, transparent 25%), linear-gradient(-45deg, #dde0dc 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #dde0dc 75%), linear-gradient(-45deg, transparent 75%, #dde0dc 75%);
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-size: 16px 16px;
+  display: flex;
+  justify-content: center;
+  min-height: 0;
+  overflow: hidden;
+  padding: 24px;
+  position: relative;
+  touch-action: none;
+  user-select: none;
+}
+
+.mockup-canvas-stage {
+  flex: 0 0 auto;
+  position: relative;
+  transform-origin: center;
+  will-change: transform;
+}
+
+.mockup-edit-source {
+  height: 100%;
+  width: 100%;
+}
+
+.mockup-edit-source > svg,
+.mockup-annotation-layer {
+  background: white;
+  box-shadow: 0 4px 18px rgba(32, 43, 40, .16);
+  display: block;
+  height: 100%;
+  max-height: none;
+  max-width: none;
+  width: 100%;
+}
+
+.mockup-edit-source > svg {
+  z-index: 1;
+}
+
+.mockup-annotation-layer {
+  background: transparent;
+  box-shadow: none;
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 2;
+}
+
+.tool-eraser .mockup-annotation-layer,
+.tool-callout .mockup-annotation-layer {
+  pointer-events: auto;
+}
+
+.tool-pencil,
+.tool-callout {
+  cursor: crosshair;
+}
+
+.tool-pan,
+.space-pan .mockup-edit-canvas {
+  cursor: grab;
+}
+
+.tool-pan:active,
+.space-pan .mockup-edit-canvas:active {
+  cursor: grabbing;
+}
+
+.tool-eraser {
+  cursor: cell;
+}
+
+.mockup-edit-canvas .adashi-editor-selected {
+  filter: drop-shadow(0 0 2px #1687d9) drop-shadow(0 0 1px #1687d9);
+  outline: 2px solid #1687d9;
+  outline-offset: 2px;
+}
+
+.mockup-resize-handle {
+  background: white;
+  border: 2px solid #1687d9;
+  border-radius: 2px;
+  cursor: nwse-resize;
+  height: 14px;
+  min-height: 0;
+  padding: 0;
+  position: absolute;
+  width: 14px;
+  z-index: 4;
+}
+
+@media (max-width: 900px) {
+  .mockup-editor-body {
+    grid-template-columns: 104px minmax(280px, 1fr);
+  }
+
+  .mockup-properties {
+    display: none;
+  }
+}
+
+.mockup-evidence-strip {
+  justify-content: flex-start;
+  border-top: 1px solid #d8d5cc;
+  border-bottom: 0;
+}
+
+@media (max-width: 1100px) {
+  .mockup-comparison {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mockup-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 .uml-artifact-tabs button {

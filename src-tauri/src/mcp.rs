@@ -4,6 +4,7 @@ use crate::design::{
 };
 use crate::fixed_hooks::{self, DESIGN_AUTHORING_HOOK_KEY, IMPLEMENTATION_GUIDANCE_HOOK_KEY};
 use crate::memory::{self, ProjectMemory};
+use crate::mockups::{self, MockupSummary};
 use crate::qa::{self, NewQaJob, QaDesignLinkInput, QaJob, QaJobQuery, QaRun, UpdateQaJob};
 use crate::rules::{self, InjectionRule, NewRule, Rule, UpdateRule};
 use crate::settings::{self, AppSettings, ProjectSettings};
@@ -14,9 +15,10 @@ use crate::tasks::{
 };
 use crate::{open_project_database, resolve_project_from_settings};
 use rmcp::handler::server::wrapper::{Json, Parameters};
-use rmcp::model::ErrorData;
+use rmcp::model::{CallToolResult, ContentBlock, ErrorData};
 use rmcp::transport::stdio;
 use rmcp::{serve_server, tool, tool_router};
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
@@ -261,6 +263,22 @@ struct DesignSaveParams {
     expected_revision: i64,
     change_intent: String,
     changes: Vec<DesignChange>,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct MockupContextParams {
+    project_id: String,
+    external_id: String,
+}
+
+#[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct MockupPendingResult {
+    project_id: String,
+    project_name: String,
+    revision: i64,
+    mockups: Vec<MockupSummary>,
 }
 
 #[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
@@ -1009,7 +1027,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_design_get_overview",
-        description = "Read a compact top-down C4/UML design overview for the selected project, including supported typed UML artifact types and diagram metadata. This is deterministic retrieval; the agent chooses the relevant design scope and artifact type."
+        description = "Read a compact top-down C4/UML design overview and attached UI mockup inventory for the selected project. Mockups are returned as a separate artifact kind and are not added to umlArtifactTypes. This is deterministic retrieval; the agent chooses the relevant design scope and artifact type."
     )]
     fn design_get_overview(
         &self,
@@ -1046,7 +1064,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_design_search",
-        description = "Run deterministic text search over stored design elements, relationships, typed UML artifacts, and source. The agent must reason over the hits; the MCP does not infer task context."
+        description = "Run deterministic text search over stored design elements, relationships, typed UML artifacts, UI mockups, and source. The agent must reason over the hits; the MCP does not infer task context."
     )]
     fn design_search(
         &self,
@@ -1067,7 +1085,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_design_get_by_ids",
-        description = "Read explicit design elements, relationships, typed UML artifacts, supported artifact types, and bindings by stored design ids."
+        description = "Read explicit design elements, relationships, typed UML artifacts, UI mockups, supported UML artifact types, and bindings by stored design ids."
     )]
     fn design_get_by_ids(
         &self,
@@ -1101,7 +1119,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_design_save",
-        description = "Transactionally save a formal C4/UML design changeset. Supports upsert_element, upsert_relationship, upsert_uml, upsert_binding, delete_element, delete_relationship, delete_uml, and delete_binding. Use upsert_uml with diagramType and attachedToExternalId for typed Mermaid artifacts such as class/structure, sequence, flow, and state. Deletes clean dependent design attachments and bindings where needed. The save validates revision, containment, relationships, UML syntax, attachments, and bindings; invalid input returns correction errors and is not stored."
+        description = "Transactionally save a formal C4/UML/UI-mockup design changeset. Supports upsert_element, upsert_relationship, upsert_uml, upsert_mockup, upsert_mockup_proposal, upsert_binding, and matching delete operations. UI mockups remain separate from umlArtifactTypes; upsert_mockup stores validated accepted layered SVG and upsert_mockup_proposal stores a candidate that requires explicit user acceptance. Deletes clean dependent design attachments and bindings. The save validates revision, containment, relationships, UML syntax, safe SVG, attachments, and bindings; invalid input returns correction errors and is not stored."
     )]
     fn design_save(
         &self,
@@ -1118,6 +1136,61 @@ impl AdashiMcpServer {
         )
         .map_err(tool_error)?;
         Ok(Json(result))
+    }
+
+    #[tool(
+        name = "adashi_mockup_list_pending_revisions",
+        description = "List project-local UI mockups awaiting an AI revision or user acceptance. Returns stored facts only."
+    )]
+    fn mockup_list_pending_revisions(
+        &self,
+        Parameters(params): Parameters<ProjectParams>,
+    ) -> Result<Json<MockupPendingResult>, ErrorData> {
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        let revision = project_state::load_project_revision(&db, project_row_id)
+            .map_err(tool_error)?
+            .revision;
+        let mockups = mockups::load_pending(&db, project_row_id).map_err(tool_error)?;
+        Ok(Json(MockupPendingResult {
+            project_id: project.id,
+            project_name: project.name,
+            revision,
+            mockups,
+        }))
+    }
+
+    #[tool(
+        name = "adashi_mockup_get_revision_context",
+        description = "Read deterministic UI mockup revision facts: accepted and working SVG, lightweight manifest, ordered edit operations, vector annotations, proposal metadata, and an Adashi-rendered PNG image content block. Performs no AI interpretation."
+    )]
+    fn mockup_get_revision_context(
+        &self,
+        Parameters(params): Parameters<MockupContextParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        let revision = project_state::load_project_revision(&db, project_row_id)
+            .map_err(tool_error)?
+            .revision;
+        let mockup = mockups::load_mockup(&db, project_row_id, params.external_id.trim())
+            .map_err(tool_error)?;
+        let preview_variant = if mockup.working_svg.is_some() {
+            "working"
+        } else {
+            "accepted"
+        };
+        let png = mockups::preview_base64(&db, &mockup, preview_variant).map_err(tool_error)?;
+        let structured = json!({
+            "projectId": project.id,
+            "projectName": project.name,
+            "revision": revision,
+            "previewVariant": preview_variant,
+            "mockup": mockup,
+        });
+        let mut result = CallToolResult::structured(structured);
+        result.content.push(ContentBlock::image(png, "image/png"));
+        Ok(result)
     }
 }
 
@@ -1406,6 +1479,14 @@ fn load_task_design_specifications(
                     )
                     .map_err(|err| err.to_string())?,
                 "relationship" => None,
+                "mockup" => db
+                    .query_row(
+                        "SELECT attached_to_external_id FROM ui_mockups WHERE external_id=?1 LIMIT 1",
+                        rusqlite::params![link.design_external_id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()
+                    .map_err(|err| err.to_string())?,
                 _ => None,
             };
 
@@ -1443,4 +1524,74 @@ fn tool_error(message: String) -> ErrorData {
 fn internal_error(err: impl std::fmt::Display) -> ErrorData {
     let value = json!({ "message": err.to_string() });
     ErrorData::internal_error("Adashi MCP server failed", Some(value))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mockups::CreateMockupInput;
+    use crate::settings::{AppSettings, ProjectSettings, WindowSettings};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn mockup_revision_context_returns_structured_facts_and_png_image() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("adashi-mcp-mockup-{suffix}"));
+        let settings_path = root.join("settings.json");
+        let project_folder = root.join("project");
+        let project = ProjectSettings {
+            id: "mockup-test".into(),
+            name: "Mockup Test".into(),
+            folder: project_folder.to_string_lossy().into_owned(),
+        };
+        settings::save(
+            &settings_path,
+            &AppSettings {
+                window: WindowSettings {
+                    width: 1000,
+                    height: 700,
+                    x: None,
+                    y: None,
+                },
+                projects: vec![project.clone()],
+                last_active_project_id: Some(project.id.clone()),
+                rule_templates: vec![],
+            },
+        )
+        .unwrap();
+        let mut db = crate::open_project_database(&project).unwrap();
+        let project_row_id = project_row_id(&db).unwrap();
+        let attachment: String = db
+            .query_row(
+                "SELECT external_id FROM c4_elements ORDER BY id LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let revision = project_state::load_project_revision(&db, project_row_id)
+            .unwrap()
+            .revision;
+        mockups::create_mockup(&mut db, project_row_id, CreateMockupInput {
+            external_id: "mockup-home".into(), title: "Home".into(), attached_to_external_id: attachment,
+            viewport_width: 120, viewport_height: 80, screen: "Home".into(), state: "Default".into(), fidelity: "static".into(),
+            schema_version: Some(1), accepted_svg: r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80"><rect data-adashi-id="panel" width="120" height="80" fill="#fff"/></svg>"##.into(),
+            expected_revision: revision,
+        }).unwrap();
+        drop(db);
+
+        let server = AdashiMcpServer::new(settings_path);
+        let result = server
+            .mockup_get_revision_context(Parameters(MockupContextParams {
+                project_id: project.id,
+                external_id: "mockup-home".into(),
+            }))
+            .unwrap();
+        assert!(result.structured_content.is_some());
+        assert_eq!(result.content.len(), 2);
+        assert!(matches!(result.content[1], ContentBlock::Image(_)));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

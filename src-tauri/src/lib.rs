@@ -2,6 +2,7 @@ mod design;
 mod fixed_hooks;
 mod mcp;
 mod memory;
+mod mockups;
 mod qa;
 mod rules;
 mod schema;
@@ -25,6 +26,9 @@ use tauri_plugin_dialog::DialogExt;
 use crate::design::DesignArtifactTypeRecord;
 use crate::fixed_hooks::FixedHookPrompt;
 use crate::memory::ProjectMemory;
+use crate::mockups::{
+    CreateMockupInput, MockupMutationInput, MockupSummary, SaveDraftInput, UiMockup,
+};
 use crate::qa::{NewQaJob, QaDesignLinkInput, QaJob, QaJobQuery, QaRun, UpdateQaJob};
 use crate::rules::{NewRule, Rule, UpdateRule};
 use crate::settings::{
@@ -57,6 +61,7 @@ struct DashboardPayload {
     design_relationships: Vec<DesignRelationship>,
     uml_artifact_types: Vec<DesignArtifactTypeRecord>,
     diagrams: Vec<DesignDiagram>,
+    mockups: Vec<MockupSummary>,
     tasks: Vec<Task>,
     guidelines: Vec<Guideline>,
     post_task_commands: Vec<PostTaskCommand>,
@@ -208,6 +213,7 @@ fn load_dashboard_payload(
         design_relationships: load_design_relationships(&db)?,
         uml_artifact_types: design::supported_uml_artifact_types(),
         diagrams: load_diagrams(&db)?,
+        mockups: mockups::load_summaries(db, project_row_id)?,
         tasks: tasks::load_tasks(db, project_row_id, None)?,
         guidelines: load_guidelines(&db)?,
         post_task_commands: load_post_task_commands(&db)?,
@@ -219,6 +225,93 @@ fn load_dashboard_payload(
         fixed_hook_prompts: fixed_hooks::load_fixed_hook_prompts(db, project_row_id)?,
         memory: memory::load_memory(db, project_row_id)?,
     })
+}
+
+#[tauri::command]
+fn get_mockup(
+    project_id: String,
+    external_id: String,
+    state: State<'_, AppState>,
+) -> Result<UiMockup, String> {
+    let project = resolve_project(&state, Some(&project_id))?;
+    let db = open_project_database(&project).map_err(|err| err.to_string())?;
+    let project_row_id = load_project_row_id(&db)?;
+    mockups::load_mockup(&db, project_row_id, external_id.trim())
+}
+
+#[tauri::command]
+fn create_mockup(
+    project_id: String,
+    input: CreateMockupInput,
+    state: State<'_, AppState>,
+) -> Result<DashboardPayload, String> {
+    mutate_mockup_dashboard(&state, &project_id, |db, row_id| {
+        mockups::create_mockup(db, row_id, input).map(|_| ())
+    })
+}
+
+#[tauri::command]
+fn save_mockup_draft(
+    project_id: String,
+    input: SaveDraftInput,
+    state: State<'_, AppState>,
+) -> Result<DashboardPayload, String> {
+    mutate_mockup_dashboard(&state, &project_id, |db, row_id| {
+        mockups::save_draft(db, row_id, input).map(|_| ())
+    })
+}
+
+macro_rules! mockup_lifecycle_command {
+    ($name:ident, $runtime:ident) => {
+        #[tauri::command]
+        fn $name(
+            project_id: String,
+            input: MockupMutationInput,
+            state: State<'_, AppState>,
+        ) -> Result<DashboardPayload, String> {
+            mutate_mockup_dashboard(&state, &project_id, |db, row_id| {
+                mockups::$runtime(db, row_id, input).map(|_| ())
+            })
+        }
+    };
+}
+
+mockup_lifecycle_command!(request_mockup_revision, request_revision);
+mockup_lifecycle_command!(resume_mockup_editing, resume_editing);
+mockup_lifecycle_command!(accept_mockup_proposal, accept_proposal);
+mockup_lifecycle_command!(reject_mockup_proposal, reject_proposal);
+mockup_lifecycle_command!(discard_mockup_draft, discard_draft);
+
+#[tauri::command]
+fn delete_mockup(
+    project_id: String,
+    input: MockupMutationInput,
+    state: State<'_, AppState>,
+) -> Result<DashboardPayload, String> {
+    mutate_mockup_dashboard(&state, &project_id, |db, row_id| {
+        mockups::delete_mockup(db, row_id, input)
+    })
+}
+
+fn mutate_mockup_dashboard<F>(
+    state: &AppState,
+    project_id: &str,
+    mutation: F,
+) -> Result<DashboardPayload, String>
+where
+    F: FnOnce(&mut Connection, i64) -> Result<(), String>,
+{
+    let project = {
+        let settings = state
+            .settings
+            .lock()
+            .map_err(|_| "Settings lock was poisoned".to_string())?;
+        resolve_project_from_settings(&settings, Some(project_id))?
+    };
+    let mut db = open_project_database(&project).map_err(|err| err.to_string())?;
+    let row_id = load_project_row_id(&db)?;
+    mutation(&mut db, row_id)?;
+    load_dashboard_payload(project, &db, state)
 }
 
 fn load_rule_templates(state: &AppState) -> Result<Vec<RuleTemplate>, String> {
@@ -1110,6 +1203,8 @@ pub fn run() {
             add_project,
             close_app,
             confirm_task,
+            accept_mockup_proposal,
+            create_mockup,
             create_qa_job,
             create_rule,
             create_rule_from_template,
@@ -1119,14 +1214,21 @@ pub fn run() {
             delete_rule_template,
             create_design_relationship,
             delete_project,
+            delete_mockup,
             delete_task,
             finish_task,
             get_app_settings,
             get_dashboard,
+            get_mockup,
             get_project_revision,
             pick_project_folder,
             set_active_project,
             save_rule_template,
+            save_mockup_draft,
+            request_mockup_revision,
+            resume_mockup_editing,
+            reject_mockup_proposal,
+            discard_mockup_draft,
             update_design_element,
             update_design_relationship,
             update_fixed_hook_prompt,

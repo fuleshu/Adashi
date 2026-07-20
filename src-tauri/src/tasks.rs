@@ -323,11 +323,12 @@ fn load_design_links(
                 l.sort_order,
                 l.target_type,
                 l.design_external_id,
-                COALESCE(e.name, r.description, d.title, l.design_external_id) AS title
+                COALESCE(e.name, r.description, d.title, m.title, l.design_external_id) AS title
              FROM task_design_specification_links l
              LEFT JOIN c4_elements e ON e.external_id = l.design_external_id
              LEFT JOIN c4_relationships r ON r.external_id = l.design_external_id
              LEFT JOIN diagrams d ON d.key = l.design_external_id
+             LEFT JOIN ui_mockups m ON m.external_id = l.design_external_id
              WHERE l.task_id = ?1
              ORDER BY l.sort_order, l.id",
         )
@@ -425,6 +426,19 @@ fn infer_design_target_type(db: &Connection, design_external_id: &str) -> Result
         return Ok("uml".to_string());
     }
 
+    let mockup_exists = db
+        .query_row(
+            "SELECT 1 FROM ui_mockups WHERE external_id=?1 LIMIT 1",
+            params![design_external_id],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(|err| err.to_string())?
+        .is_some();
+    if mockup_exists {
+        return Ok("mockup".to_string());
+    }
+
     Err(format!(
         "Unknown design specification id: {design_external_id}"
     ))
@@ -452,7 +466,7 @@ fn validate_state(state: &str) -> Result<(), String> {
 }
 
 fn validate_design_target_type(target_type: &str) -> Result<(), String> {
-    const TARGET_TYPES: &[&str] = &["element", "relationship", "uml"];
+    const TARGET_TYPES: &[&str] = &["element", "relationship", "uml", "mockup"];
     if TARGET_TYPES.contains(&target_type) {
         Ok(())
     } else {

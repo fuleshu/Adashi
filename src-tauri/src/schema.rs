@@ -8,8 +8,135 @@ pub fn migrate(db: &mut Connection) -> rusqlite::Result<()> {
     ensure_fixed_hook_prompts_table(db)?;
     ensure_task_system_tables(db)?;
     ensure_qa_system_tables(db)?;
+    ensure_ui_mockup_tables(db)?;
+    ensure_mockup_design_link_targets(db)?;
     crate::state::ensure_project_state(db)?;
     ensure_project_memory_rows(db)?;
+    Ok(())
+}
+
+fn ensure_mockup_design_link_targets(db: &Connection) -> rusqlite::Result<()> {
+    let task_sql: String = db.query_row(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='task_design_specification_links'",
+        [], |row| row.get(0),
+    )?;
+    if !task_sql.contains("'mockup'") {
+        db.execute_batch(
+            "ALTER TABLE task_design_specification_links RENAME TO task_design_specification_links_legacy;
+             CREATE TABLE task_design_specification_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id INTEGER NOT NULL REFERENCES agent_tasks(id) ON DELETE CASCADE,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                target_type TEXT NOT NULL CHECK(target_type IN ('element', 'relationship', 'uml', 'mockup')),
+                design_external_id TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(task_id, design_external_id)
+             );
+             INSERT INTO task_design_specification_links(id, task_id, sort_order, target_type, design_external_id, created_at)
+                SELECT id, task_id, sort_order, target_type, design_external_id, created_at FROM task_design_specification_links_legacy;
+             DROP TABLE task_design_specification_links_legacy;
+             CREATE INDEX idx_task_design_links_task_order ON task_design_specification_links(task_id, sort_order);",
+        )?;
+    }
+
+    let qa_sql: String = db.query_row(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='qa_job_design_links'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !qa_sql.contains("'mockup'") {
+        db.execute_batch(
+            "ALTER TABLE qa_job_design_links RENAME TO qa_job_design_links_legacy;
+             CREATE TABLE qa_job_design_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                qa_job_id INTEGER NOT NULL REFERENCES qa_jobs(id) ON DELETE CASCADE,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                target_type TEXT NOT NULL CHECK(target_type IN ('element', 'relationship', 'uml', 'mockup')),
+                design_external_id TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(qa_job_id, design_external_id)
+             );
+             INSERT INTO qa_job_design_links(id, qa_job_id, sort_order, target_type, design_external_id, created_at)
+                SELECT id, qa_job_id, sort_order, target_type, design_external_id, created_at FROM qa_job_design_links_legacy;
+             DROP TABLE qa_job_design_links_legacy;
+             CREATE INDEX idx_qa_job_design_links_job_order ON qa_job_design_links(qa_job_id, sort_order);
+             CREATE INDEX idx_qa_job_design_links_target ON qa_job_design_links(design_external_id);",
+        )?;
+    }
+    Ok(())
+}
+
+fn ensure_ui_mockup_tables(db: &Connection) -> rusqlite::Result<()> {
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS ui_mockups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            external_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            attached_to_external_id TEXT NOT NULL,
+            viewport_width INTEGER NOT NULL,
+            viewport_height INTEGER NOT NULL,
+            screen TEXT NOT NULL DEFAULT '',
+            state TEXT NOT NULL DEFAULT '',
+            fidelity TEXT NOT NULL DEFAULT '',
+            schema_version INTEGER NOT NULL DEFAULT 1,
+            accepted_svg TEXT NOT NULL,
+            accepted_revision INTEGER NOT NULL DEFAULT 1,
+            working_svg TEXT,
+            base_revision INTEGER,
+            status TEXT NOT NULL DEFAULT 'accepted' CHECK(status IN ('accepted', 'workingDraft', 'pendingAgent', 'proposed')),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(project_id, external_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ui_mockups_attachment
+            ON ui_mockups(project_id, attached_to_external_id);
+
+        CREATE TABLE IF NOT EXISTS ui_mockup_edit_operations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mockup_id INTEGER NOT NULL REFERENCES ui_mockups(id) ON DELETE CASCADE,
+            sequence INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            target_element_id TEXT,
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(mockup_id, sequence)
+        );
+
+        CREATE TABLE IF NOT EXISTS ui_mockup_annotations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mockup_id INTEGER NOT NULL REFERENCES ui_mockups(id) ON DELETE CASCADE,
+            external_id TEXT NOT NULL,
+            svg_path TEXT NOT NULL,
+            optional_text TEXT NOT NULL DEFAULT '',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(mockup_id, external_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS ui_mockup_proposals (
+            mockup_id INTEGER PRIMARY KEY REFERENCES ui_mockups(id) ON DELETE CASCADE,
+            base_revision INTEGER NOT NULL,
+            proposed_svg TEXT NOT NULL,
+            proposed_manifest_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS ui_mockup_preview_cache (
+            mockup_id INTEGER NOT NULL REFERENCES ui_mockups(id) ON DELETE CASCADE,
+            source_revision INTEGER NOT NULL,
+            variant TEXT NOT NULL,
+            png BLOB NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY(mockup_id, source_revision, variant)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ui_mockups_status
+            ON ui_mockups(project_id, status);
+
+        INSERT OR IGNORE INTO schema_migrations(version) VALUES (10);",
+    )?;
     Ok(())
 }
 
