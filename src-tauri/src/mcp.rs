@@ -4,7 +4,7 @@ use crate::design::{
 };
 use crate::fixed_hooks::{self, DESIGN_AUTHORING_HOOK_KEY, IMPLEMENTATION_GUIDANCE_HOOK_KEY};
 use crate::memory::{self, ProjectMemory};
-use crate::mockups::{self, MockupSummary};
+use crate::mockups::{self, MockupSummary, UiMockup};
 use crate::qa::{self, NewQaJob, QaDesignLinkInput, QaJob, QaJobQuery, QaRun, UpdateQaJob};
 use crate::rules::{self, InjectionRule, NewRule, Rule, UpdateRule};
 use crate::settings::{self, AppSettings, ProjectSettings};
@@ -313,7 +313,19 @@ struct TaskReadResult {
 struct TaskDesignSpecificationBranch {
     link: TaskDesignSpecificationLink,
     scope: Option<DesignScopeResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mockup: Option<UiMockup>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mockup_preview: Option<TaskMockupPreview>,
     note: Option<String>,
+}
+
+#[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct TaskMockupPreview {
+    variant: String,
+    mime_type: String,
+    content_index: usize,
 }
 
 #[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
@@ -532,27 +544,46 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_get_task",
-        description = "Read one Adashi task and return all linked design specification branches when links are present."
+        description = "Read one Adashi task and return all linked design specification branches. Directly linked UI mockups include their full stored revision content and an accepted PNG image content block; mockups discovered only through a wider design branch remain lightweight summaries.",
+        output_schema = rmcp::handler::server::tool::schema_for_type::<TaskReadResult>()
     )]
     fn get_task(
         &self,
         Parameters(params): Parameters<TaskIdParams>,
-    ) -> Result<Json<TaskReadResult>, ErrorData> {
+    ) -> Result<CallToolResult, ErrorData> {
         let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let revision =
             project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
         let task = tasks::load_task(&db, project_row_id, params.task_id).map_err(tool_error)?;
-        let design_specifications =
-            load_task_design_specifications(&db, project_row_id, &task).map_err(tool_error)?;
+        let mut design_specifications =
+            load_task_design_specifications(&db, project_row_id, &task, true)
+                .map_err(tool_error)?;
+        let mut previews = Vec::new();
+        for specification in &mut design_specifications {
+            let Some(mockup) = specification.mockup.as_ref() else {
+                continue;
+            };
+            let png = mockups::preview_base64(&db, mockup, "accepted").map_err(tool_error)?;
+            specification.mockup_preview = Some(TaskMockupPreview {
+                variant: "accepted".to_string(),
+                mime_type: "image/png".to_string(),
+                content_index: previews.len() + 1,
+            });
+            previews.push(ContentBlock::image(png, "image/png"));
+        }
 
-        Ok(Json(TaskReadResult {
+        let payload = TaskReadResult {
             project_id: project.id,
             project_name: project.name,
             revision: revision.revision,
             task,
             design_specifications,
-        }))
+        };
+        let structured = serde_json::to_value(&payload).map_err(internal_error)?;
+        let mut result = CallToolResult::structured(structured);
+        result.content.extend(previews);
+        Ok(result)
     }
 
     #[tool(
@@ -680,7 +711,8 @@ impl AdashiMcpServer {
         let revision =
             project_state::bump_project_revision(&db, project_row_id).map_err(tool_error)?;
         let design_specifications =
-            load_task_design_specifications(&db, project_row_id, &task).map_err(tool_error)?;
+            load_task_design_specifications(&db, project_row_id, &task, false)
+                .map_err(tool_error)?;
 
         Ok(Json(TaskMutationResult {
             project_id: project.id,
@@ -716,7 +748,8 @@ impl AdashiMcpServer {
         let revision =
             project_state::bump_project_revision(&db, project_row_id).map_err(tool_error)?;
         let design_specifications =
-            load_task_design_specifications(&db, project_row_id, &task).map_err(tool_error)?;
+            load_task_design_specifications(&db, project_row_id, &task, false)
+                .map_err(tool_error)?;
 
         Ok(Json(TaskMutationResult {
             project_id: project.id,
@@ -751,7 +784,8 @@ impl AdashiMcpServer {
         let revision =
             project_state::bump_project_revision(&db, project_row_id).map_err(tool_error)?;
         let design_specifications =
-            load_task_design_specifications(&db, project_row_id, &task).map_err(tool_error)?;
+            load_task_design_specifications(&db, project_row_id, &task, false)
+                .map_err(tool_error)?;
 
         Ok(Json(TaskMutationResult {
             project_id: project.id,
@@ -1462,10 +1496,20 @@ fn load_task_design_specifications(
     db: &rusqlite::Connection,
     project_row_id: i64,
     task: &Task,
+    include_linked_mockup_content: bool,
 ) -> Result<Vec<TaskDesignSpecificationBranch>, String> {
     task.design_specification_links
         .iter()
         .map(|link| {
+            let mockup = if include_linked_mockup_content && link.target_type == "mockup" {
+                Some(mockups::load_mockup(
+                    db,
+                    project_row_id,
+                    link.design_external_id.as_str(),
+                )?)
+            } else {
+                None
+            };
             let root_id = match link.target_type.as_str() {
                 "element" => Some(link.design_external_id.clone()),
                 "uml" => db
@@ -1479,14 +1523,17 @@ fn load_task_design_specifications(
                     )
                     .map_err(|err| err.to_string())?,
                 "relationship" => None,
-                "mockup" => db
-                    .query_row(
-                        "SELECT attached_to_external_id FROM ui_mockups WHERE external_id=?1 LIMIT 1",
-                        rusqlite::params![link.design_external_id],
-                        |row| row.get::<_, String>(0),
-                    )
-                    .optional()
-                    .map_err(|err| err.to_string())?,
+                "mockup" => match mockup.as_ref() {
+                    Some(mockup) => Some(mockup.manifest.attached_to_external_id.clone()),
+                    None => db
+                        .query_row(
+                            "SELECT attached_to_external_id FROM ui_mockups WHERE external_id=?1 LIMIT 1",
+                            rusqlite::params![link.design_external_id],
+                            |row| row.get::<_, String>(0),
+                        )
+                        .optional()
+                        .map_err(|err| err.to_string())?,
+                },
                 _ => None,
             };
 
@@ -1510,6 +1557,8 @@ fn load_task_design_specifications(
             Ok(TaskDesignSpecificationBranch {
                 link: link.clone(),
                 scope,
+                mockup,
+                mockup_preview: None,
                 note,
             })
         })
@@ -1590,6 +1639,111 @@ mod tests {
             }))
             .unwrap();
         assert!(result.structured_content.is_some());
+        assert_eq!(result.content.len(), 2);
+        assert!(matches!(result.content[1], ContentBlock::Image(_)));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn task_read_returns_full_direct_mockup_content_and_png_image() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("adashi-mcp-task-mockup-{suffix}"));
+        let settings_path = root.join("settings.json");
+        let project_folder = root.join("project");
+        let project = ProjectSettings {
+            id: "task-mockup-test".into(),
+            name: "Task Mockup Test".into(),
+            folder: project_folder.to_string_lossy().into_owned(),
+        };
+        settings::save(
+            &settings_path,
+            &AppSettings {
+                window: WindowSettings {
+                    width: 1000,
+                    height: 700,
+                    x: None,
+                    y: None,
+                },
+                projects: vec![project.clone()],
+                last_active_project_id: Some(project.id.clone()),
+                rule_templates: vec![],
+            },
+        )
+        .unwrap();
+        let mut db = crate::open_project_database(&project).unwrap();
+        let project_row_id = project_row_id(&db).unwrap();
+        let attachment: String = db
+            .query_row(
+                "SELECT external_id FROM c4_elements ORDER BY id LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let revision = project_state::load_project_revision(&db, project_row_id)
+            .unwrap()
+            .revision;
+        let accepted_svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80"><rect data-adashi-id="panel" width="120" height="80" fill="#fff"/></svg>"##;
+        mockups::create_mockup(
+            &mut db,
+            project_row_id,
+            CreateMockupInput {
+                external_id: "mockup-home".into(),
+                title: "Home".into(),
+                attached_to_external_id: attachment.clone(),
+                viewport_width: 120,
+                viewport_height: 80,
+                screen: "Home".into(),
+                state: "Default".into(),
+                fidelity: "static".into(),
+                schema_version: Some(1),
+                accepted_svg: accepted_svg.into(),
+                expected_revision: revision,
+            },
+        )
+        .unwrap();
+        let task = tasks::create_task(
+            &db,
+            project_row_id,
+            NewTask {
+                title: "Implement home".into(),
+                description: None,
+                design_specification_links: Some(vec![
+                    TaskDesignSpecificationLinkInput {
+                        target_type: Some("element".into()),
+                        design_external_id: attachment,
+                    },
+                    TaskDesignSpecificationLinkInput {
+                        target_type: Some("mockup".into()),
+                        design_external_id: "mockup-home".into(),
+                    },
+                ]),
+            },
+        )
+        .unwrap();
+        drop(db);
+
+        let server = AdashiMcpServer::new(settings_path);
+        let result = server
+            .get_task(Parameters(TaskIdParams {
+                project_id: project.id,
+                task_id: task.id,
+            }))
+            .unwrap();
+        let structured = result.structured_content.as_ref().unwrap();
+        let specifications = structured["designSpecifications"].as_array().unwrap();
+
+        assert_eq!(specifications.len(), 2);
+        assert!(specifications[0].get("mockup").is_none());
+        assert!(specifications[0]["scope"]["mockups"][0]
+            .get("acceptedSvg")
+            .is_none());
+        assert_eq!(specifications[1]["mockup"]["acceptedSvg"], accepted_svg);
+        assert_eq!(specifications[1]["mockupPreview"]["variant"], "accepted");
+        assert_eq!(specifications[1]["mockupPreview"]["mimeType"], "image/png");
+        assert_eq!(specifications[1]["mockupPreview"]["contentIndex"], 1);
         assert_eq!(result.content.len(), 2);
         assert!(matches!(result.content[1], ContentBlock::Image(_)));
         std::fs::remove_dir_all(root).unwrap();
