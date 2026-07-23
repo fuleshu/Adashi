@@ -1,5 +1,5 @@
 use crate::{mockups, state};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -67,39 +67,120 @@ pub struct DesignBindingRecord {
     pub target: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-#[derive(rmcp::schemars::JsonSchema)]
-pub struct DesignChange {
-    pub op: String,
-    pub external_id: Option<String>,
-    pub parent_external_id: Option<String>,
-    pub element_type: Option<String>,
-    pub name: Option<String>,
-    pub description: Option<String>,
-    pub technology: Option<String>,
-    pub tags: Option<String>,
-    pub source_external_id: Option<String>,
-    pub destination_external_id: Option<String>,
-    pub key: Option<String>,
-    pub title: Option<String>,
-    pub language: Option<String>,
-    pub diagram_type: Option<String>,
-    pub attached_to_external_id: Option<String>,
-    pub source: Option<String>,
-    pub design_external_id: Option<String>,
-    pub target_type: Option<String>,
-    pub target: Option<String>,
-    pub viewport_width: Option<i64>,
-    pub viewport_height: Option<i64>,
-    pub screen: Option<String>,
-    pub mockup_state: Option<String>,
-    pub fidelity: Option<String>,
-    pub schema_version: Option<i64>,
-    pub accepted_svg: Option<String>,
-    pub base_revision: Option<i64>,
-    pub proposed_svg: Option<String>,
-    pub proposed_manifest: Option<mockups::MockupManifest>,
+#[derive(Clone, Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(
+    tag = "op",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum DesignChange {
+    UpsertElement {
+        external_id: String,
+        parent_external_id: Option<String>,
+        element_type: String,
+        name: String,
+        description: Option<String>,
+        technology: Option<String>,
+        tags: Option<String>,
+    },
+    UpsertRelationship {
+        external_id: String,
+        source_external_id: String,
+        destination_external_id: String,
+        description: String,
+        technology: Option<String>,
+        tags: Option<String>,
+    },
+    UpsertUml {
+        key: String,
+        title: String,
+        language: MermaidLanguage,
+        diagram_type: UmlDiagramType,
+        attached_to_external_id: String,
+        source: String,
+    },
+    UpsertBinding {
+        design_external_id: String,
+        target_type: String,
+        target: String,
+    },
+    UpsertMockup {
+        external_id: String,
+        title: String,
+        attached_to_external_id: String,
+        viewport_width: i64,
+        viewport_height: i64,
+        screen: String,
+        mockup_state: String,
+        fidelity: String,
+        schema_version: Option<i64>,
+        accepted_svg: String,
+    },
+    UpsertMockupProposal {
+        external_id: String,
+        base_revision: i64,
+        proposed_svg: String,
+        proposed_manifest: mockups::MockupManifest,
+    },
+    DeleteElement {
+        external_id: String,
+    },
+    DeleteRelationship {
+        external_id: String,
+    },
+    DeleteUml {
+        key: String,
+    },
+    DeleteBinding {
+        design_external_id: String,
+        target_type: String,
+        target: String,
+    },
+    DeleteMockup {
+        external_id: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum MermaidLanguage {
+    Mermaid,
+}
+
+impl MermaidLanguage {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Mermaid => "mermaid",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum UmlDiagramType {
+    Class,
+    Sequence,
+    Flow,
+    State,
+}
+
+impl UmlDiagramType {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Class => "class",
+            Self::Sequence => "sequence",
+            Self::Flow => "flow",
+            Self::State => "state",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ElementDescriptionUpdate {
+    pub external_id: String,
+    pub description: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -186,8 +267,8 @@ pub struct DesignSaveResult {
     pub stored: bool,
     pub correction_required: bool,
     pub revision: i64,
+    pub changed_count: usize,
     pub errors: Vec<DesignCorrection>,
-    pub structurizr_dsl: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -548,29 +629,167 @@ pub fn save_changes(
 
     let tx = db.transaction().map_err(|err| err.to_string())?;
     let workspace = load_workspace(&tx)?;
+    let mut changed_count = 0;
 
     for change in changes {
-        if let Err(message) = apply_change(&tx, project_id, workspace.id, change) {
+        match apply_change(&tx, project_id, workspace.id, change) {
+            Ok(true) => changed_count += 1,
+            Ok(false) => {}
+            Err(message) => {
+                return Ok(failed_save(
+                    current_revision,
+                    "save.invalid_changeset",
+                    message,
+                    "Correct the design_save changeset fields and resubmit the full changeset.",
+                ));
+            }
+        }
+    }
+
+    if changed_count == 0 {
+        return Ok(no_changes_save(
+            current_revision,
+            "The submitted changeset is already reflected in the stored design.",
+            "Do not resubmit the same payload. Re-evaluate whether the selected operation matches the intended artifact, or continue with the next distinct change.",
+        ));
+    }
+
+    finish_design_transaction(
+        tx,
+        project_id,
+        workspace.id,
+        current_revision,
+        changed_count,
+    )
+}
+
+pub fn set_element_descriptions(
+    db: &mut Connection,
+    project_id: i64,
+    expected_revision: i64,
+    updates: &[ElementDescriptionUpdate],
+) -> Result<DesignSaveResult, String> {
+    let current_revision = state::load_project_revision(db, project_id)?.revision;
+    if current_revision != expected_revision {
+        return Ok(failed_save(
+            current_revision,
+            "revision.stale",
+            format!(
+                "Expected revision {expected_revision}, but current revision is {current_revision}."
+            ),
+            "Reload the design overview and resubmit the description updates against the current revision.",
+        ));
+    }
+    if updates.is_empty() {
+        return Ok(failed_save(
+            current_revision,
+            "description.empty_updates",
+            "Element description update requires at least one item.",
+            "Submit one or more existing element ids with their complete descriptions.",
+        ));
+    }
+
+    let mut external_ids = HashSet::new();
+    for update in updates {
+        let external_id = update.external_id.trim();
+        if external_id.is_empty() {
             return Ok(failed_save(
                 current_revision,
-                "save.invalid_changeset",
-                message,
-                "Correct the design_save changeset fields and resubmit the full changeset.",
+                "description.missing_element",
+                "Element description update requires a non-empty externalId.",
+                "Use an externalId returned by design retrieval.",
+            ));
+        }
+        if update.description.trim().is_empty() {
+            return Ok(failed_save(
+                current_revision,
+                "description.empty_description",
+                format!("Element '{external_id}' requires a non-empty description."),
+                "Submit the complete intended element description.",
+            ));
+        }
+        if !external_ids.insert(external_id.to_string()) {
+            return Ok(failed_save(
+                current_revision,
+                "description.duplicate_element",
+                format!("Element '{external_id}' appears more than once in the same request."),
+                "Submit each element exactly once per description update request.",
             ));
         }
     }
 
-    let mut errors = validate_workspace(&tx, workspace.id)?;
+    let tx = db.transaction().map_err(|err| err.to_string())?;
+    let workspace = load_workspace(&tx)?;
+    let mut changed_count = 0;
+    for update in updates {
+        let external_id = update.external_id.trim();
+        let description = update.description.trim();
+        let existing = tx
+            .query_row(
+                "SELECT description
+                 FROM c4_elements
+                 WHERE workspace_id = ?1 AND external_id = ?2",
+                params![workspace.id, external_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|err| err.to_string())?;
+        let Some(existing) = existing else {
+            return Ok(failed_save(
+                current_revision,
+                "description.unknown_element",
+                format!("Cannot update description for unknown C4 element '{external_id}'."),
+                "Use an externalId returned by design retrieval. Create missing elements through the advanced mixed design save only when creation is intended.",
+            ));
+        };
+        if existing == description {
+            continue;
+        }
+        tx.execute(
+            "UPDATE c4_elements
+             SET description = ?1
+             WHERE workspace_id = ?2 AND external_id = ?3",
+            params![description, workspace.id, external_id],
+        )
+        .map_err(|err| err.to_string())?;
+        changed_count += 1;
+    }
+
+    if changed_count == 0 {
+        return Ok(no_changes_save(
+            current_revision,
+            "Every submitted element already has the requested description.",
+            "Do not resubmit the same descriptions. Continue with the next element or finish the task.",
+        ));
+    }
+
+    finish_design_transaction(
+        tx,
+        project_id,
+        workspace.id,
+        current_revision,
+        changed_count,
+    )
+}
+
+fn finish_design_transaction(
+    tx: Transaction<'_>,
+    project_id: i64,
+    workspace_id: i64,
+    current_revision: i64,
+    changed_count: usize,
+) -> Result<DesignSaveResult, String> {
+    let mut errors = validate_workspace(&tx, workspace_id)?;
     if errors.is_empty() {
-        let dsl = build_structurizr_dsl(&tx, workspace.id)?;
-        let json_source = build_structurizr_json_source(&tx, workspace.id)?;
+        let dsl = build_structurizr_dsl(&tx, workspace_id)?;
+        let json_source = build_structurizr_json_source(&tx, workspace_id)?;
         tx.execute(
             "UPDATE design_workspaces
              SET structurizr_dsl = ?1,
                  structurizr_json = ?2,
                  updated_at = CURRENT_TIMESTAMP
              WHERE id = ?3",
-            params![dsl, json_source, workspace.id],
+            params![dsl, json_source, workspace_id],
         )
         .map_err(|err| err.to_string())?;
         tx.execute(
@@ -578,7 +797,7 @@ pub fn save_changes(
              SET source = ?1,
                  updated_at = CURRENT_TIMESTAMP
              WHERE workspace_id = ?2 AND kind = 'structurizr'",
-            params![json_source, workspace.id],
+            params![json_source, workspace_id],
         )
         .map_err(|err| err.to_string())?;
         state::bump_project_revision(&tx, project_id)?;
@@ -590,8 +809,8 @@ pub fn save_changes(
             stored: true,
             correction_required: false,
             revision,
+            changed_count,
             errors,
-            structurizr_dsl: Some(dsl),
         })
     } else {
         errors.sort_by(|left, right| left.code.cmp(&right.code));
@@ -600,8 +819,8 @@ pub fn save_changes(
             stored: false,
             correction_required: true,
             revision: current_revision,
+            changed_count: 0,
             errors,
-            structurizr_dsl: None,
         })
     }
 }
@@ -611,12 +830,20 @@ fn apply_change(
     project_id: i64,
     workspace_id: i64,
     change: &DesignChange,
-) -> Result<(), String> {
-    match change.op.as_str() {
-        "upsert_element" => {
-            let external_id = required(change.external_id.as_deref(), "externalId")?;
-            let element_type = required(change.element_type.as_deref(), "elementType")?;
-            let name = required(change.name.as_deref(), "name")?;
+) -> Result<bool, String> {
+    let changed = match change {
+        DesignChange::UpsertElement {
+            external_id,
+            parent_external_id,
+            element_type,
+            name,
+            description,
+            technology,
+            tags,
+        } => {
+            let external_id = required(Some(external_id), "externalId")?;
+            let element_type = required(Some(element_type), "elementType")?;
+            let name = required(Some(name), "name")?;
             db.execute(
                 "INSERT INTO c4_elements(
                     workspace_id, external_id, parent_external_id, element_type, name, description, technology, tags
@@ -628,28 +855,39 @@ fn apply_change(
                     name = excluded.name,
                     description = excluded.description,
                     technology = excluded.technology,
-                    tags = excluded.tags",
+                    tags = excluded.tags
+                 WHERE c4_elements.parent_external_id IS NOT excluded.parent_external_id
+                    OR c4_elements.element_type IS NOT excluded.element_type
+                    OR c4_elements.name IS NOT excluded.name
+                    OR c4_elements.description IS NOT excluded.description
+                    OR c4_elements.technology IS NOT excluded.technology
+                    OR c4_elements.tags IS NOT excluded.tags",
                 params![
                     workspace_id,
                     external_id,
-                    optional_trim(change.parent_external_id.as_deref()),
+                    optional_trim(parent_external_id.as_deref()),
                     element_type.trim(),
                     name.trim(),
-                    change.description.as_deref().unwrap_or("").trim(),
-                    change.technology.as_deref().unwrap_or("").trim(),
-                    change.tags.as_deref().unwrap_or("").trim(),
+                    description.as_deref().unwrap_or("").trim(),
+                    technology.as_deref().unwrap_or("").trim(),
+                    tags.as_deref().unwrap_or("").trim(),
                 ],
             )
-            .map_err(|err| err.to_string())?;
+            .map_err(|err| err.to_string())?
+                > 0
         }
-        "upsert_relationship" => {
-            let external_id = required(change.external_id.as_deref(), "externalId")?;
-            let source_id = required(change.source_external_id.as_deref(), "sourceExternalId")?;
-            let destination_id = required(
-                change.destination_external_id.as_deref(),
-                "destinationExternalId",
-            )?;
-            let description = required(change.description.as_deref(), "description")?;
+        DesignChange::UpsertRelationship {
+            external_id,
+            source_external_id,
+            destination_external_id,
+            description,
+            technology,
+            tags,
+        } => {
+            let external_id = required(Some(external_id), "externalId")?;
+            let source_id = required(Some(source_external_id), "sourceExternalId")?;
+            let destination_id = required(Some(destination_external_id), "destinationExternalId")?;
+            let description = required(Some(description), "description")?;
             db.execute(
                 "INSERT INTO c4_relationships(
                     workspace_id, external_id, source_external_id, destination_external_id, description, technology, tags
@@ -660,24 +898,53 @@ fn apply_change(
                     destination_external_id = excluded.destination_external_id,
                     description = excluded.description,
                     technology = excluded.technology,
-                    tags = excluded.tags",
+                    tags = excluded.tags
+                 WHERE c4_relationships.source_external_id IS NOT excluded.source_external_id
+                    OR c4_relationships.destination_external_id IS NOT excluded.destination_external_id
+                    OR c4_relationships.description IS NOT excluded.description
+                    OR c4_relationships.technology IS NOT excluded.technology
+                    OR c4_relationships.tags IS NOT excluded.tags",
                 params![
                     workspace_id,
                     external_id,
                     source_id.trim(),
                     destination_id.trim(),
                     description.trim(),
-                    change.technology.as_deref().unwrap_or("").trim(),
-                    change.tags.as_deref().unwrap_or("").trim(),
+                    technology.as_deref().unwrap_or("").trim(),
+                    tags.as_deref().unwrap_or("").trim(),
                 ],
             )
-            .map_err(|err| err.to_string())?;
+            .map_err(|err| err.to_string())?
+                > 0
         }
-        "upsert_uml" => {
-            let key = required(change.key.as_deref(), "key")?;
-            let title = required(change.title.as_deref(), "title")?;
-            let language = required(change.language.as_deref(), "language")?;
-            let source = required(change.source.as_deref(), "source")?;
+        DesignChange::UpsertUml {
+            key,
+            title,
+            language,
+            diagram_type,
+            attached_to_external_id,
+            source,
+        } => {
+            let key = required(Some(key), "key")?;
+            let title = required(Some(title), "title")?;
+            let attached_to_external_id =
+                required(Some(attached_to_external_id), "attachedToExternalId")?;
+            let source = required(Some(source), "source")?;
+            let existing_kind = db
+                .query_row(
+                    "SELECT kind
+                     FROM diagrams
+                     WHERE workspace_id = ?1 AND key = ?2",
+                    params![workspace_id, key],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|err| err.to_string())?;
+            if existing_kind.as_deref() == Some("structurizr") {
+                return Err(format!(
+                    "Generated Structurizr artifact '{key}' cannot be changed through upsert_uml."
+                ));
+            }
             db.execute(
                 "INSERT INTO diagrams(
                     workspace_id, kind, key, title, source, diagram_type, attached_to_external_id, sort_order
@@ -692,29 +959,37 @@ fn apply_change(
                     source = excluded.source,
                     diagram_type = excluded.diagram_type,
                     attached_to_external_id = excluded.attached_to_external_id,
-                    updated_at = CURRENT_TIMESTAMP",
+                    updated_at = CURRENT_TIMESTAMP
+                 WHERE diagrams.kind IS NOT excluded.kind
+                    OR diagrams.title IS NOT excluded.title
+                    OR diagrams.source IS NOT excluded.source
+                    OR diagrams.diagram_type IS NOT excluded.diagram_type
+                    OR diagrams.attached_to_external_id IS NOT excluded.attached_to_external_id",
                 params![
                     workspace_id,
-                    language.trim(),
+                    language.as_str(),
                     key.trim(),
                     title.trim(),
                     source,
-                    change.diagram_type.as_deref().unwrap_or("").trim(),
-                    optional_trim(change.attached_to_external_id.as_deref()),
+                    diagram_type.as_str(),
+                    attached_to_external_id.trim(),
                 ],
             )
-            .map_err(|err| err.to_string())?;
+            .map_err(|err| err.to_string())?
+                > 0
         }
-        "upsert_binding" => {
-            let design_external_id =
-                required(change.design_external_id.as_deref(), "designExternalId")?;
-            let target_type = required(change.target_type.as_deref(), "targetType")?;
-            let target = required(change.target.as_deref(), "target")?;
+        DesignChange::UpsertBinding {
+            design_external_id,
+            target_type,
+            target,
+        } => {
+            let design_external_id = required(Some(design_external_id), "designExternalId")?;
+            let target_type = required(Some(target_type), "targetType")?;
+            let target = required(Some(target), "target")?;
             db.execute(
                 "INSERT INTO design_bindings(workspace_id, design_external_id, target_type, target)
                  VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(workspace_id, design_external_id, target_type, target) DO UPDATE SET
-                    updated_at = CURRENT_TIMESTAMP",
+                 ON CONFLICT(workspace_id, design_external_id, target_type, target) DO NOTHING",
                 params![
                     workspace_id,
                     design_external_id.trim(),
@@ -722,64 +997,78 @@ fn apply_change(
                     target.trim()
                 ],
             )
-            .map_err(|err| err.to_string())?;
+            .map_err(|err| err.to_string())?
+                > 0
         }
-        "upsert_mockup" => {
+        DesignChange::UpsertMockup {
+            external_id,
+            title,
+            attached_to_external_id,
+            viewport_width,
+            viewport_height,
+            screen,
+            mockup_state,
+            fidelity,
+            schema_version,
+            accepted_svg,
+        } => {
             let input = mockups::CreateMockupInput {
-                external_id: required(change.external_id.as_deref(), "externalId")?.to_string(),
-                title: required(change.title.as_deref(), "title")?.to_string(),
+                external_id: required(Some(external_id), "externalId")?.to_string(),
+                title: required(Some(title), "title")?.to_string(),
                 attached_to_external_id: required(
-                    change.attached_to_external_id.as_deref(),
+                    Some(attached_to_external_id),
                     "attachedToExternalId",
                 )?
                 .to_string(),
-                viewport_width: change
-                    .viewport_width
-                    .ok_or("Design save field 'viewportWidth' is required")?,
-                viewport_height: change
-                    .viewport_height
-                    .ok_or("Design save field 'viewportHeight' is required")?,
-                screen: change.screen.clone().unwrap_or_default(),
-                state: change.mockup_state.clone().unwrap_or_default(),
-                fidelity: change.fidelity.clone().unwrap_or_default(),
-                schema_version: change.schema_version,
-                accepted_svg: required(change.accepted_svg.as_deref(), "acceptedSvg")?.to_string(),
+                viewport_width: *viewport_width,
+                viewport_height: *viewport_height,
+                screen: required(Some(screen), "screen")?.to_string(),
+                state: required(Some(mockup_state), "mockupState")?.to_string(),
+                fidelity: required(Some(fidelity), "fidelity")?.to_string(),
+                schema_version: *schema_version,
+                accepted_svg: required(Some(accepted_svg), "acceptedSvg")?.to_string(),
                 expected_revision: 0,
             };
-            mockups::upsert_initial_in_transaction(db, project_id, &input)?;
+            mockups::upsert_initial_in_transaction(db, project_id, &input)?
         }
-        "upsert_mockup_proposal" => {
+        DesignChange::UpsertMockupProposal {
+            external_id,
+            base_revision,
+            proposed_svg,
+            proposed_manifest,
+        } => {
             let input = mockups::ProposeMockupInput {
-                external_id: required(change.external_id.as_deref(), "externalId")?.to_string(),
-                base_revision: change
-                    .base_revision
-                    .ok_or("Design save field 'baseRevision' is required")?,
-                proposed_svg: required(change.proposed_svg.as_deref(), "proposedSvg")?.to_string(),
-                proposed_manifest: change
-                    .proposed_manifest
-                    .clone()
-                    .ok_or("Design save field 'proposedManifest' is required")?,
+                external_id: required(Some(external_id), "externalId")?.to_string(),
+                base_revision: *base_revision,
+                proposed_svg: required(Some(proposed_svg), "proposedSvg")?.to_string(),
+                proposed_manifest: proposed_manifest.clone(),
                 expected_revision: 0,
             };
-            mockups::upsert_proposal_in_transaction(db, project_id, &input)?;
+            mockups::upsert_proposal_in_transaction(db, project_id, &input)?
         }
-        "delete_element" => {
-            let external_id = required(change.external_id.as_deref(), "externalId")?;
+        DesignChange::DeleteElement { external_id } => {
+            let external_id = required(Some(external_id), "externalId")?;
             delete_element_subtree(db, workspace_id, external_id.trim())?;
+            true
         }
-        "delete_relationship" => {
-            let external_id = required(change.external_id.as_deref(), "externalId")?;
+        DesignChange::DeleteRelationship { external_id } => {
+            let external_id = required(Some(external_id), "externalId")?;
             delete_relationship(db, workspace_id, external_id.trim(), true)?;
+            true
         }
-        "delete_uml" => {
-            let key = required(change.key.as_deref(), "key")?;
+        DesignChange::DeleteUml { key } => {
+            let key = required(Some(key), "key")?;
             delete_uml_artifact(db, workspace_id, key.trim(), true)?;
+            true
         }
-        "delete_binding" => {
-            let design_external_id =
-                required(change.design_external_id.as_deref(), "designExternalId")?;
-            let target_type = required(change.target_type.as_deref(), "targetType")?;
-            let target = required(change.target.as_deref(), "target")?;
+        DesignChange::DeleteBinding {
+            design_external_id,
+            target_type,
+            target,
+        } => {
+            let design_external_id = required(Some(design_external_id), "designExternalId")?;
+            let target_type = required(Some(target_type), "targetType")?;
+            let target = required(Some(target), "target")?;
             delete_binding(
                 db,
                 workspace_id,
@@ -787,15 +1076,16 @@ fn apply_change(
                 target_type.trim(),
                 target.trim(),
             )?;
+            true
         }
-        "delete_mockup" => {
-            let external_id = required(change.external_id.as_deref(), "externalId")?;
+        DesignChange::DeleteMockup { external_id } => {
+            let external_id = required(Some(external_id), "externalId")?;
             mockups::delete_in_transaction(db, project_id, external_id.trim(), true)?;
+            true
         }
-        _ => return Err(format!("Unknown design save op: {}", change.op)),
-    }
+    };
 
-    Ok(())
+    Ok(changed)
 }
 
 fn delete_element_subtree(
@@ -2025,9 +2315,17 @@ fn failed_save(
         stored: false,
         correction_required: true,
         revision,
+        changed_count: 0,
         errors: vec![correction(code, message, request)],
-        structurizr_dsl: None,
     }
+}
+
+fn no_changes_save(
+    revision: i64,
+    message: impl Into<String>,
+    request: impl Into<String>,
+) -> DesignSaveResult {
+    failed_save(revision, "save.no_changes", message, request)
 }
 
 fn correction(
@@ -2053,6 +2351,141 @@ struct WorkspaceRecord {
 mod tests {
     use super::*;
     use rusqlite::{params, Connection};
+
+    #[test]
+    fn design_change_schema_is_tagged_and_operation_specific() {
+        let schema = serde_json::to_value(rmcp::schemars::schema_for!(DesignChange)).unwrap();
+        let variants = schema["oneOf"].as_array().unwrap();
+
+        let relationship = schema_variant(variants, "upsert_relationship");
+        assert_eq!(relationship["additionalProperties"], json!(false));
+        assert_required(
+            relationship,
+            &[
+                "op",
+                "externalId",
+                "sourceExternalId",
+                "destinationExternalId",
+                "description",
+            ],
+        );
+        assert!(relationship["properties"].get("target").is_none());
+
+        let uml = schema_variant(variants, "upsert_uml");
+        assert_required(
+            uml,
+            &[
+                "op",
+                "key",
+                "title",
+                "language",
+                "diagramType",
+                "attachedToExternalId",
+                "source",
+            ],
+        );
+        assert!(uml["properties"].get("externalId").is_none());
+
+        let mockup = schema_variant(variants, "upsert_mockup");
+        assert_required(
+            mockup,
+            &[
+                "op",
+                "externalId",
+                "title",
+                "attachedToExternalId",
+                "viewportWidth",
+                "viewportHeight",
+                "screen",
+                "mockupState",
+                "fidelity",
+                "acceptedSvg",
+            ],
+        );
+    }
+
+    #[test]
+    fn design_change_decoding_rejects_wrong_missing_and_unknown_fields() {
+        let wrong_relationship_field = serde_json::from_value::<DesignChange>(json!({
+            "op": "upsert_relationship",
+            "externalId": "rel",
+            "sourceExternalId": "source",
+            "target": "destination",
+            "description": "Calls"
+        }))
+        .unwrap_err()
+        .to_string();
+        assert!(
+            wrong_relationship_field.contains("target")
+                || wrong_relationship_field.contains("destinationExternalId")
+        );
+
+        let missing_uml_language = serde_json::from_value::<DesignChange>(json!({
+            "op": "upsert_uml",
+            "key": "Flow",
+            "title": "Flow",
+            "diagramType": "sequence",
+            "attachedToExternalId": "component",
+            "source": "sequenceDiagram\n    A->>B: call"
+        }))
+        .unwrap_err()
+        .to_string();
+        assert!(missing_uml_language.contains("language"));
+
+        let unknown_operation = serde_json::from_value::<DesignChange>(json!({
+            "op": "upsert_something",
+            "externalId": "unknown"
+        }))
+        .unwrap_err()
+        .to_string();
+        assert!(unknown_operation.contains("upsert_something"));
+
+        let generated_language = serde_json::from_value::<DesignChange>(json!({
+            "op": "upsert_uml",
+            "key": "Workspace",
+            "title": "Workspace",
+            "language": "structurizr",
+            "diagramType": "sequence",
+            "attachedToExternalId": "component",
+            "source": "sequenceDiagram\n    A->>B: call"
+        }))
+        .unwrap_err()
+        .to_string();
+        assert!(generated_language.contains("structurizr"));
+
+        let unsupported_diagram_type = serde_json::from_value::<DesignChange>(json!({
+            "op": "upsert_uml",
+            "key": "Context",
+            "title": "Context",
+            "language": "mermaid",
+            "diagramType": "context",
+            "attachedToExternalId": "component",
+            "source": "flowchart TD\n    A --> B"
+        }))
+        .unwrap_err()
+        .to_string();
+        assert!(unsupported_diagram_type.contains("context"));
+    }
+
+    #[test]
+    fn design_change_decoding_accepts_the_relationship_contract() {
+        let change = serde_json::from_value::<DesignChange>(json!({
+            "op": "upsert_relationship",
+            "externalId": "rel",
+            "sourceExternalId": "source",
+            "destinationExternalId": "destination",
+            "description": "Calls"
+        }))
+        .unwrap();
+
+        assert!(matches!(
+            change,
+            DesignChange::UpsertRelationship {
+                destination_external_id,
+                ..
+            } if destination_external_id == "destination"
+        ));
+    }
 
     #[test]
     fn validate_mermaid_rejects_sequence_note_raw_semicolon_text() {
@@ -2121,8 +2554,12 @@ mod tests {
             0,
             "Remove superseded placeholder design rows.",
             &[
-                change("delete_relationship").with_external_id("placeholder-rel"),
-                change("delete_uml").with_key("LegacyState"),
+                DesignChange::DeleteRelationship {
+                    external_id: "placeholder-rel".to_string(),
+                },
+                DesignChange::DeleteUml {
+                    key: "LegacyState".to_string(),
+                },
             ],
         )
         .unwrap();
@@ -2182,7 +2619,9 @@ mod tests {
             project_id,
             0,
             "Remove a retired component branch.",
-            &[change("delete_element").with_external_id("component-a")],
+            &[DesignChange::DeleteElement {
+                external_id: "component-a".to_string(),
+            }],
         )
         .unwrap();
 
@@ -2222,7 +2661,9 @@ mod tests {
             project_id,
             0,
             "Remove a typoed relationship.",
-            &[change("delete_relationship").with_external_id("missing-rel")],
+            &[DesignChange::DeleteRelationship {
+                external_id: "missing-rel".to_string(),
+            }],
         )
         .unwrap();
 
@@ -2243,7 +2684,7 @@ mod tests {
             project_id,
             0,
             "Store sequence diagram.",
-            &[change("upsert_uml").with_sequence_uml(
+            &[sequence_uml_change(
                 "SaveSequence",
                 "Project save sequence",
                 "container-a",
@@ -2271,6 +2712,218 @@ mod tests {
             )
             .unwrap();
         assert_eq!(stored_count, 0);
+    }
+
+    #[test]
+    fn save_changes_rolls_back_typed_changeset_when_validation_fails() {
+        let (mut db, project_id, workspace_id) = setup_design_workspace();
+        insert_minimal_design(&db, workspace_id);
+        let changes = [
+            DesignChange::UpsertElement {
+                external_id: "component-new".to_string(),
+                parent_external_id: Some("container-a".to_string()),
+                element_type: "Component".to_string(),
+                name: "New Component".to_string(),
+                description: None,
+                technology: None,
+                tags: None,
+            },
+            DesignChange::UpsertRelationship {
+                external_id: "rel-invalid".to_string(),
+                source_external_id: "component-new".to_string(),
+                destination_external_id: "missing-component".to_string(),
+                description: "Calls".to_string(),
+                technology: None,
+                tags: None,
+            },
+        ];
+
+        let result = save_changes(
+            &mut db,
+            project_id,
+            0,
+            "Add a component and its relationship.",
+            &changes,
+        )
+        .unwrap();
+
+        assert!(!result.ok);
+        assert!(!result.stored);
+        assert_eq!(result.revision, 0);
+        assert_eq!(
+            result.errors[0].code,
+            "c4.unresolved_relationship_destination"
+        );
+        let stored_count: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM c4_elements WHERE workspace_id = ?1 AND external_id = 'component-new'",
+                params![workspace_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored_count, 0);
+    }
+
+    #[test]
+    fn save_changes_rejects_generated_uml_overwrite_without_bumping_revision() {
+        let (mut db, project_id, workspace_id) = setup_design_workspace();
+        insert_minimal_design(&db, workspace_id);
+
+        let result = save_changes(
+            &mut db,
+            project_id,
+            0,
+            "Attempt to replace the generated workspace artifact.",
+            &[DesignChange::UpsertUml {
+                key: "StructurizrWorkspace".to_string(),
+                title: "Replacement".to_string(),
+                language: MermaidLanguage::Mermaid,
+                diagram_type: UmlDiagramType::Sequence,
+                attached_to_external_id: "container-a".to_string(),
+                source: "sequenceDiagram\n    A->>B: call".to_string(),
+            }],
+        )
+        .unwrap();
+
+        assert!(!result.ok);
+        assert!(!result.stored);
+        assert_eq!(result.revision, 0);
+        assert_eq!(result.errors[0].code, "save.invalid_changeset");
+        assert!(result.errors[0]
+            .message
+            .contains("Generated Structurizr artifact"));
+
+        let (kind, title): (String, String) = db
+            .query_row(
+                "SELECT kind, title
+                 FROM diagrams
+                 WHERE workspace_id = ?1 AND key = 'StructurizrWorkspace'",
+                params![workspace_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(kind, "structurizr");
+        assert_eq!(title, "Structurizr workspace");
+    }
+
+    #[test]
+    fn repeated_equivalent_save_is_a_compact_no_op_without_revision_bump() {
+        let (mut db, project_id, workspace_id) = setup_design_workspace();
+        insert_minimal_design(&db, workspace_id);
+        let change = DesignChange::UpsertRelationship {
+            external_id: "placeholder-rel".to_string(),
+            source_external_id: "container-a".to_string(),
+            destination_external_id: "component-a".to_string(),
+            description: "Placeholder relationship.".to_string(),
+            technology: Some(String::new()),
+            tags: Some(String::new()),
+        };
+
+        let result = save_changes(
+            &mut db,
+            project_id,
+            0,
+            "Repeat an already stored relationship.",
+            &[change],
+        )
+        .unwrap();
+
+        assert!(!result.ok);
+        assert!(!result.stored);
+        assert_eq!(result.revision, 0);
+        assert_eq!(result.changed_count, 0);
+        assert_eq!(result.errors[0].code, "save.no_changes");
+        assert!(result.errors[0].request.contains("Do not resubmit"));
+
+        let serialized = serde_json::to_value(&result).unwrap();
+        assert!(serialized.get("structurizrDsl").is_none());
+        assert_eq!(
+            state::load_project_revision(&db, project_id)
+                .unwrap()
+                .revision,
+            0
+        );
+    }
+
+    #[test]
+    fn set_element_descriptions_updates_existing_elements_and_rejects_retry() {
+        let (mut db, project_id, workspace_id) = setup_design_workspace();
+        insert_minimal_design(&db, workspace_id);
+        let updates = [
+            ElementDescriptionUpdate {
+                external_id: "container-a".to_string(),
+                description: "Runs the primary application workload.".to_string(),
+            },
+            ElementDescriptionUpdate {
+                external_id: "component-a".to_string(),
+                description: "Processes application requests.".to_string(),
+            },
+        ];
+
+        let stored = set_element_descriptions(&mut db, project_id, 0, &updates).unwrap();
+        assert!(stored.ok);
+        assert!(stored.stored);
+        assert_eq!(stored.revision, 1);
+        assert_eq!(stored.changed_count, 2);
+        let serialized = serde_json::to_value(&stored).unwrap();
+        assert!(serialized.get("structurizrDsl").is_none());
+
+        let retried = set_element_descriptions(&mut db, project_id, 1, &updates).unwrap();
+        assert!(!retried.ok);
+        assert!(!retried.stored);
+        assert_eq!(retried.revision, 1);
+        assert_eq!(retried.changed_count, 0);
+        assert_eq!(retried.errors[0].code, "save.no_changes");
+
+        let descriptions: (String, String) = db
+            .query_row(
+                "SELECT
+                    (SELECT description FROM c4_elements WHERE workspace_id = ?1 AND external_id = 'container-a'),
+                    (SELECT description FROM c4_elements WHERE workspace_id = ?1 AND external_id = 'component-a')",
+                params![workspace_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(descriptions.0, "Runs the primary application workload.");
+        assert_eq!(descriptions.1, "Processes application requests.");
+    }
+
+    #[test]
+    fn set_element_descriptions_rolls_back_when_any_id_is_unknown() {
+        let (mut db, project_id, workspace_id) = setup_design_workspace();
+        insert_minimal_design(&db, workspace_id);
+
+        let result = set_element_descriptions(
+            &mut db,
+            project_id,
+            0,
+            &[
+                ElementDescriptionUpdate {
+                    external_id: "container-a".to_string(),
+                    description: "This write must roll back.".to_string(),
+                },
+                ElementDescriptionUpdate {
+                    external_id: "missing".to_string(),
+                    description: "Unknown element.".to_string(),
+                },
+            ],
+        )
+        .unwrap();
+
+        assert!(!result.ok);
+        assert!(!result.stored);
+        assert_eq!(result.revision, 0);
+        assert_eq!(result.errors[0].code, "description.unknown_element");
+        let description: String = db
+            .query_row(
+                "SELECT description
+                 FROM c4_elements
+                 WHERE workspace_id = ?1 AND external_id = 'container-a'",
+                params![workspace_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(description, "Primary container.");
     }
 
     fn setup_design_workspace() -> (Connection, i64, i64) {
@@ -2332,67 +2985,36 @@ mod tests {
         .unwrap();
     }
 
-    fn change(op: &str) -> TestChangeBuilder {
-        TestChangeBuilder(DesignChange {
-            op: op.to_string(),
-            external_id: None,
-            parent_external_id: None,
-            element_type: None,
-            name: None,
-            description: None,
-            technology: None,
-            tags: None,
-            source_external_id: None,
-            destination_external_id: None,
-            key: None,
-            title: None,
-            language: None,
-            diagram_type: None,
-            attached_to_external_id: None,
-            source: None,
-            design_external_id: None,
-            target_type: None,
-            target: None,
-            viewport_width: None,
-            viewport_height: None,
-            screen: None,
-            mockup_state: None,
-            fidelity: None,
-            schema_version: None,
-            accepted_svg: None,
-            base_revision: None,
-            proposed_svg: None,
-            proposed_manifest: None,
-        })
+    fn sequence_uml_change(
+        key: &str,
+        title: &str,
+        attached_to_external_id: &str,
+        source: &str,
+    ) -> DesignChange {
+        DesignChange::UpsertUml {
+            key: key.to_string(),
+            title: title.to_string(),
+            language: MermaidLanguage::Mermaid,
+            diagram_type: UmlDiagramType::Sequence,
+            attached_to_external_id: attached_to_external_id.to_string(),
+            source: source.to_string(),
+        }
     }
 
-    struct TestChangeBuilder(DesignChange);
+    fn schema_variant<'a>(variants: &'a [Value], op: &str) -> &'a Value {
+        variants
+            .iter()
+            .find(|variant| variant["properties"]["op"]["const"] == json!(op))
+            .unwrap_or_else(|| panic!("missing schema variant for {op}"))
+    }
 
-    impl TestChangeBuilder {
-        fn with_external_id(mut self, external_id: &str) -> DesignChange {
-            self.0.external_id = Some(external_id.to_string());
-            self.0
-        }
-
-        fn with_key(mut self, key: &str) -> DesignChange {
-            self.0.key = Some(key.to_string());
-            self.0
-        }
-
-        fn with_sequence_uml(
-            mut self,
-            key: &str,
-            title: &str,
-            attached_to_external_id: &str,
-            source: &str,
-        ) -> DesignChange {
-            self.0.key = Some(key.to_string());
-            self.0.title = Some(title.to_string());
-            self.0.language = Some("mermaid".to_string());
-            self.0.diagram_type = Some("sequence".to_string());
-            self.0.attached_to_external_id = Some(attached_to_external_id.to_string());
-            self.0.source = Some(source.to_string());
-            self.0
+    fn assert_required(schema: &Value, expected: &[&str]) {
+        let required = schema["required"].as_array().unwrap();
+        for field in expected {
+            assert!(
+                required.iter().any(|required| required == field),
+                "schema does not require {field}: {schema}"
+            );
         }
     }
 }

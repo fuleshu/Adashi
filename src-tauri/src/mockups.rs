@@ -211,8 +211,10 @@ pub fn create_mockup(
 ) -> Result<UiMockup, String> {
     ensure_revision(db, project_id, input.expected_revision)?;
     let tx = db.transaction().map_err(|err| err.to_string())?;
-    upsert_initial_in_transaction(&tx, project_id, &input)?;
-    state::bump_project_revision(&tx, project_id)?;
+    let changed = upsert_initial_in_transaction(&tx, project_id, &input)?;
+    if changed {
+        state::bump_project_revision(&tx, project_id)?;
+    }
     tx.commit().map_err(|err| err.to_string())?;
     load_mockup(db, project_id, input.external_id.trim())
 }
@@ -221,7 +223,7 @@ pub fn upsert_initial_in_transaction(
     db: &Connection,
     project_id: i64,
     input: &CreateMockupInput,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let external_id = required(&input.external_id, "externalId")?;
     let title = required(&input.title, "title")?;
     validate_attachment(db, input.attached_to_external_id.trim())?;
@@ -231,7 +233,7 @@ pub fn upsert_initial_in_transaction(
         input.viewport_width,
         input.viewport_height,
     )?;
-    db.execute(
+    let changed = db.execute(
         "INSERT INTO ui_mockups(project_id, external_id, title, attached_to_external_id,
             viewport_width, viewport_height, screen, state, fidelity, schema_version,
             accepted_svg, accepted_revision, status)
@@ -242,11 +244,29 @@ pub fn upsert_initial_in_transaction(
             screen = excluded.screen, state = excluded.state, fidelity = excluded.fidelity,
             schema_version = excluded.schema_version, accepted_svg = excluded.accepted_svg,
             accepted_revision = ui_mockups.accepted_revision + 1,
-            working_svg = NULL, base_revision = NULL, status = 'accepted', updated_at = CURRENT_TIMESTAMP",
+            working_svg = NULL, base_revision = NULL, status = 'accepted', updated_at = CURRENT_TIMESTAMP
+         WHERE ui_mockups.title IS NOT excluded.title
+            OR ui_mockups.attached_to_external_id IS NOT excluded.attached_to_external_id
+            OR ui_mockups.viewport_width IS NOT excluded.viewport_width
+            OR ui_mockups.viewport_height IS NOT excluded.viewport_height
+            OR ui_mockups.screen IS NOT excluded.screen
+            OR ui_mockups.state IS NOT excluded.state
+            OR ui_mockups.fidelity IS NOT excluded.fidelity
+            OR ui_mockups.schema_version IS NOT excluded.schema_version
+            OR ui_mockups.accepted_svg IS NOT excluded.accepted_svg
+            OR ui_mockups.working_svg IS NOT NULL
+            OR ui_mockups.base_revision IS NOT NULL
+            OR ui_mockups.status IS NOT 'accepted'
+            OR EXISTS (SELECT 1 FROM ui_mockup_edit_operations WHERE mockup_id = ui_mockups.id)
+            OR EXISTS (SELECT 1 FROM ui_mockup_annotations WHERE mockup_id = ui_mockups.id)
+            OR EXISTS (SELECT 1 FROM ui_mockup_proposals WHERE mockup_id = ui_mockups.id)",
         params![project_id, external_id, title, input.attached_to_external_id.trim(), input.viewport_width,
             input.viewport_height, input.screen.trim(), input.state.trim(), input.fidelity.trim(),
             input.schema_version.unwrap_or(1).max(1), svg],
     ).map_err(|err| err.to_string())?;
+    if changed == 0 {
+        return Ok(false);
+    }
     let mockup_id: i64 = db
         .query_row(
             "SELECT id FROM ui_mockups WHERE project_id=?1 AND external_id=?2",
@@ -255,7 +275,7 @@ pub fn upsert_initial_in_transaction(
         )
         .map_err(|err| err.to_string())?;
     clear_draft_evidence(db, mockup_id)?;
-    Ok(())
+    Ok(true)
 }
 
 pub fn save_draft(
@@ -346,8 +366,10 @@ pub fn propose(
 ) -> Result<UiMockup, String> {
     ensure_revision(db, project_id, input.expected_revision)?;
     let tx = db.transaction().map_err(|err| err.to_string())?;
-    upsert_proposal_in_transaction(&tx, project_id, &input)?;
-    state::bump_project_revision(&tx, project_id)?;
+    let changed = upsert_proposal_in_transaction(&tx, project_id, &input)?;
+    if changed {
+        state::bump_project_revision(&tx, project_id)?;
+    }
     tx.commit().map_err(|err| err.to_string())?;
     load_mockup(db, project_id, input.external_id.trim())
 }
@@ -356,7 +378,7 @@ pub fn upsert_proposal_in_transaction(
     db: &Connection,
     project_id: i64,
     input: &ProposeMockupInput,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let current = load_mockup(db, project_id, input.external_id.trim())?;
     if current.status != "pendingAgent" {
         return Err("AI proposals require pendingAgent status".into());
@@ -396,7 +418,7 @@ pub fn upsert_proposal_in_transaction(
         params![current.id],
     )
     .map_err(|err| err.to_string())?;
-    Ok(())
+    Ok(true)
 }
 
 pub fn accept_proposal(
@@ -985,6 +1007,22 @@ mod tests {
     }
 
     #[test]
+    fn repeated_equivalent_mockup_create_does_not_bump_revisions() {
+        let mut db = database();
+        let created = create_mockup(&mut db, 1, create_input(0)).unwrap();
+        let repeated = create_mockup(&mut db, 1, create_input(1)).unwrap();
+
+        assert_eq!(created.accepted_revision, 1);
+        assert_eq!(repeated.accepted_revision, 1);
+        assert_eq!(
+            crate::state::load_project_revision(&db, 1)
+                .unwrap()
+                .revision,
+            1
+        );
+    }
+
+    #[test]
     fn stale_or_unsafe_mutations_do_not_change_revision() {
         let mut db = database();
         create_mockup(&mut db, 1, create_input(0)).unwrap();
@@ -1068,36 +1106,17 @@ mod tests {
     #[test]
     fn transactional_design_save_creates_mockups_and_stores_proposals_as_candidates() {
         let mut db = database();
-        let initial = crate::design::DesignChange {
-            op: "upsert_mockup".into(),
-            external_id: Some("mockup-login".into()),
-            parent_external_id: None,
-            element_type: None,
-            name: None,
-            description: None,
-            technology: None,
-            tags: None,
-            source_external_id: None,
-            destination_external_id: None,
-            key: None,
-            title: Some("Login".into()),
-            language: None,
-            diagram_type: None,
-            attached_to_external_id: Some("screen".into()),
-            source: None,
-            design_external_id: None,
-            target_type: None,
-            target: None,
-            viewport_width: Some(100),
-            viewport_height: Some(60),
-            screen: Some("Login".into()),
-            mockup_state: Some("Default".into()),
-            fidelity: Some("static".into()),
+        let initial = crate::design::DesignChange::UpsertMockup {
+            external_id: "mockup-login".into(),
+            title: "Login".into(),
+            attached_to_external_id: "screen".into(),
+            viewport_width: 100,
+            viewport_height: 60,
+            screen: "Login".into(),
+            mockup_state: "Default".into(),
+            fidelity: "static".into(),
             schema_version: Some(1),
-            accepted_svg: Some(SAFE.into()),
-            base_revision: None,
-            proposed_svg: None,
-            proposed_manifest: None,
+            accepted_svg: SAFE.into(),
         };
         let saved =
             crate::design::save_changes(&mut db, 1, 0, "Create UI mockup", &[initial]).unwrap();
@@ -1124,36 +1143,11 @@ mod tests {
             },
         )
         .unwrap();
-        let proposal = crate::design::DesignChange {
-            op: "upsert_mockup_proposal".into(),
-            external_id: Some("mockup-login".into()),
-            parent_external_id: None,
-            element_type: None,
-            name: None,
-            description: None,
-            technology: None,
-            tags: None,
-            source_external_id: None,
-            destination_external_id: None,
-            key: None,
-            title: None,
-            language: None,
-            diagram_type: None,
-            attached_to_external_id: None,
-            source: None,
-            design_external_id: None,
-            target_type: None,
-            target: None,
-            viewport_width: None,
-            viewport_height: None,
-            screen: None,
-            mockup_state: None,
-            fidelity: None,
-            schema_version: None,
-            accepted_svg: None,
-            base_revision: Some(1),
-            proposed_svg: Some(SAFE.replace("#fff", "#ddd")),
-            proposed_manifest: Some(MockupManifest {
+        let proposal = crate::design::DesignChange::UpsertMockupProposal {
+            external_id: "mockup-login".into(),
+            base_revision: 1,
+            proposed_svg: SAFE.replace("#fff", "#ddd"),
+            proposed_manifest: MockupManifest {
                 schema_version: 1,
                 key: "mockup-login".into(),
                 attached_to_external_id: "screen".into(),
@@ -1162,7 +1156,7 @@ mod tests {
                 screen: "Login".into(),
                 state: "Default".into(),
                 fidelity: "static".into(),
-            }),
+            },
         };
         let saved =
             crate::design::save_changes(&mut db, 1, 3, "Propose UI mockup revision", &[proposal])

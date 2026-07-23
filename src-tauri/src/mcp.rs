@@ -1,6 +1,6 @@
 use crate::design::{
     self, DesignBindingsResult, DesignByIdsResult, DesignChange, DesignOverviewResult,
-    DesignSaveResult, DesignScopeResult, DesignSearchResult,
+    DesignSaveResult, DesignScopeResult, DesignSearchResult, ElementDescriptionUpdate,
 };
 use crate::fixed_hooks::{self, DESIGN_AUTHORING_HOOK_KEY, IMPLEMENTATION_GUIDANCE_HOOK_KEY};
 use crate::memory::{self, ProjectMemory};
@@ -257,12 +257,20 @@ struct DesignBindingsParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DesignSaveParams {
     project_id: String,
     expected_revision: i64,
     change_intent: String,
     changes: Vec<DesignChange>,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SetElementDescriptionsParams {
+    project_id: String,
+    expected_revision: i64,
+    updates: Vec<ElementDescriptionUpdate>,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
@@ -1153,7 +1161,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_design_save",
-        description = "Transactionally save a formal C4/UML/UI-mockup design changeset. Supports upsert_element, upsert_relationship, upsert_uml, upsert_mockup, upsert_mockup_proposal, upsert_binding, and matching delete operations. UI mockups remain separate from umlArtifactTypes; upsert_mockup stores validated accepted layered SVG and upsert_mockup_proposal stores a candidate that requires explicit user acceptance. Deletes clean dependent design attachments and bindings. The save validates revision, containment, relationships, UML syntax, safe SVG, attachments, and bindings; invalid input returns correction errors and is not stored."
+        description = "Advanced transactional save for heterogeneous formal C4, Mermaid UML, binding, and UI-mockup changesets. For element-description work, use adashi_design_set_element_descriptions instead: it has a smaller schema and cannot accidentally create relationships or UML. This advanced tool uses a closed tagged union, protects generated Structurizr artifacts, rejects all-no-op retries without bumping revision, and returns only a compact outcome. UI mockups remain separate from umlArtifactTypes; proposals still require explicit user acceptance."
     )]
     fn design_save(
         &self,
@@ -1167,6 +1175,26 @@ impl AdashiMcpServer {
             params.expected_revision,
             &params.change_intent,
             &params.changes,
+        )
+        .map_err(tool_error)?;
+        Ok(Json(result))
+    }
+
+    #[tool(
+        name = "adashi_design_set_element_descriptions",
+        description = "Atomically set complete descriptions on existing C4 elements only. Use this narrow tool for description-filling tasks instead of adashi_design_save. Each update contains exactly externalId and description: it cannot create elements, relationships, UML, bindings, or mockups. Unknown ids, duplicate ids, empty descriptions, stale revisions, and all-no-op retries are rejected without storing or bumping revision. Success returns a compact outcome."
+    )]
+    fn design_set_element_descriptions(
+        &self,
+        Parameters(params): Parameters<SetElementDescriptionsParams>,
+    ) -> Result<Json<DesignSaveResult>, ErrorData> {
+        let (_project, mut db) = self.open_project(Some(params.project_id.as_str()))?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        let result = design::set_element_descriptions(
+            &mut db,
+            project_row_id,
+            params.expected_revision,
+            &params.updates,
         )
         .map_err(tool_error)?;
         Ok(Json(result))
@@ -1581,6 +1609,47 @@ mod tests {
     use crate::mockups::CreateMockupInput;
     use crate::settings::{AppSettings, ProjectSettings, WindowSettings};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn element_description_contract_is_closed_narrow_and_compact() {
+        let schema =
+            serde_json::to_value(rmcp::schemars::schema_for!(SetElementDescriptionsParams))
+                .unwrap();
+        assert_eq!(schema["additionalProperties"], json!(false));
+        for field in ["projectId", "expectedRevision", "updates"] {
+            assert!(schema["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|required| required == field));
+        }
+
+        let update_ref = schema["properties"]["updates"]["items"]["$ref"]
+            .as_str()
+            .unwrap();
+        let update_name = update_ref.strip_prefix("#/$defs/").unwrap();
+        let update = &schema["$defs"][update_name];
+        assert_eq!(update["additionalProperties"], json!(false));
+        let properties = update["properties"].as_object().unwrap();
+        assert_eq!(properties.len(), 2);
+        assert!(properties.contains_key("externalId"));
+        assert!(properties.contains_key("description"));
+        assert!(update["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|required| required == "externalId"));
+        assert!(update["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|required| required == "description"));
+
+        let result_schema =
+            serde_json::to_value(rmcp::schemars::schema_for!(DesignSaveResult)).unwrap();
+        assert!(result_schema["properties"].get("structurizrDsl").is_none());
+        assert!(result_schema["properties"].get("changedCount").is_some());
+    }
 
     #[test]
     fn mockup_revision_context_returns_structured_facts_and_png_image() {
