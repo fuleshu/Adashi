@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "build": "tsc && vite build",
+    "build:frontend:linux": "tsc && vite build --outDir build/linux/frontend --emptyOutDir",
+    "linux:build": "bash scripts/linux/build.sh",
+    "linux:dev": "bash scripts/linux/dev.sh",
     "preview": "vite preview",
     "tauri": "tauri"
   },

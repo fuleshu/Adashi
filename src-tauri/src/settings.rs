@@ -64,10 +64,33 @@ impl Default for WindowSettings {
 }
 
 pub fn settings_path() -> PathBuf {
-    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
-        return PathBuf::from(local_app_data)
-            .join("Adashi")
-            .join("settings.json");
+    #[cfg(windows)]
+    {
+        if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+            return PathBuf::from(local_app_data)
+                .join("Adashi")
+                .join("settings.json");
+        }
+
+        PathBuf::from(".").join("Adashi").join("settings.json")
+    }
+
+    #[cfg(not(windows))]
+    {
+        let xdg_config_home = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        linux_settings_path(xdg_config_home.as_deref(), home.as_deref())
+    }
+}
+
+#[cfg(not(windows))]
+fn linux_settings_path(xdg_config_home: Option<&Path>, home: Option<&Path>) -> PathBuf {
+    if let Some(config_home) = xdg_config_home.filter(|path| !path.as_os_str().is_empty()) {
+        return config_home.join("adashi").join("settings.json");
+    }
+
+    if let Some(home) = home.filter(|path| !path.as_os_str().is_empty()) {
+        return home.join(".config").join("adashi").join("settings.json");
     }
 
     PathBuf::from(".").join("Adashi").join("settings.json")
@@ -480,6 +503,27 @@ mod tests {
         assert_eq!(
             normalize_project_folder_text(r"C:\\src\\MyProject"),
             r"C:\src\MyProject"
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn linux_settings_path_prefers_xdg_config_home() {
+        assert_eq!(
+            linux_settings_path(
+                Some(Path::new("/tmp/adashi-xdg")),
+                Some(Path::new("/home/tester"))
+            ),
+            PathBuf::from("/tmp/adashi-xdg/adashi/settings.json")
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn linux_settings_path_falls_back_to_home_config() {
+        assert_eq!(
+            linux_settings_path(None, Some(Path::new("/home/tester"))),
+            PathBuf::from("/home/tester/.config/adashi/settings.json")
         );
     }
 

@@ -46,6 +46,9 @@ const MIN_STRUCTURIZR_FONT_SIZE = 12;
 const MAX_STRUCTURIZR_FONT_SIZE = 28;
 const STRUCTURIZR_RELATIONSHIP_FONT_RATIO = 0.8;
 const DEFAULT_MERMAID_FONT_SIZE = DEFAULT_STRUCTURIZR_FONT_SIZE;
+const IS_LINUX = /\bLinux\b/i.test(navigator.userAgent);
+const DEFAULT_QA_SHELL = IS_LINUX ? "bash" : "powershell";
+const PROJECT_FOLDER_PLACEHOLDER = IS_LINUX ? "/home/user/src/MyProject" : "C:\\src\\MyProject";
 const MIN_MERMAID_FONT_SIZE = MIN_STRUCTURIZR_FONT_SIZE;
 const MAX_MERMAID_FONT_SIZE = MAX_STRUCTURIZR_FONT_SIZE;
 const MIN_MERMAID_ZOOM = 25;
@@ -3109,7 +3112,11 @@ function ProjectCreationForm({
       <label>
         <span>Folder</span>
         <div className="folder-picker-row">
-          <input value={folder} onChange={(event) => setFolder(event.target.value)} placeholder="C:\src\MyProject" />
+          <input
+            value={folder}
+            onChange={(event) => setFolder(event.target.value)}
+            placeholder={PROJECT_FOLDER_PLACEHOLDER}
+          />
           <button disabled={isPickingFolder || isCreating} onClick={browseFolder} title="Browse for project folder" type="button">
             <Folder size={17} />
             Browse
@@ -3764,7 +3771,7 @@ function QaView({
         description: "",
         command: "cargo check --manifest-path src-tauri/Cargo.toml",
         workingDirectory: "",
-        shell: "powershell",
+        shell: DEFAULT_QA_SHELL,
         timeoutSeconds: 120,
         enabled: true,
         designSpecificationLinks: [],

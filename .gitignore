@@ -5,6 +5,7 @@ Thumbs.db
 node_modules/
 dist/
 dist-ssr/
+/build/linux/
 *.local
 
 # Rust/Tauri

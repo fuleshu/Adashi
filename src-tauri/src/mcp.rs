@@ -5,6 +5,7 @@ use crate::design::{
 use crate::fixed_hooks::{self, DESIGN_AUTHORING_HOOK_KEY, IMPLEMENTATION_GUIDANCE_HOOK_KEY};
 use crate::memory::{self, ProjectMemory};
 use crate::mockups::{self, MockupSummary, UiMockup};
+use crate::project::{open_project_database, resolve_project_from_settings};
 use crate::qa::{self, NewQaJob, QaDesignLinkInput, QaJob, QaJobQuery, QaRun, UpdateQaJob};
 use crate::rules::{self, InjectionRule, NewRule, Rule, UpdateRule};
 use crate::settings::{self, AppSettings, ProjectSettings};
@@ -13,7 +14,6 @@ use crate::tasks::{
     self, FinishTask, NewTask, Task, TaskDesignSpecificationLink, TaskDesignSpecificationLinkInput,
     UpdateTask,
 };
-use crate::{open_project_database, resolve_project_from_settings};
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::{CallToolResult, ContentBlock, ErrorData};
 use rmcp::transport::stdio;

@@ -207,6 +207,60 @@ Build the frontend:
 npm run build
 ```
 
+### Linux ARM64 / DGX Spark
+
+Adashi supports Linux ARM64 through a Linux-only Tauri configuration. The Windows configuration, icon, build command, and PowerShell defaults remain unchanged.
+
+On Ubuntu 24.04, install the Tauri and Rust build prerequisites:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+  build-essential curl file libayatana-appindicator3-dev libdbus-1-dev \
+  libgtk-3-dev librsvg2-dev libssl-dev libwebkit2gtk-4.1-dev \
+  libxdo-dev pkg-config wget
+```
+
+Install Rust with rustup when `cargo` is not already available:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+```
+
+Then install the JavaScript dependencies once:
+
+```bash
+npm ci
+```
+
+Linux development and build commands are intentionally separate:
+
+```bash
+npm run linux:dev
+npm run linux:build
+npm run linux:build -- mcp
+npm run linux:build -- frontend
+```
+
+All generated Linux files stay under `build/linux/`:
+
+- Frontend assets: `build/linux/frontend/`
+- Rust binaries: `build/linux/cargo-target/release/`
+- Debian package: `build/linux/cargo-target/release/bundle/deb/`
+
+The Linux MCP binary can be configured independently of the Windows executable:
+
+```toml
+[mcp_servers.adashi]
+command = "/absolute/path/to/Adashi/build/linux/cargo-target/release/adashi-mcp"
+args = []
+```
+
+Linux user settings are stored in `$XDG_CONFIG_HOME/adashi/settings.json`, or in `$HOME/.config/adashi/settings.json` when `XDG_CONFIG_HOME` is unset. Project databases remain in each project's `.adashi/` directory on both operating systems.
+
+The existing Windows commands below continue to use `dist/`, `src-tauri/target/`, `src-tauri/icons/icon.ico`, and PowerShell defaults.
+
 ### Configure The MCP Server
 
 Build the release binary first:

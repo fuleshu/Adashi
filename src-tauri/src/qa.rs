@@ -8,8 +8,15 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_TIMEOUT_SECONDS: i64 = 120;
+#[cfg(windows)]
 const DEFAULT_SHELL: &str = "powershell";
+#[cfg(not(windows))]
+const DEFAULT_SHELL: &str = "bash";
 const OUTPUT_LIMIT: usize = 200_000;
+
+pub(crate) fn platform_default_shell() -> &'static str {
+    DEFAULT_SHELL
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -682,7 +689,11 @@ fn shell_command(job: &QaJob) -> Command {
             command
         }
         "pwsh" | "pwsh.exe" => {
-            let mut command = Command::new("pwsh.exe");
+            #[cfg(windows)]
+            let executable = "pwsh.exe";
+            #[cfg(not(windows))]
+            let executable = "pwsh";
+            let mut command = Command::new(executable);
             command.arg("-NoProfile").arg("-Command").arg(&job.command);
             command
         }
@@ -691,9 +702,23 @@ fn shell_command(job: &QaJob) -> Command {
             command.arg("-c").arg(&job.command);
             command
         }
-        _ => {
+        "powershell" | "powershell.exe" => {
+            #[cfg(windows)]
+            let executable = "powershell.exe";
+            #[cfg(not(windows))]
+            let executable = "pwsh";
+            let mut command = Command::new(executable);
+            command.arg("-NoProfile").arg("-Command").arg(&job.command);
+            command
+        }
+        _ if cfg!(windows) => {
             let mut command = Command::new("powershell.exe");
             command.arg("-NoProfile").arg("-Command").arg(&job.command);
+            command
+        }
+        _ => {
+            let mut command = Command::new("bash");
+            command.arg("-c").arg(&job.command);
             command
         }
     }
@@ -1197,4 +1222,21 @@ struct QaRunRow {
     started_at: String,
     finished_at: Option<String>,
     summary: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_keeps_powershell_as_the_default_shell() {
+        assert_eq!(normalize_shell(None), "powershell");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn unix_defaults_to_bash() {
+        assert_eq!(normalize_shell(None), "bash");
+    }
 }
