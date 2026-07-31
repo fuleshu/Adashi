@@ -1,6 +1,8 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+
+use crate::concurrency;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -19,10 +21,11 @@ pub(crate) fn platform_default_shell() -> &'static str {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct QaJob {
     pub id: i64,
+    pub version: i64,
     pub number: i64,
     pub name: String,
     pub description: String,
@@ -43,7 +46,7 @@ pub struct QaJob {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct QaJobDesignLink {
     pub id: i64,
@@ -55,7 +58,7 @@ pub struct QaJobDesignLink {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct QaJobTaskLink {
     pub id: i64,
@@ -68,7 +71,7 @@ pub struct QaJobTaskLink {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct QaJobRun {
     pub id: i64,
@@ -84,7 +87,7 @@ pub struct QaJobRun {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct QaRun {
     pub id: i64,
@@ -98,7 +101,7 @@ pub struct QaRun {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct QaJobQuery {
     pub job_ids: Option<Vec<i64>>,
@@ -110,7 +113,7 @@ pub struct QaJobQuery {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct QaDesignLinkInput {
     pub target_type: Option<String>,
@@ -118,7 +121,7 @@ pub struct QaDesignLinkInput {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct NewQaJob {
     pub name: String,
@@ -135,7 +138,7 @@ pub struct NewQaJob {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct UpdateQaJob {
     pub qa_job_id: i64,
@@ -434,7 +437,7 @@ pub fn load_run(db: &Connection, project_id: i64, qa_run_id: i64) -> Result<QaRu
     hydrate_run(db, row)
 }
 
-fn hydrate_job(db: &Connection, _project_id: i64, row: QaJobRow) -> Result<QaJob, String> {
+fn hydrate_job(db: &Connection, project_id: i64, row: QaJobRow) -> Result<QaJob, String> {
     let latest_run = load_latest_job_run(db, row.id)?;
     let run_history = load_job_run_history(db, row.id, 2)?;
     let design_specification_links = load_design_links(db, row.id)?;
@@ -444,6 +447,7 @@ fn hydrate_job(db: &Connection, _project_id: i64, row: QaJobRow) -> Result<QaJob
 
     Ok(QaJob {
         id: row.id,
+        version: concurrency::load_version(db, project_id, "qa.job", &row.id.to_string())?,
         number: row.number,
         name: row.name,
         description: row.description,

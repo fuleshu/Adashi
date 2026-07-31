@@ -57,6 +57,7 @@ const MERMAID_ZOOM_STEP = 5;
 const MERMAID_FIT_PADDING = 36;
 
 type DesignDiagram = {
+  version: number;
   id: number;
   kind: DiagramKind;
   key: string;
@@ -81,6 +82,7 @@ type UmlArtifactType = {
 };
 
 type DesignElement = {
+  version: number;
   id: number;
   externalId: string;
   parentExternalId?: string | null;
@@ -92,6 +94,7 @@ type DesignElement = {
 };
 
 type DesignRelationship = {
+  version: number;
   id: number;
   externalId: string;
   sourceExternalId: string;
@@ -183,6 +186,7 @@ type StructurizrProjection = {
 };
 
 type Task = {
+  version: number;
   id: number;
   number: number;
   title: string;
@@ -276,6 +280,7 @@ type QaRun = {
 };
 
 type QaJob = {
+  version: number;
   id: number;
   number: number;
   name: string;
@@ -309,6 +314,7 @@ type RuleIntend = "general" | "design" | "implementation";
 type RuleHook = "run.start" | "task.start" | "task.end" | "run.end";
 
 type Rule = {
+  version: number;
   id: number;
   name: string;
   enabled: boolean;
@@ -329,6 +335,7 @@ type RuleTemplate = {
 };
 
 type FixedHookPrompt = {
+  version: number;
   key: string;
   title: string;
   intend: RuleIntend;
@@ -338,6 +345,9 @@ type FixedHookPrompt = {
 };
 
 type ProjectMemory = {
+  memoryVersion: number;
+  protocolVersion: number;
+  notes: Array<{ noteId: string; operationId: string; runId: string; taskId?: number | null; body: string; createdAt: string }>;
   rule: string;
   memory: string;
   updatedAt: string;
@@ -364,6 +374,8 @@ type MockupSummary = {
   state: string;
   fidelity: string;
   acceptedRevision: number;
+  acceptedVersion: number;
+  workingVersion: number;
   status: "accepted" | "workingDraft" | "pendingAgent" | "proposed";
 };
 
@@ -374,6 +386,8 @@ type UiMockup = {
   manifest: MockupManifest;
   acceptedSvg: string;
   acceptedRevision: number;
+  acceptedVersion: number;
+  workingVersion: number;
   workingSvg?: string | null;
   baseRevision?: number | null;
   status: MockupSummary["status"];
@@ -444,6 +458,32 @@ const MERMAID_THEME_VARIABLES = {
   tertiaryColor: "#fffaf0",
   fontFamily: "Inter, Segoe UI, sans-serif",
 };
+
+
+function newOperationId(scope: string): string {
+  return scope + "-" + crypto.randomUUID();
+}
+
+function formatMutationError(reason: unknown): string {
+  const raw = String(reason);
+  const candidates: unknown[] = [reason];
+  for (const text of [raw, raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1)]) {
+    if (!text) continue;
+    try { candidates.push(JSON.parse(text)); } catch { /* ordinary error text */ }
+  }
+  const visit = (value: unknown): Array<{ resourceKind: string; resourceId: string; expectedVersion: number; currentVersion: number }> | null => {
+    if (!value || typeof value !== "object") return null;
+    const record = value as Record<string, unknown>;
+    if (Array.isArray(record.conflicts)) return record.conflicts as Array<{ resourceKind: string; resourceId: string; expectedVersion: number; currentVersion: number }>;
+    for (const child of Object.values(record)) { const found = visit(child); if (found) return found; }
+    return null;
+  };
+  for (const candidate of candidates) {
+    const conflicts = visit(candidate);
+    if (conflicts?.length) return conflicts.map((conflict) => `Conflict on ${conflict.resourceKind} '${conflict.resourceId}': expected version ${conflict.expectedVersion}, current version ${conflict.currentVersion}. Reload that resource and reapply the edit.`).join(String.fromCharCode(10));
+  }
+  return raw;
+}
 
 function initializeMermaid(fontSize: number) {
   mermaid.initialize({
@@ -2557,6 +2597,8 @@ function ElementInspector({
     invoke<DashboardPayload>("update_design_element", {
       input: {
         projectId,
+        operationId: newOperationId("design-element"),
+        expectedVersion: element.version,
         externalId: updatedElement.externalId,
         name: updatedElement.name,
         description: updatedElement.description,
@@ -2565,7 +2607,7 @@ function ElementInspector({
       },
     })
       .then(onChange)
-      .catch((reason) => onError(String(reason)));
+      .catch((reason) => onError(formatMutationError(reason)));
   }
 
   return (
@@ -2652,6 +2694,8 @@ function RelationshipInspector({
     invoke<DashboardPayload>("update_design_relationship", {
       input: {
         projectId,
+        operationId: newOperationId("design-relationship"),
+        expectedVersion: relationship.version,
         externalId: updatedRelationship.externalId,
         description: updatedRelationship.description,
         technology: updatedRelationship.technology,
@@ -2659,7 +2703,7 @@ function RelationshipInspector({
       },
     })
       .then(onChange)
-      .catch((reason) => onError(String(reason)));
+      .catch((reason) => onError(formatMutationError(reason)));
   }
 
   return (
@@ -2769,6 +2813,7 @@ function AddRelationshipForm({
     invoke<DashboardPayload>("create_design_relationship", {
       input: {
         projectId,
+        operationId: newOperationId("design-relationship-create"),
         sourceExternalId: sourceElement.externalId,
         destinationExternalId,
         description,
@@ -2781,7 +2826,7 @@ function AddRelationshipForm({
         setTechnology("");
         onChange(updatedPayload);
       })
-      .catch((reason) => onError(String(reason)));
+      .catch((reason) => onError(formatMutationError(reason)));
   }
 
   return (
@@ -2906,14 +2951,20 @@ function MockupWorkspace({
     return () => { active = false; };
   }, [onError, projectId, reloadKey, summary.externalId]);
 
-  function mutate(command: string, expectedRevision = projectRevision) {
+  function mutate(command: string, versions?: { acceptedVersion: number; workingVersion: number }) {
+    const currentVersions = versions ?? { acceptedVersion: mockup?.acceptedVersion ?? summary.acceptedVersion, workingVersion: mockup?.workingVersion ?? summary.workingVersion };
     setBusy(true);
     invoke<DashboardPayload>(command, {
       projectId,
-      input: { externalId: summary.externalId, expectedRevision },
+      input: {
+        externalId: summary.externalId,
+        operationId: newOperationId("mockup-" + command),
+        expectedAcceptedVersion: currentVersions.acceptedVersion,
+        expectedWorkingVersion: currentVersions.workingVersion,
+      },
     })
       .then((payload) => { onChange(payload); setReloadKey((key) => key + 1); })
-      .catch((error) => onError(String(error)))
+      .catch((error) => onError(formatMutationError(error)))
       .finally(() => setBusy(false));
   }
 
@@ -2949,9 +3000,8 @@ function MockupWorkspace({
         mockup={mockup}
         onDashboardChange={(payload) => onChange(payload as DashboardPayload)}
         onError={onError}
-        onRequestRevision={(revision) => mutate("request_mockup_revision", revision)}
+        onRequestRevision={(acceptedVersion, workingVersion) => mutate("request_mockup_revision", { acceptedVersion, workingVersion })}
         projectId={projectId}
-        projectRevision={projectRevision}
       /> : <div className={hasProposal ? "mockup-comparison" : "mockup-comparison single"}>
         <article>
           <div className="mockup-preview-heading"><span>{mockup.workingSvg ? "Working draft" : "Accepted"}</span><small>r{mockup.acceptedRevision} · {mockup.status}</small></div>
@@ -3016,7 +3066,7 @@ function FirstProjectOnboarding({
   const [creationError, setCreationError] = React.useState<string | null>(null);
 
   function closeApp() {
-    invoke<void>("close_app").catch((reason) => onError(String(reason)));
+    invoke<void>("close_app").catch((reason) => onError(formatMutationError(reason)));
   }
 
   return (
@@ -3087,7 +3137,7 @@ function ProjectCreationForm({
         setFolder("");
         onCreated(updatedSettings, projectId);
       })
-      .catch((reason) => onError(String(reason)))
+      .catch((reason) => onError(formatMutationError(reason)))
       .finally(() => setIsCreating(false));
   }
 
@@ -3099,7 +3149,7 @@ function ProjectCreationForm({
           setFolder(selectedFolder);
         }
       })
-      .catch((reason) => onError(String(reason)))
+      .catch((reason) => onError(formatMutationError(reason)))
       .finally(() => setIsPickingFolder(false));
   }
 
@@ -3151,19 +3201,21 @@ function SettingsView({
   function remove(projectId: string) {
     invoke<AppSettings>("delete_project", { projectId })
       .then(onDelete)
-      .catch((reason) => onError(String(reason)));
+      .catch((reason) => onError(formatMutationError(reason)));
   }
 
   function saveFixedHookPrompt(hookPrompt: FixedHookPrompt, prompt: string) {
     invoke<DashboardPayload>("update_fixed_hook_prompt", {
       input: {
         projectId: activeProjectId,
+        operationId: newOperationId("fixed-hook"),
+        expectedVersion: hookPrompt.version,
         key: hookPrompt.key,
         prompt,
       },
     })
       .then(onDashboardChange)
-      .catch((reason) => onError(String(reason)));
+      .catch((reason) => onError(formatMutationError(reason)));
   }
 
   return (
@@ -3288,6 +3340,7 @@ function TasksView({
     invoke<DashboardPayload>("create_task", {
       input: {
         projectId,
+        operationId: newOperationId("task-create"),
         title: "New Task",
         description: "",
         designSpecificationLinks: [],
@@ -3301,7 +3354,7 @@ function TasksView({
         setSelectedTaskId(newestTask?.id ?? null);
         onChange(updatedPayload);
       })
-      .catch((reason) => onError(String(reason)));
+      .catch((reason) => onError(formatMutationError(reason)));
   }
 
   function updateTask(task: Task, changes: Partial<Pick<Task, "title" | "description" | "state">> & {
@@ -3310,6 +3363,8 @@ function TasksView({
     invoke<DashboardPayload>("update_task", {
       input: {
         projectId,
+        operationId: newOperationId("task-update"),
+        expectedVersion: task.version,
         taskId: task.id,
         ...changes,
       },
@@ -3318,7 +3373,7 @@ function TasksView({
         setSelectedTaskId(task.id);
         onChange(updatedPayload);
       })
-      .catch((reason) => onError(String(reason)));
+      .catch((reason) => onError(formatMutationError(reason)));
   }
 
   function deleteSelectedTask(task: Task) {
@@ -3326,12 +3381,12 @@ function TasksView({
       return;
     }
 
-    invoke<DashboardPayload>("delete_task", { projectId, taskId: task.id })
+    invoke<DashboardPayload>("delete_task", { projectId, taskId: task.id, operationId: newOperationId("task-delete"), expectedVersion: task.version })
       .then((updatedPayload) => {
         setSelectedTaskId(updatedPayload.tasks.find((candidate) => visibleStates[candidate.state])?.id ?? null);
         onChange(updatedPayload);
       })
-      .catch((reason) => onError(String(reason)));
+      .catch((reason) => onError(formatMutationError(reason)));
   }
 
   function addDesignLink(task: Task, option: TaskDesignLinkOption) {
@@ -3372,6 +3427,8 @@ function TasksView({
     invoke<DashboardPayload>("finish_task", {
       input: {
         projectId,
+        operationId: newOperationId("task-finish"),
+        expectedVersion: task.version,
         taskId: task.id,
         completionMemo,
         createdFiles: splitLines(createdFiles),
@@ -3379,13 +3436,13 @@ function TasksView({
       },
     })
       .then(onChange)
-      .catch((reason) => onError(String(reason)));
+      .catch((reason) => onError(formatMutationError(reason)));
   }
 
   function confirmSelectedTask(task: Task) {
-    invoke<DashboardPayload>("confirm_task", { projectId, taskId: task.id })
+    invoke<DashboardPayload>("confirm_task", { projectId, taskId: task.id, operationId: newOperationId("task-confirm"), expectedVersion: task.version })
       .then(onChange)
-      .catch((reason) => onError(String(reason)));
+      .catch((reason) => onError(formatMutationError(reason)));
   }
 
   return (
@@ -3767,6 +3824,7 @@ function QaView({
     invoke<DashboardPayload>("create_qa_job", {
       input: {
         projectId,
+        operationId: newOperationId("qa-create"),
         name: "New QA Job",
         description: "",
         command: "cargo check --manifest-path src-tauri/Cargo.toml",
@@ -3787,7 +3845,7 @@ function QaView({
         setSelectedJobId(newestJob?.id ?? null);
         onChange(updatedPayload);
       })
-      .catch((reason) => onError(String(reason)));
+      .catch((reason) => onError(formatMutationError(reason)));
   }
 
   function updateJob(
@@ -3803,6 +3861,8 @@ function QaView({
     invoke<DashboardPayload>("update_qa_job", {
       input: {
         projectId,
+        operationId: newOperationId("qa-update"),
+        expectedVersion: job.version,
         qaJobId: job.id,
         ...changes,
       },
@@ -3811,7 +3871,7 @@ function QaView({
         setSelectedJobId(job.id);
         onChange(updatedPayload);
       })
-      .catch((reason) => onError(String(reason)));
+      .catch((reason) => onError(formatMutationError(reason)));
   }
 
   function deleteSelectedJob(job: QaJob) {
@@ -3819,12 +3879,12 @@ function QaView({
       return;
     }
 
-    invoke<DashboardPayload>("delete_qa_job", { projectId, qaJobId: job.id })
+    invoke<DashboardPayload>("delete_qa_job", { projectId, qaJobId: job.id, operationId: newOperationId("qa-delete"), expectedVersion: job.version })
       .then((updatedPayload) => {
         setSelectedJobId(updatedPayload.qaJobs.find((candidate) => candidate.enabled || showDisabled)?.id ?? null);
         onChange(updatedPayload);
       })
-      .catch((reason) => onError(String(reason)));
+      .catch((reason) => onError(formatMutationError(reason)));
   }
 
   function runQuery(query: QaJobQuery) {
@@ -3832,6 +3892,7 @@ function QaView({
     invoke<DashboardPayload>("run_qa_jobs", {
       input: {
         projectId,
+        operationId: newOperationId("qa-run"),
         query,
         triggerSource: "dashboard",
       },
@@ -3842,7 +3903,7 @@ function QaView({
         setSelectedJobRunId(refreshedJob?.runHistory[0]?.id ?? null);
         onChange(updatedPayload);
       })
-      .catch((reason) => onError(String(reason)))
+      .catch((reason) => onError(formatMutationError(reason)))
       .finally(() => setRunning(false));
   }
 
@@ -4289,6 +4350,7 @@ function RulesView({
     invoke<DashboardPayload>("create_rule", {
       input: {
         projectId,
+        operationId: newOperationId("rule-create"),
         name: "New Rule",
         enabled: true,
         intend: "implementation",
@@ -4304,7 +4366,7 @@ function RulesView({
         setSelectedRuleId(newestRule?.id ?? null);
         onChange(updatedPayload);
       })
-      .catch((reason) => onError(String(reason)));
+      .catch((reason) => onError(formatMutationError(reason)));
   }
 
   function updateRule(rule: Rule, changes: Partial<Rule>) {
@@ -4316,6 +4378,8 @@ function RulesView({
     invoke<DashboardPayload>("update_rule", {
       input: {
         projectId,
+        operationId: newOperationId("rule-update"),
+        expectedVersion: rule.version,
         id: updatedRule.id,
         name: updatedRule.name.trim() || "New Rule",
         enabled: updatedRule.enabled,
@@ -4328,16 +4392,16 @@ function RulesView({
         setSelectedRuleId(updatedRule.id);
         onChange(updatedPayload);
       })
-      .catch((reason) => onError(String(reason)));
+      .catch((reason) => onError(formatMutationError(reason)));
   }
 
   function remove(ruleId: number) {
-    invoke<DashboardPayload>("delete_rule", { projectId, ruleId })
+    invoke<DashboardPayload>("delete_rule", { projectId, ruleId, operationId: newOperationId("rule-delete"), expectedVersion: rules.find((rule) => rule.id === ruleId)?.version ?? 0 })
       .then((updatedPayload) => {
         setSelectedRuleId(updatedPayload.rules[0]?.id ?? null);
         onChange(updatedPayload);
       })
-      .catch((reason) => onError(String(reason)));
+      .catch((reason) => onError(formatMutationError(reason)));
   }
 
   function saveSelectedRuleAsTemplate() {
@@ -4356,7 +4420,7 @@ function RulesView({
         setSelectedTemplateId(newestTemplate?.id ?? "");
         onSettingsChange(updatedSettings);
       })
-      .catch((reason) => onError(String(reason)));
+      .catch((reason) => onError(formatMutationError(reason)));
   }
 
   function createRuleFromSelectedTemplate() {
@@ -4367,6 +4431,7 @@ function RulesView({
     invoke<DashboardPayload>("create_rule_from_template", {
       input: {
         projectId,
+        operationId: newOperationId("rule-template-create"),
         templateId: selectedTemplate.id,
       },
     })
@@ -4378,7 +4443,7 @@ function RulesView({
         setSelectedRuleId(newestRule?.id ?? null);
         onChange(updatedPayload);
       })
-      .catch((reason) => onError(String(reason)));
+      .catch((reason) => onError(formatMutationError(reason)));
   }
 
   function removeSelectedTemplate() {
@@ -4391,7 +4456,7 @@ function RulesView({
         setSelectedTemplateId(updatedSettings.ruleTemplates[0]?.id ?? "");
         onSettingsChange(updatedSettings);
       })
-      .catch((reason) => onError(String(reason)));
+      .catch((reason) => onError(formatMutationError(reason)));
   }
 
   return (
@@ -4566,22 +4631,26 @@ function MemoryView({
     invoke<DashboardPayload>("update_memory_rule", {
       input: {
         projectId,
+        operationId: newOperationId("memory-protocol"),
+        expectedVersion: memory.protocolVersion,
         rule,
       },
     })
       .then(onChange)
-      .catch((reason) => onError(String(reason)));
+      .catch((reason) => onError(formatMutationError(reason)));
   }
 
   function saveMemory(nextMemory: string) {
     invoke<DashboardPayload>("update_memory", {
       input: {
         projectId,
+        operationId: newOperationId("memory-compaction"),
+        expectedVersion: memory.memoryVersion,
         memory: nextMemory,
       },
     })
       .then(onChange)
-      .catch((reason) => onError(String(reason)));
+      .catch((reason) => onError(formatMutationError(reason)));
   }
 
   return (

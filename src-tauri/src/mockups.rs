@@ -1,4 +1,4 @@
-use crate::state;
+use crate::{concurrency, state};
 use base64::Engine as _;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -6,7 +6,7 @@ use serde_json::Value;
 use std::collections::HashSet;
 
 #[derive(Clone, Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MockupManifest {
     pub schema_version: i64,
     pub key: String,
@@ -19,7 +19,7 @@ pub struct MockupManifest {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MockupEditOperation {
     pub sequence: i64,
     pub kind: String,
@@ -28,7 +28,7 @@ pub struct MockupEditOperation {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MockupAnnotation {
     pub external_id: String,
     pub svg_path: String,
@@ -37,7 +37,7 @@ pub struct MockupAnnotation {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MockupProposal {
     pub base_revision: i64,
     pub proposed_svg: String,
@@ -46,7 +46,7 @@ pub struct MockupProposal {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UiMockup {
     pub id: i64,
     pub external_id: String,
@@ -54,6 +54,8 @@ pub struct UiMockup {
     pub manifest: MockupManifest,
     pub accepted_svg: String,
     pub accepted_revision: i64,
+    pub accepted_version: i64,
+    pub working_version: i64,
     pub working_svg: Option<String>,
     pub base_revision: Option<i64>,
     pub status: String,
@@ -65,7 +67,7 @@ pub struct UiMockup {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MockupSummary {
     pub external_id: String,
     pub title: String,
@@ -76,11 +78,13 @@ pub struct MockupSummary {
     pub state: String,
     pub fidelity: String,
     pub accepted_revision: i64,
+    pub accepted_version: i64,
+    pub working_version: i64,
     pub status: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateMockupInput {
     pub external_id: String,
     pub title: String,
@@ -92,42 +96,59 @@ pub struct CreateMockupInput {
     pub fidelity: String,
     pub schema_version: Option<i64>,
     pub accepted_svg: String,
-    pub expected_revision: i64,
+    pub operation_id: String,
+    pub expected_accepted_version: i64,
+    pub expected_working_version: i64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SaveDraftInput {
     pub external_id: String,
     pub working_svg: String,
     pub base_revision: i64,
-    pub expected_revision: i64,
+    pub operation_id: String,
+    pub expected_accepted_version: i64,
+    pub expected_working_version: i64,
     pub edit_operations: Vec<MockupEditOperation>,
     pub annotations: Vec<MockupAnnotation>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MockupMutationInput {
     pub external_id: String,
-    pub expected_revision: i64,
+    pub operation_id: String,
+    pub expected_accepted_version: i64,
+    pub expected_working_version: i64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProposeMockupInput {
     pub external_id: String,
     pub base_revision: i64,
     pub proposed_svg: String,
     pub proposed_manifest: MockupManifest,
-    pub expected_revision: i64,
+    pub operation_id: String,
+    pub expected_accepted_version: i64,
+    pub expected_working_version: i64,
 }
 
 pub fn load_summaries(db: &Connection, project_id: i64) -> Result<Vec<MockupSummary>, String> {
     let mut statement = db.prepare(
-        "SELECT external_id, title, attached_to_external_id, viewport_width, viewport_height,
-                screen, state, fidelity, accepted_revision, status
-         FROM ui_mockups WHERE project_id = ?1 ORDER BY attached_to_external_id, title, external_id",
+        "SELECT m.external_id, m.title, m.attached_to_external_id, m.viewport_width, m.viewport_height,
+                m.screen, m.state, m.fidelity, m.accepted_revision, m.status,
+                COALESCE(accepted.version, 0), COALESCE(working.version, 0)
+         FROM ui_mockups m
+         LEFT JOIN resource_versions accepted
+           ON accepted.project_id=m.project_id AND accepted.resource_kind='mockup.accepted'
+          AND accepted.resource_id=m.external_id
+         LEFT JOIN resource_versions working
+           ON working.project_id=m.project_id AND working.resource_kind='mockup.working'
+          AND working.resource_id=m.external_id
+         WHERE m.project_id = ?1
+         ORDER BY m.attached_to_external_id, m.title, m.external_id",
     ).map_err(|err| err.to_string())?;
     let rows = statement
         .query_map(params![project_id], |row| {
@@ -141,6 +162,8 @@ pub fn load_summaries(db: &Connection, project_id: i64) -> Result<Vec<MockupSumm
                 state: row.get(6)?,
                 fidelity: row.get(7)?,
                 accepted_revision: row.get(8)?,
+                accepted_version: row.get(10)?,
+                working_version: row.get(11)?,
                 status: row.get(9)?,
             })
         })
@@ -193,6 +216,13 @@ pub fn load_mockup(
         manifest,
         accepted_svg: row.10,
         accepted_revision: row.11,
+        accepted_version: concurrency::load_version(
+            db,
+            project_id,
+            "mockup.accepted",
+            external_id,
+        )?,
+        working_version: concurrency::load_version(db, project_id, "mockup.working", external_id)?,
         working_svg: row.12,
         base_revision: row.13,
         status: row.14,
@@ -209,14 +239,29 @@ pub fn create_mockup(
     project_id: i64,
     input: CreateMockupInput,
 ) -> Result<UiMockup, String> {
-    ensure_revision(db, project_id, input.expected_revision)?;
+    if let Some(replayed) =
+        concurrency::load_operation::<UiMockup>(db, project_id, &input.operation_id)?
+    {
+        return Ok(replayed);
+    }
+    let guard = mockup_guard(
+        &input.operation_id,
+        &input.external_id,
+        input.expected_accepted_version,
+        input.expected_working_version,
+        true,
+    );
     let tx = db.transaction().map_err(|err| err.to_string())?;
+    concurrency::validate_guard(&tx, project_id, &guard)?;
     let changed = upsert_initial_in_transaction(&tx, project_id, &input)?;
     if changed {
+        bump_mockup_versions(&tx, project_id, input.external_id.trim(), true)?;
         state::bump_project_revision(&tx, project_id)?;
     }
+    let result = load_mockup(&tx, project_id, input.external_id.trim())?;
+    concurrency::record_no_op(&tx, project_id, &input.operation_id, &result)?;
     tx.commit().map_err(|err| err.to_string())?;
-    load_mockup(db, project_id, input.external_id.trim())
+    Ok(result)
 }
 
 pub fn upsert_initial_in_transaction(
@@ -283,8 +328,21 @@ pub fn save_draft(
     project_id: i64,
     input: SaveDraftInput,
 ) -> Result<UiMockup, String> {
-    ensure_revision(db, project_id, input.expected_revision)?;
-    let current = load_mockup(db, project_id, input.external_id.trim())?;
+    if let Some(replayed) =
+        concurrency::load_operation::<UiMockup>(db, project_id, &input.operation_id)?
+    {
+        return Ok(replayed);
+    }
+    let guard = mockup_guard(
+        &input.operation_id,
+        &input.external_id,
+        input.expected_accepted_version,
+        input.expected_working_version,
+        false,
+    );
+    let tx = db.transaction().map_err(|err| err.to_string())?;
+    concurrency::validate_guard(&tx, project_id, &guard)?;
+    let current = load_mockup(&tx, project_id, input.external_id.trim())?;
     if input.base_revision != current.accepted_revision {
         return Err(format!(
             "Stale mockup base revision: expected {}, received {}",
@@ -298,13 +356,22 @@ pub fn save_draft(
     )?;
     validate_operations(&input.edit_operations)?;
     validate_annotations(&input.annotations)?;
-    let tx = db.transaction().map_err(|err| err.to_string())?;
-    tx.execute("UPDATE ui_mockups SET working_svg=?1, base_revision=?2, status='workingDraft', updated_at=CURRENT_TIMESTAMP WHERE id=?3",
-        params![svg, input.base_revision, current.id]).map_err(|err| err.to_string())?;
-    tx.execute(
-        "DELETE FROM ui_mockup_preview_cache WHERE mockup_id=?1 AND variant IN ('working', 'proposed')",
-        params![current.id],
-    ).map_err(|err| err.to_string())?;
+    let same_evidence = serde_json::to_value(&current.edit_operations)
+        .map_err(|err| err.to_string())?
+        == serde_json::to_value(&input.edit_operations).map_err(|err| err.to_string())?
+        && serde_json::to_value(&current.annotations).map_err(|err| err.to_string())?
+            == serde_json::to_value(&input.annotations).map_err(|err| err.to_string())?;
+    if current.working_svg.as_deref() == Some(svg.as_str())
+        && current.base_revision == Some(input.base_revision)
+        && current.status == "workingDraft"
+        && same_evidence
+    {
+        concurrency::record_no_op(&tx, project_id, &input.operation_id, &current)?;
+        tx.commit().map_err(|err| err.to_string())?;
+        return Ok(current);
+    }
+    tx.execute("UPDATE ui_mockups SET working_svg=?1, base_revision=?2, status='workingDraft', updated_at=CURRENT_TIMESTAMP WHERE id=?3", params![svg, input.base_revision, current.id]).map_err(|err| err.to_string())?;
+    tx.execute("DELETE FROM ui_mockup_preview_cache WHERE mockup_id=?1 AND variant IN ('working', 'proposed')", params![current.id]).map_err(|err| err.to_string())?;
     replace_operations(&tx, current.id, &input.edit_operations)?;
     replace_annotations(&tx, current.id, &input.annotations)?;
     tx.execute(
@@ -312,9 +379,12 @@ pub fn save_draft(
         params![current.id],
     )
     .map_err(|err| err.to_string())?;
+    concurrency::bump_version(&tx, project_id, "mockup.working", input.external_id.trim())?;
     state::bump_project_revision(&tx, project_id)?;
+    let result = load_mockup(&tx, project_id, input.external_id.trim())?;
+    concurrency::record_no_op(&tx, project_id, &input.operation_id, &result)?;
     tx.commit().map_err(|err| err.to_string())?;
-    load_mockup(db, project_id, input.external_id.trim())
+    Ok(result)
 }
 
 pub fn request_revision(
@@ -337,12 +407,24 @@ pub fn resume_editing(
     project_id: i64,
     input: MockupMutationInput,
 ) -> Result<UiMockup, String> {
-    let current = load_mockup(db, project_id, input.external_id.trim())?;
+    if let Some(replayed) =
+        concurrency::load_operation::<UiMockup>(db, project_id, &input.operation_id)?
+    {
+        return Ok(replayed);
+    }
+    let guard = mockup_guard(
+        &input.operation_id,
+        &input.external_id,
+        input.expected_accepted_version,
+        input.expected_working_version,
+        false,
+    );
+    let tx = db.transaction().map_err(|err| err.to_string())?;
+    concurrency::validate_guard(&tx, project_id, &guard)?;
+    let current = load_mockup(&tx, project_id, input.external_id.trim())?;
     if !matches!(current.status.as_str(), "pendingAgent" | "proposed") {
         return Err("Only pending or proposed mockups can resume editing".into());
     }
-    ensure_revision(db, project_id, input.expected_revision)?;
-    let tx = db.transaction().map_err(|err| err.to_string())?;
     tx.execute(
         "DELETE FROM ui_mockup_proposals WHERE mockup_id=?1",
         params![current.id],
@@ -353,9 +435,12 @@ pub fn resume_editing(
         params![current.id],
     )
     .map_err(|err| err.to_string())?;
+    concurrency::bump_version(&tx, project_id, "mockup.working", input.external_id.trim())?;
     state::bump_project_revision(&tx, project_id)?;
+    let result = load_mockup(&tx, project_id, input.external_id.trim())?;
+    concurrency::record_no_op(&tx, project_id, &input.operation_id, &result)?;
     tx.commit().map_err(|err| err.to_string())?;
-    load_mockup(db, project_id, input.external_id.trim())
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -364,14 +449,29 @@ pub fn propose(
     project_id: i64,
     input: ProposeMockupInput,
 ) -> Result<UiMockup, String> {
-    ensure_revision(db, project_id, input.expected_revision)?;
+    if let Some(replayed) =
+        concurrency::load_operation::<UiMockup>(db, project_id, &input.operation_id)?
+    {
+        return Ok(replayed);
+    }
+    let guard = mockup_guard(
+        &input.operation_id,
+        &input.external_id,
+        input.expected_accepted_version,
+        input.expected_working_version,
+        false,
+    );
     let tx = db.transaction().map_err(|err| err.to_string())?;
+    concurrency::validate_guard(&tx, project_id, &guard)?;
     let changed = upsert_proposal_in_transaction(&tx, project_id, &input)?;
     if changed {
+        concurrency::bump_version(&tx, project_id, "mockup.working", input.external_id.trim())?;
         state::bump_project_revision(&tx, project_id)?;
     }
+    let result = load_mockup(&tx, project_id, input.external_id.trim())?;
+    concurrency::record_no_op(&tx, project_id, &input.operation_id, &result)?;
     tx.commit().map_err(|err| err.to_string())?;
-    load_mockup(db, project_id, input.external_id.trim())
+    Ok(result)
 }
 
 pub fn upsert_proposal_in_transaction(
@@ -426,25 +526,35 @@ pub fn accept_proposal(
     project_id: i64,
     input: MockupMutationInput,
 ) -> Result<UiMockup, String> {
-    ensure_revision(db, project_id, input.expected_revision)?;
-    let current = load_mockup(db, project_id, input.external_id.trim())?;
+    if let Some(replayed) =
+        concurrency::load_operation::<UiMockup>(db, project_id, &input.operation_id)?
+    {
+        return Ok(replayed);
+    }
+    let guard = mockup_guard(
+        &input.operation_id,
+        &input.external_id,
+        input.expected_accepted_version,
+        input.expected_working_version,
+        true,
+    );
+    let tx = db.transaction().map_err(|err| err.to_string())?;
+    concurrency::validate_guard(&tx, project_id, &guard)?;
+    let current = load_mockup(&tx, project_id, input.external_id.trim())?;
     let proposal = current
         .proposal
         .ok_or_else(|| "Mockup has no proposal to accept".to_string())?;
     if proposal.base_revision != current.accepted_revision {
         return Err("Proposal base revision is stale".into());
     }
-    let tx = db.transaction().map_err(|err| err.to_string())?;
-    tx.execute("UPDATE ui_mockups SET accepted_svg=?1, accepted_revision=accepted_revision+1,
-        viewport_width=?2, viewport_height=?3, screen=?4, state=?5, fidelity=?6, schema_version=?7,
-        working_svg=NULL, base_revision=NULL, status='accepted', updated_at=CURRENT_TIMESTAMP WHERE id=?8",
-        params![proposal.proposed_svg, proposal.proposed_manifest.viewport_width, proposal.proposed_manifest.viewport_height,
-            proposal.proposed_manifest.screen, proposal.proposed_manifest.state, proposal.proposed_manifest.fidelity,
-            proposal.proposed_manifest.schema_version, current.id]).map_err(|err| err.to_string())?;
+    tx.execute("UPDATE ui_mockups SET accepted_svg=?1, accepted_revision=accepted_revision+1, viewport_width=?2, viewport_height=?3, screen=?4, state=?5, fidelity=?6, schema_version=?7, working_svg=NULL, base_revision=NULL, status='accepted', updated_at=CURRENT_TIMESTAMP WHERE id=?8", params![proposal.proposed_svg, proposal.proposed_manifest.viewport_width, proposal.proposed_manifest.viewport_height, proposal.proposed_manifest.screen, proposal.proposed_manifest.state, proposal.proposed_manifest.fidelity, proposal.proposed_manifest.schema_version, current.id]).map_err(|err| err.to_string())?;
     clear_draft_evidence(&tx, current.id)?;
+    bump_mockup_versions(&tx, project_id, input.external_id.trim(), true)?;
     state::bump_project_revision(&tx, project_id)?;
+    let result = load_mockup(&tx, project_id, input.external_id.trim())?;
+    concurrency::record_no_op(&tx, project_id, &input.operation_id, &result)?;
     tx.commit().map_err(|err| err.to_string())?;
-    load_mockup(db, project_id, input.external_id.trim())
+    Ok(result)
 }
 
 pub fn reject_proposal(
@@ -460,14 +570,34 @@ pub fn discard_draft(
     project_id: i64,
     input: MockupMutationInput,
 ) -> Result<UiMockup, String> {
-    ensure_revision(db, project_id, input.expected_revision)?;
-    let current = load_mockup(db, project_id, input.external_id.trim())?;
+    if let Some(replayed) =
+        concurrency::load_operation::<UiMockup>(db, project_id, &input.operation_id)?
+    {
+        return Ok(replayed);
+    }
+    let guard = mockup_guard(
+        &input.operation_id,
+        &input.external_id,
+        input.expected_accepted_version,
+        input.expected_working_version,
+        false,
+    );
     let tx = db.transaction().map_err(|err| err.to_string())?;
+    concurrency::validate_guard(&tx, project_id, &guard)?;
+    let current = load_mockup(&tx, project_id, input.external_id.trim())?;
+    if current.working_svg.is_none() && current.proposal.is_none() && current.status == "accepted" {
+        concurrency::record_no_op(&tx, project_id, &input.operation_id, &current)?;
+        tx.commit().map_err(|err| err.to_string())?;
+        return Ok(current);
+    }
     tx.execute("UPDATE ui_mockups SET working_svg=NULL, base_revision=NULL, status='accepted', updated_at=CURRENT_TIMESTAMP WHERE id=?1", params![current.id]).map_err(|err| err.to_string())?;
     clear_draft_evidence(&tx, current.id)?;
+    concurrency::bump_version(&tx, project_id, "mockup.working", input.external_id.trim())?;
     state::bump_project_revision(&tx, project_id)?;
+    let result = load_mockup(&tx, project_id, input.external_id.trim())?;
+    concurrency::record_no_op(&tx, project_id, &input.operation_id, &result)?;
     tx.commit().map_err(|err| err.to_string())?;
-    load_mockup(db, project_id, input.external_id.trim())
+    Ok(result)
 }
 
 pub fn delete_mockup(
@@ -475,10 +605,23 @@ pub fn delete_mockup(
     project_id: i64,
     input: MockupMutationInput,
 ) -> Result<(), String> {
-    ensure_revision(db, project_id, input.expected_revision)?;
+    if concurrency::load_operation::<bool>(db, project_id, &input.operation_id)?.is_some() {
+        return Ok(());
+    }
+    let guard = mockup_guard(
+        &input.operation_id,
+        &input.external_id,
+        input.expected_accepted_version,
+        input.expected_working_version,
+        true,
+    );
     let tx = db.transaction().map_err(|err| err.to_string())?;
+    concurrency::validate_guard(&tx, project_id, &guard)?;
     delete_in_transaction(&tx, project_id, input.external_id.trim(), true)?;
+    concurrency::tombstone_version(&tx, project_id, "mockup.accepted", input.external_id.trim())?;
+    concurrency::tombstone_version(&tx, project_id, "mockup.working", input.external_id.trim())?;
     state::bump_project_revision(&tx, project_id)?;
+    concurrency::record_no_op(&tx, project_id, &input.operation_id, &true)?;
     tx.commit().map_err(|err| err.to_string())?;
     Ok(())
 }
@@ -656,12 +799,24 @@ fn mutate_status(
     to: &str,
     clear: bool,
 ) -> Result<UiMockup, String> {
-    ensure_revision(db, project_id, input.expected_revision)?;
-    let current = load_mockup(db, project_id, input.external_id.trim())?;
+    if let Some(replayed) =
+        concurrency::load_operation::<UiMockup>(db, project_id, &input.operation_id)?
+    {
+        return Ok(replayed);
+    }
+    let guard = mockup_guard(
+        &input.operation_id,
+        &input.external_id,
+        input.expected_accepted_version,
+        input.expected_working_version,
+        false,
+    );
+    let tx = db.transaction().map_err(|err| err.to_string())?;
+    concurrency::validate_guard(&tx, project_id, &guard)?;
+    let current = load_mockup(&tx, project_id, input.external_id.trim())?;
     if current.status != from {
         return Err(format!("Mockup must be {from} before changing to {to}"));
     }
-    let tx = db.transaction().map_err(|err| err.to_string())?;
     tx.execute(
         "UPDATE ui_mockups SET status=?1, updated_at=CURRENT_TIMESTAMP WHERE id=?2",
         params![to, current.id],
@@ -670,20 +825,57 @@ fn mutate_status(
     if clear {
         clear_draft_evidence(&tx, current.id)?;
     }
+    concurrency::bump_version(&tx, project_id, "mockup.working", input.external_id.trim())?;
     state::bump_project_revision(&tx, project_id)?;
+    let result = load_mockup(&tx, project_id, input.external_id.trim())?;
+    concurrency::record_no_op(&tx, project_id, &input.operation_id, &result)?;
     tx.commit().map_err(|err| err.to_string())?;
-    load_mockup(db, project_id, input.external_id.trim())
+    Ok(result)
 }
 
-fn ensure_revision(db: &Connection, project_id: i64, expected: i64) -> Result<(), String> {
-    let current = state::load_project_revision(db, project_id)?.revision;
-    if current == expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "Stale project revision: expected {expected}, current {current}"
-        ))
+fn mockup_guard(
+    operation_id: &str,
+    external_id: &str,
+    accepted_version: i64,
+    working_version: i64,
+    writes_accepted: bool,
+) -> concurrency::MutationGuard {
+    let accepted = concurrency::ResourceExpectation {
+        resource_kind: "mockup.accepted".to_string(),
+        resource_id: external_id.trim().to_string(),
+        expected_version: accepted_version,
+    };
+    let working = concurrency::ResourceExpectation {
+        resource_kind: "mockup.working".to_string(),
+        resource_id: external_id.trim().to_string(),
+        expected_version: working_version,
+    };
+    concurrency::MutationGuard {
+        operation_id: operation_id.trim().to_string(),
+        read_set: if writes_accepted {
+            Vec::new()
+        } else {
+            vec![accepted.clone()]
+        },
+        write_set: if writes_accepted {
+            vec![accepted, working]
+        } else {
+            vec![working]
+        },
     }
+}
+
+fn bump_mockup_versions(
+    db: &Connection,
+    project_id: i64,
+    external_id: &str,
+    include_accepted: bool,
+) -> Result<(), String> {
+    if include_accepted {
+        concurrency::bump_version(db, project_id, "mockup.accepted", external_id)?;
+    }
+    concurrency::bump_version(db, project_id, "mockup.working", external_id)?;
+    Ok(())
 }
 
 fn validate_attachment(db: &Connection, id: &str) -> Result<(), String> {
@@ -891,7 +1083,7 @@ mod tests {
         db
     }
 
-    fn create_input(expected_revision: i64) -> CreateMockupInput {
+    fn create_input(expected_version: i64) -> CreateMockupInput {
         CreateMockupInput {
             external_id: "mockup-login".into(),
             title: "Login".into(),
@@ -903,7 +1095,9 @@ mod tests {
             fidelity: "static".into(),
             schema_version: Some(1),
             accepted_svg: SAFE.into(),
-            expected_revision,
+            operation_id: format!("create-{expected_version}"),
+            expected_accepted_version: expected_version,
+            expected_working_version: expected_version,
         }
     }
 
@@ -920,7 +1114,9 @@ mod tests {
                 external_id: created.external_id.clone(),
                 working_svg: draft_svg.clone(),
                 base_revision: 1,
-                expected_revision: 1,
+                operation_id: "mockup-test-1".to_string(),
+                expected_accepted_version: 1,
+                expected_working_version: 1,
                 edit_operations: vec![MockupEditOperation {
                     sequence: 0,
                     kind: "setFill".into(),
@@ -942,7 +1138,9 @@ mod tests {
             1,
             MockupMutationInput {
                 external_id: created.external_id.clone(),
-                expected_revision: 2,
+                operation_id: "mockup-test-2".to_string(),
+                expected_accepted_version: 1,
+                expected_working_version: 2,
             },
         )
         .unwrap();
@@ -955,7 +1153,9 @@ mod tests {
                 base_revision: 1,
                 proposed_svg: SAFE.replace("#fff", "#ddd"),
                 proposed_manifest: manifest.clone(),
-                expected_revision: 3,
+                operation_id: "mockup-test-3".to_string(),
+                expected_accepted_version: 1,
+                expected_working_version: 3,
             },
         )
         .unwrap();
@@ -964,7 +1164,9 @@ mod tests {
             1,
             MockupMutationInput {
                 external_id: created.external_id.clone(),
-                expected_revision: 4,
+                operation_id: "mockup-test-4".to_string(),
+                expected_accepted_version: 1,
+                expected_working_version: 4,
             },
         )
         .unwrap();
@@ -976,7 +1178,9 @@ mod tests {
             1,
             MockupMutationInput {
                 external_id: created.external_id.clone(),
-                expected_revision: 5,
+                operation_id: "mockup-test-5".to_string(),
+                expected_accepted_version: 1,
+                expected_working_version: 5,
             },
         )
         .unwrap();
@@ -988,7 +1192,9 @@ mod tests {
                 base_revision: 1,
                 proposed_svg: SAFE.replace("#fff", "#ccc"),
                 proposed_manifest: manifest,
-                expected_revision: 6,
+                operation_id: "mockup-test-6".to_string(),
+                expected_accepted_version: 1,
+                expected_working_version: 6,
             },
         )
         .unwrap();
@@ -997,7 +1203,9 @@ mod tests {
             1,
             MockupMutationInput {
                 external_id: created.external_id,
-                expected_revision: 7,
+                operation_id: "mockup-test-7".to_string(),
+                expected_accepted_version: 1,
+                expected_working_version: 7,
             },
         )
         .unwrap();
@@ -1014,6 +1222,8 @@ mod tests {
 
         assert_eq!(created.accepted_revision, 1);
         assert_eq!(repeated.accepted_revision, 1);
+        assert_eq!(repeated.accepted_version, 1);
+        assert_eq!(repeated.working_version, 1);
         assert_eq!(
             crate::state::load_project_revision(&db, 1)
                 .unwrap()
@@ -1033,7 +1243,9 @@ mod tests {
                 external_id: "mockup-login".into(),
                 working_svg: SAFE.into(),
                 base_revision: 1,
-                expected_revision: 0,
+                operation_id: "mockup-test-0".to_string(),
+                expected_accepted_version: 0,
+                expected_working_version: 0,
                 edit_operations: vec![],
                 annotations: vec![],
             },
@@ -1128,7 +1340,9 @@ mod tests {
                 external_id: "mockup-login".into(),
                 working_svg: SAFE.replace("#fff", "#eee"),
                 base_revision: 1,
-                expected_revision: 1,
+                operation_id: "mockup-test-1".to_string(),
+                expected_accepted_version: 1,
+                expected_working_version: 1,
                 edit_operations: vec![],
                 annotations: vec![],
             },
@@ -1139,7 +1353,9 @@ mod tests {
             1,
             MockupMutationInput {
                 external_id: "mockup-login".into(),
-                expected_revision: 2,
+                operation_id: "mockup-test-2".to_string(),
+                expected_accepted_version: 1,
+                expected_working_version: 2,
             },
         )
         .unwrap();
@@ -1166,5 +1382,52 @@ mod tests {
         assert_eq!(stored.status, "proposed");
         assert_eq!(stored.accepted_svg, SAFE);
         assert!(stored.proposal.is_some());
+    }
+    #[test]
+    fn disjoint_mockups_from_one_snapshot_both_commit_and_same_mockup_conflicts() {
+        let mut db = database();
+        let first = create_mockup(&mut db, 1, create_input(0)).unwrap();
+        let mut second_input = create_input(0);
+        second_input.external_id = "mockup-second".into();
+        second_input.title = "Second".into();
+        second_input.operation_id = "create-second".into();
+        let second = create_mockup(&mut db, 1, second_input).unwrap();
+
+        let save = |external_id: &str, operation_id: &str, fill: &str| SaveDraftInput {
+            external_id: external_id.into(),
+            working_svg: SAFE.replace("#fff", fill),
+            base_revision: 1,
+            operation_id: operation_id.into(),
+            expected_accepted_version: 1,
+            expected_working_version: 1,
+            edit_operations: vec![],
+            annotations: vec![],
+        };
+        let second_saved = save_draft(
+            &mut db,
+            1,
+            save(&second.external_id, "draft-second", "#ddd"),
+        )
+        .unwrap();
+        let first_saved =
+            save_draft(&mut db, 1, save(&first.external_id, "draft-first", "#eee")).unwrap();
+        assert_eq!(second_saved.working_version, 2);
+        assert_eq!(first_saved.working_version, 2);
+
+        let stale = save_draft(
+            &mut db,
+            1,
+            save(&first.external_id, "draft-first-stale", "#ccc"),
+        )
+        .unwrap_err();
+        let conflict: serde_json::Value = serde_json::from_str(&stale).unwrap();
+        assert_eq!(conflict["conflicts"][0]["resourceKind"], "mockup.working");
+        assert_eq!(
+            load_mockup(&db, 1, &first.external_id)
+                .unwrap()
+                .working_svg
+                .as_deref(),
+            first_saved.working_svg.as_deref()
+        );
     }
 }

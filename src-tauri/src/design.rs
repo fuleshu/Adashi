@@ -1,13 +1,14 @@
-use crate::{mockups, state};
+use crate::{concurrency, mockups, state};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct DesignElementRecord {
+    pub version: i64,
     pub external_id: String,
     pub parent_external_id: Option<String>,
     pub element_type: String,
@@ -18,9 +19,10 @@ pub struct DesignElementRecord {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct DesignRelationshipRecord {
+    pub version: i64,
     pub external_id: String,
     pub source_external_id: String,
     pub destination_external_id: String,
@@ -30,9 +32,10 @@ pub struct DesignRelationshipRecord {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct DesignDiagramRecord {
+    pub version: i64,
     pub key: String,
     pub language: String,
     pub title: String,
@@ -47,7 +50,7 @@ pub struct DesignDiagramRecord {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct DesignArtifactTypeRecord {
     pub diagram_type: String,
@@ -59,9 +62,10 @@ pub struct DesignArtifactTypeRecord {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct DesignBindingRecord {
+    pub version: i64,
     pub design_external_id: String,
     pub target_type: String,
     pub target: String,
@@ -184,7 +188,7 @@ pub struct ElementDescriptionUpdate {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct DesignOverviewResult {
     pub revision: i64,
@@ -200,7 +204,7 @@ pub struct DesignOverviewResult {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct DesignScopeResult {
     pub revision: i64,
@@ -216,7 +220,7 @@ pub struct DesignScopeResult {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct DesignSearchResult {
     pub revision: i64,
@@ -224,7 +228,7 @@ pub struct DesignSearchResult {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct DesignSearchHit {
     pub kind: String,
@@ -234,7 +238,7 @@ pub struct DesignSearchHit {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct DesignByIdsResult {
     pub revision: i64,
@@ -247,7 +251,7 @@ pub struct DesignByIdsResult {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct DesignBindingsResult {
     pub revision: i64,
@@ -259,8 +263,8 @@ pub struct DesignBindingsResult {
     pub mockups: Vec<mockups::MockupSummary>,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct DesignSaveResult {
     pub ok: bool,
@@ -271,8 +275,8 @@ pub struct DesignSaveResult {
     pub errors: Vec<DesignCorrection>,
 }
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct DesignCorrection {
     pub code: String,
@@ -592,23 +596,131 @@ pub fn load_by_bindings(
     })
 }
 
+pub trait DesignGuardInput {
+    fn resolve_for_changes(
+        self,
+        db: &Connection,
+        project_id: i64,
+        changes: &[DesignChange],
+    ) -> Result<concurrency::MutationGuard, String>;
+    fn resolve_for_descriptions(
+        self,
+        db: &Connection,
+        project_id: i64,
+        updates: &[ElementDescriptionUpdate],
+    ) -> Result<concurrency::MutationGuard, String>;
+}
+
+impl DesignGuardInput for &concurrency::MutationGuard {
+    fn resolve_for_changes(
+        self,
+        _db: &Connection,
+        _project_id: i64,
+        _changes: &[DesignChange],
+    ) -> Result<concurrency::MutationGuard, String> {
+        Ok(self.clone())
+    }
+    fn resolve_for_descriptions(
+        self,
+        _db: &Connection,
+        _project_id: i64,
+        _updates: &[ElementDescriptionUpdate],
+    ) -> Result<concurrency::MutationGuard, String> {
+        Ok(self.clone())
+    }
+}
+
+#[cfg(test)]
+impl DesignGuardInput for i64 {
+    fn resolve_for_changes(
+        self,
+        db: &Connection,
+        project_id: i64,
+        changes: &[DesignChange],
+    ) -> Result<concurrency::MutationGuard, String> {
+        let workspace = load_workspace(db)?;
+        let mut writes = std::collections::BTreeSet::new();
+        let mut reads = std::collections::BTreeSet::new();
+        for change in changes {
+            let (required_writes, required_reads) =
+                required_resources(db, project_id, workspace.id, change)?;
+            for target in required_writes {
+                writes.insert((target.kind, target.id));
+            }
+            for read in required_reads {
+                reads.insert(read);
+            }
+        }
+        for write in &writes {
+            reads.remove(write);
+        }
+        let expectation = |(resource_kind, resource_id): (String, String)| -> Result<concurrency::ResourceExpectation, String> {
+            let expected_version = concurrency::load_version(db, project_id, &resource_kind, &resource_id)?;
+            Ok(concurrency::ResourceExpectation { resource_kind, resource_id, expected_version })
+        };
+        Ok(concurrency::MutationGuard {
+            operation_id: format!(
+                "design-test-{self}-{}-{}",
+                state::load_project_revision(db, project_id)?.revision,
+                changes.len()
+            ),
+            read_set: reads
+                .into_iter()
+                .map(expectation)
+                .collect::<Result<Vec<_>, _>>()?,
+            write_set: writes
+                .into_iter()
+                .map(expectation)
+                .collect::<Result<Vec<_>, _>>()?,
+        })
+    }
+
+    fn resolve_for_descriptions(
+        self,
+        db: &Connection,
+        project_id: i64,
+        updates: &[ElementDescriptionUpdate],
+    ) -> Result<concurrency::MutationGuard, String> {
+        let mut write_set = Vec::new();
+        for update in updates {
+            let resource_id = update.external_id.trim().to_string();
+            write_set.push(concurrency::ResourceExpectation {
+                expected_version: concurrency::load_version(
+                    db,
+                    project_id,
+                    "design.element",
+                    &resource_id,
+                )?,
+                resource_kind: "design.element".to_string(),
+                resource_id,
+            });
+        }
+        Ok(concurrency::MutationGuard {
+            operation_id: format!(
+                "description-test-{self}-{}-{}",
+                state::load_project_revision(db, project_id)?.revision,
+                updates.len()
+            ),
+            read_set: Vec::new(),
+            write_set,
+        })
+    }
+}
+
 pub fn save_changes(
     db: &mut Connection,
     project_id: i64,
-    expected_revision: i64,
+    guard: impl DesignGuardInput,
     change_intent: &str,
     changes: &[DesignChange],
 ) -> Result<DesignSaveResult, String> {
+    let guard = guard.resolve_for_changes(db, project_id, changes)?;
     let current_revision = state::load_project_revision(db, project_id)?.revision;
-    if current_revision != expected_revision {
-        return Ok(failed_save(
-            current_revision,
-            "revision.stale",
-            format!("Expected revision {expected_revision}, but current revision is {current_revision}."),
-            "Reload the design overview and resubmit the full changeset against the current revision.",
-        ));
+    if let Some(replayed) =
+        concurrency::load_operation::<DesignSaveResult>(db, project_id, &guard.operation_id)?
+    {
+        return Ok(replayed);
     }
-
     if change_intent.trim().is_empty() {
         return Ok(failed_save(
             current_revision,
@@ -617,23 +729,43 @@ pub fn save_changes(
             "Describe the design change intent and resubmit the full changeset.",
         ));
     }
-
     if changes.is_empty() {
         return Ok(failed_save(
             current_revision,
             "save.empty_changeset",
             "Design save requires at least one change.",
-            "Submit the C4, UML, or binding changes that make up the completed design update.",
+            "Submit the C4, UML, binding, or mockup changes that make up the completed design update.",
         ));
     }
 
-    let tx = db.transaction().map_err(|err| err.to_string())?;
+    let tx = db.transaction().map_err(|error| error.to_string())?;
+    concurrency::validate_guard(&tx, project_id, &guard)?;
     let workspace = load_workspace(&tx)?;
     let mut changed_count = 0;
+    let mut changed_resources = Vec::new();
+    let mut declared_resources = HashSet::new();
 
     for change in changes {
+        let (writes, reads) = required_resources(&tx, project_id, workspace.id, change)?;
+        validate_declared_resources(&guard, &writes, &reads)?;
+        for target in &writes {
+            if !declared_resources.insert((target.kind.clone(), target.id.clone())) {
+                return Ok(failed_save(
+                    current_revision,
+                    "save.duplicate_resource",
+                    format!(
+                        "Resource '{}:{}' is changed more than once in one design transaction.",
+                        target.kind, target.id
+                    ),
+                    "Combine repeated edits into one final operation per resource.",
+                ));
+            }
+        }
         match apply_change(&tx, project_id, workspace.id, change) {
-            Ok(true) => changed_count += 1,
+            Ok(true) => {
+                changed_count += 1;
+                changed_resources.extend(writes);
+            }
             Ok(false) => {}
             Err(message) => {
                 return Ok(failed_save(
@@ -647,11 +779,14 @@ pub fn save_changes(
     }
 
     if changed_count == 0 {
-        return Ok(no_changes_save(
+        let result = no_changes_save(
             current_revision,
             "The submitted changeset is already reflected in the stored design.",
-            "Do not resubmit the same payload. Re-evaluate whether the selected operation matches the intended artifact, or continue with the next distinct change.",
-        ));
+            "Do not resubmit the same payload. Continue with the next distinct change.",
+        );
+        tx.rollback().map_err(|error| error.to_string())?;
+        concurrency::record_no_op(db, project_id, &guard.operation_id, &result)?;
+        return Ok(result);
     }
 
     finish_design_transaction(
@@ -660,25 +795,23 @@ pub fn save_changes(
         workspace.id,
         current_revision,
         changed_count,
+        &guard.operation_id,
+        &changed_resources,
     )
 }
 
 pub fn set_element_descriptions(
     db: &mut Connection,
     project_id: i64,
-    expected_revision: i64,
+    guard: impl DesignGuardInput,
     updates: &[ElementDescriptionUpdate],
 ) -> Result<DesignSaveResult, String> {
+    let guard = guard.resolve_for_descriptions(db, project_id, updates)?;
     let current_revision = state::load_project_revision(db, project_id)?.revision;
-    if current_revision != expected_revision {
-        return Ok(failed_save(
-            current_revision,
-            "revision.stale",
-            format!(
-                "Expected revision {expected_revision}, but current revision is {current_revision}."
-            ),
-            "Reload the design overview and resubmit the description updates against the current revision.",
-        ));
+    if let Some(replayed) =
+        concurrency::load_operation::<DesignSaveResult>(db, project_id, &guard.operation_id)?
+    {
+        return Ok(replayed);
     }
     if updates.is_empty() {
         return Ok(failed_save(
@@ -718,8 +851,19 @@ pub fn set_element_descriptions(
         }
     }
 
-    let tx = db.transaction().map_err(|err| err.to_string())?;
+    let tx = db.transaction().map_err(|error| error.to_string())?;
+    concurrency::validate_guard(&tx, project_id, &guard)?;
     let workspace = load_workspace(&tx)?;
+    let targets = updates
+        .iter()
+        .map(|update| ResourceChangeTarget {
+            kind: "design.element".to_string(),
+            id: update.external_id.trim().to_string(),
+            delete: false,
+        })
+        .collect::<Vec<_>>();
+    validate_declared_resources(&guard, &targets, &[])?;
+
     let mut changed_count = 0;
     for update in updates {
         let external_id = update.external_id.trim();
@@ -728,39 +872,41 @@ pub fn set_element_descriptions(
             .query_row(
                 "SELECT description
                  FROM c4_elements
-                 WHERE workspace_id = ?1 AND external_id = ?2",
+                 WHERE workspace_id=?1 AND external_id=?2",
                 params![workspace.id, external_id],
                 |row| row.get::<_, String>(0),
             )
             .optional()
-            .map_err(|err| err.to_string())?;
+            .map_err(|error| error.to_string())?;
         let Some(existing) = existing else {
             return Ok(failed_save(
                 current_revision,
                 "description.unknown_element",
                 format!("Cannot update description for unknown C4 element '{external_id}'."),
-                "Use an externalId returned by design retrieval. Create missing elements through the advanced mixed design save only when creation is intended.",
+                "Use an externalId returned by design retrieval.",
             ));
         };
         if existing == description {
             continue;
         }
         tx.execute(
-            "UPDATE c4_elements
-             SET description = ?1
-             WHERE workspace_id = ?2 AND external_id = ?3",
+            "UPDATE c4_elements SET description=?1
+             WHERE workspace_id=?2 AND external_id=?3",
             params![description, workspace.id, external_id],
         )
-        .map_err(|err| err.to_string())?;
+        .map_err(|error| error.to_string())?;
         changed_count += 1;
     }
 
     if changed_count == 0 {
-        return Ok(no_changes_save(
+        let result = no_changes_save(
             current_revision,
             "Every submitted element already has the requested description.",
-            "Do not resubmit the same descriptions. Continue with the next element or finish the task.",
-        ));
+            "Do not resubmit the same descriptions.",
+        );
+        tx.rollback().map_err(|error| error.to_string())?;
+        concurrency::record_no_op(db, project_id, &guard.operation_id, &result)?;
+        return Ok(result);
     }
 
     finish_design_transaction(
@@ -769,6 +915,8 @@ pub fn set_element_descriptions(
         workspace.id,
         current_revision,
         changed_count,
+        &guard.operation_id,
+        &targets,
     )
 }
 
@@ -778,51 +926,309 @@ fn finish_design_transaction(
     workspace_id: i64,
     current_revision: i64,
     changed_count: usize,
+    operation_id: &str,
+    changed_resources: &[ResourceChangeTarget],
 ) -> Result<DesignSaveResult, String> {
     let mut errors = validate_workspace(&tx, workspace_id)?;
-    if errors.is_empty() {
-        let dsl = build_structurizr_dsl(&tx, workspace_id)?;
-        let json_source = build_structurizr_json_source(&tx, workspace_id)?;
-        tx.execute(
-            "UPDATE design_workspaces
-             SET structurizr_dsl = ?1,
-                 structurizr_json = ?2,
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE id = ?3",
-            params![dsl, json_source, workspace_id],
-        )
-        .map_err(|err| err.to_string())?;
-        tx.execute(
-            "UPDATE diagrams
-             SET source = ?1,
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE workspace_id = ?2 AND kind = 'structurizr'",
-            params![json_source, workspace_id],
-        )
-        .map_err(|err| err.to_string())?;
-        state::bump_project_revision(&tx, project_id)?;
-        let revision = state::load_project_revision(&tx, project_id)?.revision;
-        tx.commit().map_err(|err| err.to_string())?;
-
-        Ok(DesignSaveResult {
-            ok: true,
-            stored: true,
-            correction_required: false,
-            revision,
-            changed_count,
-            errors,
-        })
-    } else {
+    if !errors.is_empty() {
         errors.sort_by(|left, right| left.code.cmp(&right.code));
-        Ok(DesignSaveResult {
+        return Ok(DesignSaveResult {
             ok: false,
             stored: false,
             correction_required: true,
             revision: current_revision,
             changed_count: 0,
             errors,
-        })
+        });
     }
+
+    let dsl = build_structurizr_dsl(&tx, workspace_id)?;
+    let json_source = build_structurizr_json_source(&tx, workspace_id)?;
+    tx.execute(
+        "UPDATE design_workspaces
+         SET structurizr_dsl=?1, structurizr_json=?2, updated_at=CURRENT_TIMESTAMP
+         WHERE id=?3",
+        params![dsl, json_source, workspace_id],
+    )
+    .map_err(|error| error.to_string())?;
+    tx.execute(
+        "UPDATE diagrams SET source=?1, updated_at=CURRENT_TIMESTAMP
+         WHERE workspace_id=?2 AND kind='structurizr'",
+        params![json_source, workspace_id],
+    )
+    .map_err(|error| error.to_string())?;
+
+    let mut seen = HashSet::new();
+    for resource in changed_resources {
+        if !seen.insert((resource.kind.as_str(), resource.id.as_str())) {
+            continue;
+        }
+        if resource.delete {
+            concurrency::tombstone_version(&tx, project_id, &resource.kind, &resource.id)?;
+        } else {
+            concurrency::bump_version(&tx, project_id, &resource.kind, &resource.id)?;
+        }
+    }
+    let revision = state::bump_project_revision(&tx, project_id)?.revision;
+    let result = DesignSaveResult {
+        ok: true,
+        stored: true,
+        correction_required: false,
+        revision,
+        changed_count,
+        errors,
+    };
+    concurrency::record_no_op(&tx, project_id, operation_id, &result)?;
+    tx.commit().map_err(|error| error.to_string())?;
+    Ok(result)
+}
+
+#[derive(Clone, Debug)]
+struct ResourceChangeTarget {
+    kind: String,
+    id: String,
+    delete: bool,
+}
+
+fn validate_declared_resources(
+    guard: &concurrency::MutationGuard,
+    writes: &[ResourceChangeTarget],
+    reads: &[(String, String)],
+) -> Result<(), String> {
+    for target in writes {
+        concurrency::require_write_target(guard, &target.kind, &target.id)?;
+    }
+    for (kind, id) in reads {
+        let declared = guard
+            .read_set
+            .iter()
+            .chain(&guard.write_set)
+            .any(|resource| {
+                resource.resource_kind.trim() == kind && resource.resource_id.trim() == id
+            });
+        if !declared {
+            return Err(format!("readSet must contain resource '{kind}:{id}'"));
+        }
+    }
+    Ok(())
+}
+
+fn required_resources(
+    db: &Connection,
+    project_id: i64,
+    workspace_id: i64,
+    change: &DesignChange,
+) -> Result<(Vec<ResourceChangeTarget>, Vec<(String, String)>), String> {
+    let target = |kind: &str, id: &str, delete| ResourceChangeTarget {
+        kind: kind.to_string(),
+        id: id.trim().to_string(),
+        delete,
+    };
+    let mut writes = Vec::new();
+    let mut reads = Vec::new();
+    match change {
+        DesignChange::UpsertElement {
+            external_id,
+            parent_external_id,
+            ..
+        } => {
+            writes.push(target("design.element", external_id, false));
+            if let Some(parent) = parent_external_id
+                .as_deref()
+                .filter(|id| !id.trim().is_empty())
+            {
+                reads.push(("design.element".to_string(), parent.trim().to_string()));
+            }
+        }
+        DesignChange::UpsertRelationship {
+            external_id,
+            source_external_id,
+            destination_external_id,
+            ..
+        } => {
+            writes.push(target("design.relationship", external_id, false));
+            reads.push((
+                "design.element".to_string(),
+                source_external_id.trim().to_string(),
+            ));
+            reads.push((
+                "design.element".to_string(),
+                destination_external_id.trim().to_string(),
+            ));
+        }
+        DesignChange::UpsertUml {
+            key,
+            attached_to_external_id,
+            ..
+        } => {
+            writes.push(target("design.uml", key, false));
+            reads.push(resolve_design_identity(
+                db,
+                workspace_id,
+                attached_to_external_id,
+            )?);
+        }
+        DesignChange::UpsertBinding {
+            design_external_id,
+            target_type,
+            target: binding_target,
+        } => {
+            writes.push(target(
+                "design.binding",
+                &format!(
+                    "{}|{}|{}",
+                    design_external_id.trim(),
+                    target_type.trim(),
+                    binding_target.trim()
+                ),
+                false,
+            ));
+            reads.push(resolve_design_identity(
+                db,
+                workspace_id,
+                design_external_id,
+            )?);
+        }
+        DesignChange::UpsertMockup {
+            external_id,
+            attached_to_external_id,
+            ..
+        } => {
+            writes.push(target("mockup.accepted", external_id, false));
+            writes.push(target("mockup.working", external_id, false));
+            reads.push((
+                "design.element".to_string(),
+                attached_to_external_id.trim().to_string(),
+            ));
+        }
+        DesignChange::UpsertMockupProposal { external_id, .. } => {
+            writes.push(target("mockup.working", external_id, false));
+            reads.push((
+                "mockup.accepted".to_string(),
+                external_id.trim().to_string(),
+            ));
+        }
+        DesignChange::DeleteElement { external_id } => {
+            let elements = load_elements(db, workspace_id)?;
+            let element_ids = collect_descendants(&elements, external_id.trim(), None);
+            if element_ids.is_empty() {
+                writes.push(target("design.element", external_id, true));
+            } else {
+                for id in &element_ids {
+                    writes.push(target("design.element", id, true));
+                }
+                let relationships = load_relationships(db, workspace_id)?
+                    .into_iter()
+                    .filter(|relationship| {
+                        element_ids.contains(&relationship.source_external_id)
+                            || element_ids.contains(&relationship.destination_external_id)
+                    })
+                    .collect::<Vec<_>>();
+                let mut attached_ids = element_ids.clone();
+                for relationship in &relationships {
+                    writes.push(target(
+                        "design.relationship",
+                        &relationship.external_id,
+                        true,
+                    ));
+                    attached_ids.insert(relationship.external_id.clone());
+                }
+                let diagrams = load_diagrams(db, workspace_id)?
+                    .into_iter()
+                    .filter(|diagram| {
+                        diagram.language == "mermaid"
+                            && diagram
+                                .attached_to_external_id
+                                .as_ref()
+                                .is_some_and(|id| attached_ids.contains(id))
+                    })
+                    .collect::<Vec<_>>();
+                let mut design_ids = attached_ids;
+                for diagram in &diagrams {
+                    writes.push(target("design.uml", &diagram.key, true));
+                    design_ids.insert(diagram.key.clone());
+                }
+                for binding in load_bindings(db, workspace_id)? {
+                    if design_ids.contains(&binding.design_external_id) {
+                        writes.push(target(
+                            "design.binding",
+                            &format!(
+                                "{}|{}|{}",
+                                binding.design_external_id, binding.target_type, binding.target
+                            ),
+                            true,
+                        ));
+                    }
+                }
+                for mockup in mockups::load_summaries(db, project_id)? {
+                    if design_ids.contains(&mockup.attached_to_external_id) {
+                        writes.push(target("mockup.accepted", &mockup.external_id, true));
+                        writes.push(target("mockup.working", &mockup.external_id, true));
+                    }
+                }
+            }
+        }
+        DesignChange::DeleteRelationship { external_id } => {
+            writes.push(target("design.relationship", external_id, true));
+        }
+        DesignChange::DeleteUml { key } => {
+            writes.push(target("design.uml", key, true));
+        }
+        DesignChange::DeleteBinding {
+            design_external_id,
+            target_type,
+            target: binding_target,
+        } => {
+            writes.push(target(
+                "design.binding",
+                &format!(
+                    "{}|{}|{}",
+                    design_external_id.trim(),
+                    target_type.trim(),
+                    binding_target.trim()
+                ),
+                true,
+            ));
+        }
+        DesignChange::DeleteMockup { external_id } => {
+            writes.push(target("mockup.accepted", external_id, true));
+            writes.push(target("mockup.working", external_id, true));
+        }
+    }
+    Ok((writes, reads))
+}
+
+fn resolve_design_identity(
+    db: &Connection,
+    workspace_id: i64,
+    external_id: &str,
+) -> Result<(String, String), String> {
+    let id = external_id.trim();
+    if db
+        .query_row(
+            "SELECT 1 FROM c4_elements WHERE workspace_id=?1 AND external_id=?2",
+            params![workspace_id, id],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?
+        .is_some()
+    {
+        return Ok(("design.element".to_string(), id.to_string()));
+    }
+    if db
+        .query_row(
+            "SELECT 1 FROM c4_relationships WHERE workspace_id=?1 AND external_id=?2",
+            params![workspace_id, id],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?
+        .is_some()
+    {
+        return Ok(("design.relationship".to_string(), id.to_string()));
+    }
+    Err(format!("Unknown attached design resource '{id}'"))
 }
 
 fn apply_change(
@@ -1027,7 +1433,9 @@ fn apply_change(
                 fidelity: required(Some(fidelity), "fidelity")?.to_string(),
                 schema_version: *schema_version,
                 accepted_svg: required(Some(accepted_svg), "acceptedSvg")?.to_string(),
-                expected_revision: 0,
+                operation_id: "design-transaction".to_string(),
+                expected_accepted_version: 0,
+                expected_working_version: 0,
             };
             mockups::upsert_initial_in_transaction(db, project_id, &input)?
         }
@@ -1042,7 +1450,9 @@ fn apply_change(
                 base_revision: *base_revision,
                 proposed_svg: required(Some(proposed_svg), "proposedSvg")?.to_string(),
                 proposed_manifest: proposed_manifest.clone(),
-                expected_revision: 0,
+                operation_id: "design-transaction".to_string(),
+                expected_accepted_version: 0,
+                expected_working_version: 0,
             };
             mockups::upsert_proposal_in_transaction(db, project_id, &input)?
         }
@@ -1768,15 +2178,21 @@ fn load_workspace(db: &Connection) -> Result<WorkspaceRecord, String> {
 fn load_elements(db: &Connection, workspace_id: i64) -> Result<Vec<DesignElementRecord>, String> {
     let mut statement = db
         .prepare(
-            "SELECT external_id, parent_external_id, element_type, name, description, technology, tags
-             FROM c4_elements
-             WHERE workspace_id = ?1
-             ORDER BY parent_external_id IS NOT NULL, parent_external_id, id",
+            "SELECT e.external_id, e.parent_external_id, e.element_type, e.name, e.description, e.technology, e.tags,
+                    COALESCE(rv.version, 0)
+             FROM c4_elements e
+             JOIN design_workspaces w ON w.id=e.workspace_id
+             LEFT JOIN resource_versions rv
+               ON rv.project_id=w.project_id AND rv.resource_kind='design.element'
+              AND rv.resource_id=e.external_id
+             WHERE e.workspace_id = ?1
+             ORDER BY e.parent_external_id IS NOT NULL, e.parent_external_id, e.id",
         )
         .map_err(|err| err.to_string())?;
     let rows = statement
         .query_map(params![workspace_id], |row| {
             Ok(DesignElementRecord {
+                version: row.get(7)?,
                 external_id: row.get(0)?,
                 parent_external_id: row.get(1)?,
                 element_type: row.get(2)?,
@@ -1798,15 +2214,21 @@ fn load_relationships(
 ) -> Result<Vec<DesignRelationshipRecord>, String> {
     let mut statement = db
         .prepare(
-            "SELECT external_id, source_external_id, destination_external_id, description, technology, tags
-             FROM c4_relationships
-             WHERE workspace_id = ?1
-             ORDER BY id",
+            "SELECT r.external_id, r.source_external_id, r.destination_external_id, r.description, r.technology, r.tags,
+                    COALESCE(rv.version, 0)
+             FROM c4_relationships r
+             JOIN design_workspaces w ON w.id=r.workspace_id
+             LEFT JOIN resource_versions rv
+               ON rv.project_id=w.project_id AND rv.resource_kind='design.relationship'
+              AND rv.resource_id=r.external_id
+             WHERE r.workspace_id = ?1
+             ORDER BY r.id",
         )
         .map_err(|err| err.to_string())?;
     let rows = statement
         .query_map(params![workspace_id], |row| {
             Ok(DesignRelationshipRecord {
+                version: row.get(6)?,
                 external_id: row.get(0)?,
                 source_external_id: row.get(1)?,
                 destination_external_id: row.get(2)?,
@@ -1836,8 +2258,13 @@ fn load_diagrams(db: &Connection, workspace_id: i64) -> Result<Vec<DesignDiagram
                     WHEN r.external_id IS NOT NULL THEN 'relationship'
                     ELSE NULL
                 END AS attached_to_target_type,
-                d.sort_order
+                d.sort_order,
+                COALESCE(rv.version, 0)
              FROM diagrams d
+             JOIN design_workspaces w ON w.id=d.workspace_id
+             LEFT JOIN resource_versions rv
+                ON rv.project_id=w.project_id AND rv.resource_kind='design.uml'
+                AND rv.resource_id=d.key
              LEFT JOIN c4_elements e
                 ON e.workspace_id = d.workspace_id
                 AND e.external_id = d.attached_to_external_id
@@ -1852,6 +2279,7 @@ fn load_diagrams(db: &Connection, workspace_id: i64) -> Result<Vec<DesignDiagram
         .query_map(params![workspace_id], |row| {
             let diagram_type: String = row.get(4)?;
             Ok(DesignDiagramRecord {
+                version: row.get(8)?,
                 language: row.get(0)?,
                 key: row.get(1)?,
                 title: row.get(2)?,
@@ -1874,15 +2302,20 @@ fn load_diagrams(db: &Connection, workspace_id: i64) -> Result<Vec<DesignDiagram
 fn load_bindings(db: &Connection, workspace_id: i64) -> Result<Vec<DesignBindingRecord>, String> {
     let mut statement = db
         .prepare(
-            "SELECT design_external_id, target_type, target
-             FROM design_bindings
-             WHERE workspace_id = ?1
-             ORDER BY target_type, target, design_external_id",
+            "SELECT b.design_external_id, b.target_type, b.target, COALESCE(rv.version, 0)
+             FROM design_bindings b
+             JOIN design_workspaces w ON w.id=b.workspace_id
+             LEFT JOIN resource_versions rv
+               ON rv.project_id=w.project_id AND rv.resource_kind='design.binding'
+              AND rv.resource_id=b.design_external_id || '|' || b.target_type || '|' || b.target
+             WHERE b.workspace_id = ?1
+             ORDER BY b.target_type, b.target, b.design_external_id",
         )
         .map_err(|err| err.to_string())?;
     let rows = statement
         .query_map(params![workspace_id], |row| {
             Ok(DesignBindingRecord {
+                version: row.get(3)?,
                 design_external_id: row.get(0)?,
                 target_type: row.get(1)?,
                 target: row.get(2)?,
@@ -2929,6 +3362,8 @@ mod tests {
     fn setup_design_workspace() -> (Connection, i64, i64) {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(include_str!("schema.sql")).unwrap();
+        db.execute_batch(include_str!("concurrency_schema.sql"))
+            .unwrap();
         db.execute(
             "INSERT INTO projects(name, slug, repository_path)
              VALUES ('Test Project', 'test-project', NULL)",
@@ -3016,5 +3451,51 @@ mod tests {
                 "schema does not require {field}: {schema}"
             );
         }
+    }
+    #[test]
+    fn structural_delete_rejects_a_changed_dependent_without_partial_storage() {
+        let (mut db, project_id, workspace_id) = setup_design_workspace();
+        insert_minimal_design(&db, workspace_id);
+        let changes = [DesignChange::DeleteElement {
+            external_id: "component-a".to_string(),
+        }];
+        let guard = 0i64.resolve_for_changes(&db, project_id, &changes).unwrap();
+        concurrency::bump_version(&db, project_id, "design.relationship", "placeholder-rel")
+            .unwrap();
+
+        let error = save_changes(
+            &mut db,
+            project_id,
+            &guard,
+            "Delete changed branch",
+            &changes,
+        )
+        .unwrap_err();
+        let conflict: serde_json::Value = serde_json::from_str(&error).unwrap();
+        assert_eq!(conflict["conflicts"][0]["resourceId"], "placeholder-rel");
+        assert_eq!(
+            db.query_row(
+                "SELECT COUNT(*) FROM c4_elements WHERE external_id='component-a'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT COUNT(*) FROM c4_relationships WHERE external_id='placeholder-rel'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            state::load_project_revision(&db, project_id)
+                .unwrap()
+                .revision,
+            0
+        );
     }
 }

@@ -1,11 +1,14 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+use crate::concurrency;
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct Task {
     pub id: i64,
+    pub version: i64,
     pub number: i64,
     pub title: String,
     pub description: String,
@@ -22,7 +25,7 @@ pub struct Task {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct TaskDesignSpecificationLink {
     pub id: i64,
@@ -34,7 +37,7 @@ pub struct TaskDesignSpecificationLink {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct TaskDesignSpecificationLinkInput {
     pub target_type: Option<String>,
@@ -42,7 +45,7 @@ pub struct TaskDesignSpecificationLinkInput {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct NewTask {
     pub title: String,
@@ -51,7 +54,7 @@ pub struct NewTask {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct UpdateTask {
     pub task_id: i64,
@@ -62,7 +65,7 @@ pub struct UpdateTask {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct FinishTask {
     pub task_id: i64,
@@ -92,13 +95,13 @@ pub fn load_tasks(
                 .map(|states| states.contains(&task.state))
                 .unwrap_or(true)
         })
-        .map(|task| hydrate_task(db, task))
+        .map(|task| hydrate_task(db, project_id, task))
         .collect()
 }
 
 pub fn load_task(db: &Connection, project_id: i64, task_id: i64) -> Result<Task, String> {
     let task = load_task_row(db, project_id, task_id)?;
-    hydrate_task(db, task)
+    hydrate_task(db, project_id, task)
 }
 
 pub fn create_task(db: &Connection, project_id: i64, input: NewTask) -> Result<Task, String> {
@@ -234,10 +237,11 @@ pub fn delete_task(db: &Connection, project_id: i64, task_id: i64) -> Result<(),
     Ok(())
 }
 
-fn hydrate_task(db: &Connection, task: TaskRow) -> Result<Task, String> {
+fn hydrate_task(db: &Connection, project_id: i64, task: TaskRow) -> Result<Task, String> {
     let links = load_design_links(db, task.id)?;
     Ok(Task {
         id: task.id,
+        version: concurrency::load_version(db, project_id, "task", &task.id.to_string())?,
         number: task.number,
         title: task.title,
         description: task.description,

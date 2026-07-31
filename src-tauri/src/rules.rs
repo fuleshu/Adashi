@@ -7,10 +7,11 @@ pub const INTENDS: &[&str] = &["general", "design", "implementation"];
 pub const HOOKS: &[&str] = &["run.start", "task.start", "task.end", "run.end"];
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct Rule {
     pub id: i64,
+    pub version: i64,
     pub name: String,
     pub enabled: bool,
     pub intend: String,
@@ -19,10 +20,11 @@ pub struct Rule {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct InjectionRule {
     pub id: i64,
+    pub version: i64,
     pub enabled: bool,
     pub intend: String,
     pub hook: String,
@@ -30,7 +32,7 @@ pub struct InjectionRule {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct NewRule {
     pub name: String,
@@ -41,7 +43,7 @@ pub struct NewRule {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UpdateRule {
     pub id: i64,
     pub name: String,
@@ -54,8 +56,11 @@ pub struct UpdateRule {
 pub fn load_rules(db: &Connection) -> Result<Vec<Rule>, String> {
     let mut statement = db
         .prepare(
-            "SELECT id, name, enabled, intend, hook, prompt
-             FROM rules
+            "SELECT r.id, r.name, r.enabled, r.intend, r.hook, r.prompt, COALESCE(rv.version, 0)
+             FROM rules r
+             LEFT JOIN resource_versions rv
+               ON rv.project_id=r.project_id AND rv.resource_kind='rule'
+              AND rv.resource_id=CAST(r.id AS TEXT)
              ORDER BY
                 CASE hook
                     WHEN 'run.start' THEN 1
@@ -73,6 +78,7 @@ pub fn load_rules(db: &Connection) -> Result<Vec<Rule>, String> {
         .query_map([], |row| {
             Ok(Rule {
                 id: row.get(0)?,
+                version: row.get(6)?,
                 name: row.get(1)?,
                 enabled: row.get::<_, i64>(2)? != 0,
                 intend: row.get(3)?,
@@ -88,13 +94,16 @@ pub fn load_rules(db: &Connection) -> Result<Vec<Rule>, String> {
 
 pub fn load_rule(db: &Connection, rule_id: i64) -> Result<Rule, String> {
     db.query_row(
-        "SELECT id, name, enabled, intend, hook, prompt
-         FROM rules
-         WHERE id = ?1",
+        "SELECT r.id, r.name, r.enabled, r.intend, r.hook, r.prompt, COALESCE(rv.version, 0)
+         FROM rules r
+         LEFT JOIN resource_versions rv
+           ON rv.project_id=r.project_id AND rv.resource_kind='rule' AND rv.resource_id=CAST(r.id AS TEXT)
+         WHERE r.id = ?1",
         params![rule_id],
         |row| {
             Ok(Rule {
                 id: row.get(0)?,
+                version: row.get(6)?,
                 name: row.get(1)?,
                 enabled: row.get::<_, i64>(2)? != 0,
                 intend: row.get(3)?,
@@ -119,9 +128,12 @@ pub fn load_rule_injections(
 
     let mut statement = db
         .prepare(
-            "SELECT id, enabled, intend, hook, prompt
-             FROM rules
-             WHERE enabled = 1 AND intend = ?1 AND hook = ?2
+            "SELECT r.id, r.enabled, r.intend, r.hook, r.prompt, COALESCE(rv.version, 0)
+             FROM rules r
+             LEFT JOIN resource_versions rv
+               ON rv.project_id=r.project_id AND rv.resource_kind='rule'
+              AND rv.resource_id=CAST(r.id AS TEXT)
+             WHERE r.enabled = 1 AND intend = ?1 AND hook = ?2
              ORDER BY id",
         )
         .map_err(|err| err.to_string())?;
@@ -129,6 +141,7 @@ pub fn load_rule_injections(
         .query_map(params![intend, hook], |row| {
             Ok(InjectionRule {
                 id: row.get(0)?,
+                version: row.get(5)?,
                 enabled: row.get::<_, i64>(1)? != 0,
                 intend: row.get(2)?,
                 hook: row.get(3)?,
@@ -274,6 +287,13 @@ mod tests {
                 prompt TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE resource_versions (
+                project_id INTEGER NOT NULL,
+                resource_kind TEXT NOT NULL,
+                resource_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                PRIMARY KEY(project_id, resource_kind, resource_id)
             );",
         )
         .unwrap();

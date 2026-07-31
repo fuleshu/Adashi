@@ -1,5 +1,6 @@
 #![cfg_attr(not(feature = "desktop"), allow(dead_code))]
 
+mod concurrency;
 mod design;
 mod fixed_hooks;
 mod mcp;
@@ -17,6 +18,7 @@ mod tasks;
 #[cfg(test)]
 pub(crate) use project::open_project_database;
 #[cfg(feature = "desktop")]
+#[path = "desktop_module.rs"]
 mod desktop;
 #[cfg(feature = "desktop")]
 pub use desktop::run;

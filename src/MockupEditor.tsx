@@ -20,11 +20,24 @@ import {
   ungroupElements,
 } from "./mockupEditorModel";
 
+
+function formatMockupError(reason: unknown): string {
+  const raw = String(reason);
+  try {
+    const start = raw.indexOf("{");
+    const value = JSON.parse(start >= 0 ? raw.slice(start, raw.lastIndexOf("}") + 1) : raw) as { conflicts?: Array<{ resourceKind: string; resourceId: string; expectedVersion: number; currentVersion: number }> };
+    if (value.conflicts?.length) return value.conflicts.map((item) => `Conflict on ${item.resourceKind} '${item.resourceId}': expected version ${item.expectedVersion}, current version ${item.currentVersion}.`).join(String.fromCharCode(10));
+  } catch { /* ordinary error text */ }
+  return raw;
+}
+
 type EditorTool = "select" | "pan" | "pencil" | "eraser" | "callout";
 
 type EditorMockup = {
   externalId: string;
   acceptedRevision: number;
+  acceptedVersion: number;
+  workingVersion: number;
   acceptedSvg: string;
   workingSvg?: string | null;
   editOperations: MockupEditOperation[];
@@ -49,18 +62,16 @@ type DragState = {
 
 export function MockupEditor({
   projectId,
-  projectRevision,
   mockup,
   onDashboardChange,
   onError,
   onRequestRevision,
 }: {
   projectId: string;
-  projectRevision: number;
   mockup: EditorMockup;
   onDashboardChange: (payload: unknown) => void;
   onError: (message: string) => void;
-  onRequestRevision: (revision: number) => void;
+  onRequestRevision: (acceptedVersion: number, workingVersion: number) => void;
 }) {
   const initial = React.useMemo<MockupEditorSnapshot>(() => ({
     svg: mockup.workingSvg ?? mockup.acceptedSvg,
@@ -82,12 +93,14 @@ export function MockupEditor({
   const [pan, setPan] = React.useState({ x: 0, y: 0 });
   const [spacePan, setSpacePan] = React.useState(false);
   const canvasRef = React.useRef<HTMLDivElement>(null);
-  const latestRevision = React.useRef(projectRevision);
+  const latestAcceptedVersion = React.useRef(mockup.acceptedVersion);
+  const latestWorkingVersion = React.useRef(mockup.workingVersion);
   const queuedSave = React.useRef(false);
   const editVersion = React.useRef(0);
   const spacePressed = React.useRef(false);
 
-  React.useEffect(() => { latestRevision.current = projectRevision; }, [projectRevision]);
+  React.useEffect(() => { latestAcceptedVersion.current = mockup.acceptedVersion; }, [mockup.acceptedVersion]);
+  React.useEffect(() => { latestWorkingVersion.current = mockup.workingVersion; }, [mockup.workingVersion]);
   React.useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -174,24 +187,27 @@ export function MockupEditor({
     const snapshot = present;
     const savedVersion = editVersion.current;
     try {
-      const payload = await invoke<{ revision: number }>("save_mockup_draft", {
+      const payload = await invoke<{ revision: number; mockups: Array<{ externalId: string; acceptedVersion: number; workingVersion: number }> }>("save_mockup_draft", {
         projectId,
         input: {
           externalId: mockup.externalId,
           workingSvg: snapshot.svg,
           baseRevision: mockup.acceptedRevision,
-          expectedRevision: latestRevision.current,
+          operationId: "mockup-draft-" + crypto.randomUUID(),
+          expectedAcceptedVersion: latestAcceptedVersion.current,
+          expectedWorkingVersion: latestWorkingVersion.current,
           editOperations: snapshot.operations,
           annotations: snapshot.annotations,
         },
       });
-      latestRevision.current = payload.revision;
+      const stored = payload.mockups.find((item) => item.externalId === mockup.externalId);
+      if (stored) { latestAcceptedVersion.current = stored.acceptedVersion; latestWorkingVersion.current = stored.workingVersion; }
       onDashboardChange(payload);
       setDirty((current) => current && editVersion.current !== savedVersion);
       setLastSaved(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
       return payload.revision;
     } catch (error) {
-      onError(String(error));
+      onError(formatMockupError(error));
       return null;
     } finally {
       setSaving(false);
@@ -200,8 +216,8 @@ export function MockupEditor({
   }
 
   async function requestRevision() {
-    const revision = dirty ? await saveDraft() : latestRevision.current;
-    if (revision !== null) onRequestRevision(revision);
+    const revision = dirty ? await saveDraft() : 0;
+    if (revision !== null) onRequestRevision(latestAcceptedVersion.current, latestWorkingVersion.current);
   }
 
   function coordinates(event: React.PointerEvent): [number, number] {

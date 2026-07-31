@@ -25,9 +25,10 @@ Use the injected formal design as implementation guidance.
 - If implementation discovers the design is stale, report the mismatch instead of silently drifting away from the formal design."#;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
 pub struct FixedHookPrompt {
+    pub version: i64,
     pub key: String,
     pub title: String,
     pub intend: String,
@@ -106,9 +107,11 @@ pub fn load_fixed_hook_prompts(
 
     let mut statement = db
         .prepare(
-            "SELECT key, title, intend, hook, prompt, updated_at
-             FROM fixed_hook_prompts
-             WHERE project_id = ?1
+            "SELECT f.key, f.title, f.intend, f.hook, f.prompt, f.updated_at, COALESCE(rv.version, 0)
+             FROM fixed_hook_prompts f
+             LEFT JOIN resource_versions rv
+               ON rv.project_id=f.project_id AND rv.resource_kind='fixed-hook' AND rv.resource_id=f.key
+             WHERE f.project_id = ?1
              ORDER BY
                 CASE key
                     WHEN 'design.run.start.authoring' THEN 1
@@ -121,6 +124,7 @@ pub fn load_fixed_hook_prompts(
     let rows = statement
         .query_map(params![project_id], |row| {
             Ok(FixedHookPrompt {
+                version: row.get(6)?,
                 key: row.get(0)?,
                 title: row.get(1)?,
                 intend: row.get(2)?,

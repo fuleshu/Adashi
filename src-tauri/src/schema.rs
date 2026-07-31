@@ -2,6 +2,7 @@ use rusqlite::Connection;
 
 pub fn migrate(db: &mut Connection) -> rusqlite::Result<()> {
     db.execute_batch(include_str!("schema.sql"))?;
+    db.execute_batch(include_str!("concurrency_schema.sql"))?;
     ensure_rules_name_column(db)?;
     ensure_diagram_attachment_columns(db)?;
     ensure_design_bindings_table(db)?;
