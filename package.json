@@ -1,12 +1,13 @@
 {
   "name": "adashi",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "build": "tsc && vite build",
     "build:frontend:linux": "tsc && vite build --outDir build/linux/frontend --emptyOutDir",
     "linux:build": "bash scripts/linux/build.sh",
+    "linux:install": "bash scripts/linux/install.sh",
     "linux:dev": "bash scripts/linux/dev.sh",
     "preview": "vite preview",
     "tauri": "tauri"

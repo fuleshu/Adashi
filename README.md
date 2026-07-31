@@ -234,14 +234,25 @@ Then install the JavaScript dependencies once:
 npm ci
 ```
 
-Linux development and build commands are intentionally separate:
+The application version has one source of truth: the top-level `version` field in `package.json`. Tauri reads that value for both the Windows installer and Linux package. Change it with:
+
+```bash
+npm version 0.1.2 --no-git-tag-version
+```
+
+Replace `0.1.2` with the new release version and commit both `package.json` and the automatically updated `package-lock.json`. Do not set a separate version in a Tauri platform configuration.
+
+Use these Linux commands:
 
 ```bash
 npm run linux:dev
 npm run linux:build
+npm run linux:install
 npm run linux:build -- mcp
 npm run linux:build -- frontend
 ```
+
+`npm run linux:build` creates the desktop binary and Debian package. `npm run linux:install` performs a fresh desktop build and then installs or reinstalls that exact package. The installer stages the package in an APT-readable temporary location, so private home/build-directory permissions do not produce the `_apt` warning. It uses `sudo` and may prompt for your password.
 
 All generated Linux files stay under `build/linux/`:
 
@@ -259,7 +270,7 @@ args = []
 
 Linux user settings are stored in `$XDG_CONFIG_HOME/adashi/settings.json`, or in `$HOME/.config/adashi/settings.json` when `XDG_CONFIG_HOME` is unset. Project databases remain in each project's `.adashi/` directory on both operating systems.
 
-The existing Windows commands below continue to use `dist/`, `src-tauri/target/`, `src-tauri/icons/icon.ico`, and PowerShell defaults.
+The existing Windows commands below continue to use `dist/`, `src-tauri/target/`, `src-tauri/icons/icon.ico`, and PowerShell defaults. Windows and Linux package filenames both use the version from `package.json`.
 
 ### Configure The MCP Server
 

@@ -9,7 +9,12 @@ export CARGO_TARGET_DIR="${linux_build_dir}/cargo-target"
 
 cd "${project_root}"
 
-case "${1:-all}" in
+build_target="${1:-all}"
+version="$(node -p "require('./package.json').version")"
+
+echo "Building Adashi ${version} for Linux (${build_target})"
+
+case "${build_target}" in
   all)
     npm run tauri -- build
     ;;
@@ -31,5 +36,17 @@ case "${1:-all}" in
     exit 2
     ;;
 esac
+
+if [[ "${build_target}" == "all" || "${build_target}" == "desktop" ]]; then
+  architecture="$(dpkg --print-architecture)"
+  package_path="${linux_build_dir}/cargo-target/release/bundle/deb/Adashi_${version}_${architecture}.deb"
+
+  if [[ ! -f "${package_path}" ]]; then
+    echo "Expected Debian package was not created: ${package_path}" >&2
+    exit 1
+  fi
+
+  echo "Debian package: ${package_path}"
+fi
 
 echo "Linux build output: ${linux_build_dir}"
