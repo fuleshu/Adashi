@@ -26,6 +26,17 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
+/// Publishes non-negative counts using portable JSON Schema validation keywords.
+///
+/// Schemars labels Rust `usize` values with its custom `uint` format. JSON Schema
+/// clients may ignore that annotation, so MCP-facing count fields use `minimum`
+/// instead while retaining their native Rust representation.
+fn nonnegative_count_schema(_: &mut rmcp::schemars::SchemaGenerator) -> rmcp::schemars::Schema {
+    rmcp::schemars::json_schema!({
+        "type": "integer",
+        "minimum": 0,
+    })
+}
 #[derive(Clone)]
 pub struct AdashiMcpServer {
     settings_path: PathBuf,
@@ -277,6 +288,7 @@ struct PublishIntentParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DesignOverviewParams {
     project_id: String,
+    #[schemars(schema_with = "nonnegative_count_schema")]
     max_depth: Option<usize>,
 }
 
@@ -286,6 +298,7 @@ struct DesignScopeParams {
     project_id: String,
     element_id: String,
     include_ancestors: Option<bool>,
+    #[schemars(schema_with = "nonnegative_count_schema")]
     children_depth: Option<usize>,
     include_source: Option<bool>,
 }
@@ -296,6 +309,7 @@ struct DesignSearchParams {
     project_id: String,
     query: String,
     kinds: Option<Vec<String>>,
+    #[schemars(schema_with = "nonnegative_count_schema")]
     limit: Option<usize>,
 }
 
@@ -391,6 +405,7 @@ struct TaskDesignSpecificationBranch {
 struct TaskMockupPreview {
     variant: String,
     mime_type: String,
+    #[schemars(schema_with = "nonnegative_count_schema")]
     content_index: usize,
 }
 
@@ -2163,6 +2178,40 @@ mod tests {
             serde_json::to_value(rmcp::schemars::schema_for!(DesignSaveResult)).unwrap();
         assert!(result_schema["properties"].get("structurizrDsl").is_none());
         assert!(result_schema["properties"].get("changedCount").is_some());
+    }
+    fn assert_portable_nonnegative_integer(schema: &serde_json::Value) {
+        assert_eq!(schema["minimum"], json!(0));
+        assert!(schema.get("format").is_none());
+    }
+
+    #[test]
+    fn count_schemas_use_portable_nonnegative_validation() {
+        let schemas = [
+            (
+                serde_json::to_value(rmcp::schemars::schema_for!(DesignOverviewParams)).unwrap(),
+                "maxDepth",
+            ),
+            (
+                serde_json::to_value(rmcp::schemars::schema_for!(DesignScopeParams)).unwrap(),
+                "childrenDepth",
+            ),
+            (
+                serde_json::to_value(rmcp::schemars::schema_for!(DesignSearchParams)).unwrap(),
+                "limit",
+            ),
+            (
+                serde_json::to_value(rmcp::schemars::schema_for!(DesignSaveResult)).unwrap(),
+                "changedCount",
+            ),
+            (
+                serde_json::to_value(rmcp::schemars::schema_for!(TaskMockupPreview)).unwrap(),
+                "contentIndex",
+            ),
+        ];
+
+        for (schema, property) in schemas {
+            assert_portable_nonnegative_integer(&schema["properties"][property]);
+        }
     }
 
     #[test]

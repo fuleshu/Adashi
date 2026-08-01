@@ -4,6 +4,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
+/// Publishes non-negative counts using portable JSON Schema validation keywords.
+///
+/// Schemars otherwise emits a custom `uint` format for `usize`, which MCP
+/// clients are permitted to ignore.
+fn nonnegative_count_schema(_: &mut rmcp::schemars::SchemaGenerator) -> rmcp::schemars::Schema {
+    rmcp::schemars::json_schema!({
+        "type": "integer",
+        "minimum": 0,
+    })
+}
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
@@ -271,6 +281,7 @@ pub struct DesignSaveResult {
     pub stored: bool,
     pub correction_required: bool,
     pub revision: i64,
+    #[schemars(schema_with = "nonnegative_count_schema")]
     pub changed_count: usize,
     pub errors: Vec<DesignCorrection>,
 }
