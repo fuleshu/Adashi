@@ -6,7 +6,7 @@ pub const IMPLEMENTATION_GUIDANCE_HOOK_KEY: &str = "implementation.run.start.des
 
 const LEGACY_DESIGN_RULE_NAME: &str = "Design MCP API Protocol";
 
-pub const DEFAULT_DESIGN_AUTHORING_PROMPT: &str = r#"# Formal Design Authoring Hook
+const LEGACY_DESIGN_AUTHORING_PROMPT: &str = r#"# Formal Design Authoring Hook
 
 You are modifying or discussing formal design. The generated design context in this run.start injection is already loaded.
 
@@ -15,7 +15,7 @@ You are modifying or discussing formal design. The generated design context in t
 - If the design changes, persist the coherent C4/UML/binding changes with one `adashi_design_save` call.
 - Do not store design conclusions as chat notes."#;
 
-pub const DEFAULT_IMPLEMENTATION_GUIDANCE_PROMPT: &str = r#"# Formal Design Implementation Guide
+const LEGACY_IMPLEMENTATION_GUIDANCE_PROMPT: &str = r#"# Formal Design Implementation Guide
 
 Use the injected formal design as implementation guidance.
 
@@ -23,6 +23,20 @@ Use the injected formal design as implementation guidance.
 - If code touches a designed component, preserve the intended responsibilities and relationships unless the user explicitly asks to redesign them.
 - Retrieve narrower design scope or bindings only when the injected implementation guide is insufficient for the files, symbols, or component being changed.
 - If implementation discovers the design is stale, report the mismatch instead of silently drifting away from the formal design."#;
+
+pub const DEFAULT_DESIGN_AUTHORING_PROMPT: &str = r#"# Formal Design Authoring Hook
+
+The startup design index identifies retrieval entry points, not full design guidance.
+- Select relevant ids with the index or adashi_design_search; read their scopes, artifacts and file/symbol bindings before changing formal design.
+- Preserve intended responsibilities and relationships unless the user authorizes a redesign.
+- Persist coherent C4/UML/binding changes with adashi_design_save. Do not store design conclusions as chat notes."#;
+
+pub const DEFAULT_IMPLEMENTATION_GUIDANCE_PROMPT: &str = r#"# Formal Design Implementation Guide
+
+The startup design index identifies retrieval entry points, not full implementation guidance.
+- Retrieve design bound to touched files/symbols with adashi_design_get_bindings, then relevant scopes/artifacts by explicit ids.
+- Align code with those responsibilities and relationships unless the user authorizes a redesign.
+- If implementation discovers stale design, report the mismatch instead of silently drifting away from it."#;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -83,6 +97,7 @@ pub fn ensure_fixed_hook_prompts(db: &Connection) -> Result<(), String> {
                 definition.default_prompt
             };
             insert_default_prompt(db, project_id, definition, default_prompt)?;
+            migrate_builtin_prompt(db, project_id, definition)?;
         }
 
         db.execute(
@@ -186,6 +201,39 @@ pub fn update_fixed_hook_prompt(
         .ok_or_else(|| format!("Unknown fixed hook prompt key: {key}"))
 }
 
+fn migrate_builtin_prompt(
+    db: &Connection,
+    project_id: i64,
+    definition: FixedHookDefinition,
+) -> Result<(), String> {
+    let legacy = if definition.key == DESIGN_AUTHORING_HOOK_KEY {
+        LEGACY_DESIGN_AUTHORING_PROMPT
+    } else {
+        LEGACY_IMPLEMENTATION_GUIDANCE_PROMPT
+    };
+    db.execute_batch("SAVEPOINT fixed_prompt_migration")
+        .map_err(|e| e.to_string())?;
+    let result = (|| {
+        let changed = db.execute(
+            "UPDATE fixed_hook_prompts SET prompt=?1, updated_at=CURRENT_TIMESTAMP
+             WHERE project_id=?2 AND key=?3 AND trim(replace(prompt, char(13)||char(10), char(10)))=?4",
+            params![definition.default_prompt, project_id, definition.key, legacy],
+        ).map_err(|e| e.to_string())?;
+        if changed > 0 {
+            crate::concurrency::bump_version(db, project_id, "fixed-hook", definition.key)?;
+            crate::state::bump_project_revision(db, project_id)?;
+        }
+        Ok::<_, String>(())
+    })();
+    if result.is_err() {
+        let _ =
+            db.execute_batch("ROLLBACK TO fixed_prompt_migration; RELEASE fixed_prompt_migration");
+        return result;
+    }
+    db.execute_batch("RELEASE fixed_prompt_migration")
+        .map_err(|e| e.to_string())
+}
+
 fn insert_default_prompt(
     db: &Connection,
     project_id: i64,
@@ -226,4 +274,59 @@ fn fixed_hook_definitions() -> [FixedHookDefinition; 2] {
             default_prompt: DEFAULT_IMPLEMENTATION_GUIDANCE_PROMPT,
         },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn builtin_migration_is_versioned_once_and_preserves_custom_prompts() {
+        let mut db = Connection::open_in_memory().unwrap();
+        crate::schema::migrate(&mut db).unwrap();
+        db.execute("INSERT INTO projects(name,slug) VALUES('P','p')", [])
+            .unwrap();
+        crate::state::ensure_project_state(&db).unwrap();
+        ensure_fixed_hook_prompts(&db).unwrap();
+        db.execute(
+            "UPDATE fixed_hook_prompts SET prompt=?1 WHERE key=?2",
+            params![
+                LEGACY_IMPLEMENTATION_GUIDANCE_PROMPT,
+                IMPLEMENTATION_GUIDANCE_HOOK_KEY
+            ],
+        )
+        .unwrap();
+        db.execute("UPDATE fixed_hook_prompts SET prompt='Required custom authoring guidance.' WHERE key=?1",
+            [DESIGN_AUTHORING_HOOK_KEY]).unwrap();
+        ensure_fixed_hook_prompts(&db).unwrap();
+        assert_eq!(
+            load_prompt(&db, 1, IMPLEMENTATION_GUIDANCE_HOOK_KEY)
+                .unwrap()
+                .unwrap(),
+            DEFAULT_IMPLEMENTATION_GUIDANCE_PROMPT
+        );
+        assert_eq!(
+            load_prompt(&db, 1, DESIGN_AUTHORING_HOOK_KEY)
+                .unwrap()
+                .unwrap(),
+            "Required custom authoring guidance."
+        );
+        let revision = crate::state::load_project_revision(&db, 1)
+            .unwrap()
+            .revision;
+        let version = crate::concurrency::load_version(
+            &db,
+            1,
+            "fixed-hook",
+            IMPLEMENTATION_GUIDANCE_HOOK_KEY,
+        )
+        .unwrap();
+        assert!(version > 0);
+        ensure_fixed_hook_prompts(&db).unwrap();
+        assert_eq!(
+            crate::state::load_project_revision(&db, 1)
+                .unwrap()
+                .revision,
+            revision
+        );
+    }
 }

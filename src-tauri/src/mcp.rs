@@ -3,12 +3,11 @@ use crate::design::{
     self, DesignBindingsResult, DesignByIdsResult, DesignChange, DesignOverviewResult,
     DesignSaveResult, DesignScopeResult, DesignSearchResult, ElementDescriptionUpdate,
 };
-use crate::fixed_hooks::{self, DESIGN_AUTHORING_HOOK_KEY, IMPLEMENTATION_GUIDANCE_HOOK_KEY};
 use crate::memory::{self, AppendMemoryNote, MemoryNote, ProjectMemory};
 use crate::mockups::{self, MockupSummary, UiMockup};
 use crate::project::{open_project_database, resolve_project_from_settings};
 use crate::qa::{self, NewQaJob, QaDesignLinkInput, QaJob, QaJobQuery, QaRun, UpdateQaJob};
-use crate::rules::{self, InjectionRule, NewRule, Rule, UpdateRule};
+use crate::rules::{self, NewRule, Rule, UpdateRule};
 use crate::settings::{self, AppSettings, ProjectSettings};
 use crate::state as project_state;
 use crate::tasks::{
@@ -22,8 +21,9 @@ use rmcp::{serve_server, tool, tool_router};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::HashMap;
-use std::fmt::Write as _;
+mod context;
+use base64::Engine as _;
+use context::{MemoryContext, RuleInjectionResult};
 use std::path::PathBuf;
 
 /// Publishes non-negative counts using portable JSON Schema validation keywords.
@@ -71,10 +71,36 @@ struct ProjectParams {
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MemoryParams {
+    project_id: String,
+    /// Literal case-insensitive substring in retained note bodies.
+    query: Option<String>,
+    run_id: Option<String>,
+    task_id: Option<i64>,
+    #[serde(default)]
+    include_superseded: bool,
+}
+
+#[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MemoryReadResult {
+    project_id: String,
+    project_name: String,
+    revision: i64,
+    memory: ProjectMemory,
+    retained_notes: u32,
+    matched_notes: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RuleInjectionParams {
     project_id: String,
     intend: String,
     hook: String,
+    /// Summary by default; protocolOnly skips the summary for operational work.
+    #[serde(default)]
+    memory_context: MemoryContext,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
@@ -139,7 +165,22 @@ struct UpdateTaskParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ListTasksParams {
     project_id: String,
-    states: Option<Vec<String>>,
+    /// Omitted/null selects all states; [] selects none. Values are exact.
+    states: Option<Vec<tasks::TaskState>>,
+    /// Default 25, range 1..=100.
+    limit: Option<u32>,
+    /// Opaque continuation; keep the same states.
+    cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TaskCursor {
+    contract_version: u32,
+    project_id: String,
+    revision: i64,
+    states: Option<Vec<tasks::TaskState>>,
+    after_id: i64,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
@@ -252,6 +293,9 @@ struct UpdateMemoryParams {
     operation_id: String,
     expected_version: i64,
     memory: String,
+    /// Authorized coordinator only: exact reviewed note ids covered by the summary.
+    #[serde(default)]
+    superseded_note_ids: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
@@ -372,10 +416,14 @@ struct RuleListResult {
 #[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TaskListResult {
+    contract_version: u32,
     project_id: String,
     project_name: String,
     revision: i64,
-    tasks: Vec<Task>,
+    tasks: Vec<tasks::TaskSummary>,
+    filtered_total: i64,
+    has_more: bool,
+    next_cursor: Option<String>,
 }
 
 #[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
@@ -407,21 +455,6 @@ struct TaskMockupPreview {
     mime_type: String,
     #[schemars(schema_with = "nonnegative_count_schema")]
     content_index: usize,
-}
-
-#[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RuleInjectionResult {
-    project_id: String,
-    project_name: String,
-    intend: String,
-    hook: String,
-    rules: Vec<InjectionRule>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    memory_rule: Option<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    generated_context: Vec<String>,
-    injection_prompt: String,
 }
 
 #[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
@@ -566,85 +599,112 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_get_rule_injections",
-        description = "Get enabled optional rule prompts plus fixed generated lifecycle context for an intend and hook. run.start includes memory context, and design/implementation run.start includes Settings-managed fixed prompts plus compact formal-design context directly."
+        description = "Lifecycle v2: apply injectionPrompt once at EVERY required hook, even if rules is empty. Sections/rules contain metadata only; status=empty means no instructions apply. run.start supplies the full memory protocol plus a bounded current summary (memoryContext=protocolOnly skips summary), never the handover log. Design/implementation add full fixed guidance and a bounded design index; retrieve scope/bindings explicitly. Cache by project, intend, hook, section id and contentVersion; apply changed sections."
     )]
     fn get_rule_injections(
         &self,
         Parameters(params): Parameters<RuleInjectionParams>,
     ) -> Result<Json<RuleInjectionResult>, ErrorData> {
         let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
-        let rules =
-            rules::load_rule_injections(&db, &params.intend, &params.hook).map_err(tool_error)?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let mut injection_parts = rules
-            .iter()
-            .map(|rule| rule.prompt.clone())
-            .collect::<Vec<_>>();
-        let mut generated_context = Vec::new();
-
-        let memory_rule = if params.hook == "run.start" {
-            let memory = memory::load_memory(&db, project_row_id).map_err(tool_error)?;
-            let memory_context = format_memory_run_start_context(&memory);
-            if !memory_context.trim().is_empty() {
-                injection_parts.push(memory_context.clone());
-                generated_context.push(memory_context);
-            }
-
-            if matches!(params.intend.as_str(), "design" | "implementation") {
-                if let Some(prompt) =
-                    load_fixed_hook_prompt_for_injection(&db, project_row_id, &params.intend)?
-                {
-                    injection_parts.push(prompt);
-                }
-
-                let overview =
-                    design::load_overview(&db, project_row_id, Some(3)).map_err(tool_error)?;
-                let design_context = format_design_run_start_context(&params.intend, &overview);
-                if !design_context.trim().is_empty() {
-                    injection_parts.push(design_context.clone());
-                    generated_context.push(design_context);
-                }
-            }
-
-            Some(memory.rule)
-        } else {
-            None
-        };
-
-        let injection_prompt = injection_parts.join("\n\n");
-
-        Ok(Json(RuleInjectionResult {
-            project_id: project.id,
-            project_name: project.name,
-            intend: params.intend,
-            hook: params.hook,
-            rules,
-            memory_rule,
-            generated_context,
-            injection_prompt,
-        }))
+        context::build(
+            &db,
+            project_row_id,
+            project,
+            &params.intend,
+            &params.hook,
+            params.memory_context,
+        )
+        .map(Json)
+        .map_err(tool_error)
     }
 
     #[tool(
         name = "adashi_list_tasks",
-        description = "List project-local Adashi tasks. Pass states to filter to open, finished, and/or confirmed."
+        description = "v2 bounded summaries (id, number, title, titleTruncated, state, version); title is at most 240 characters. states omitted/null means ALL; [] means NONE; invalid values fail. Default limit 25, max 100. filteredTotal/hasMore distinguish complete empty results from partial pages. Follow nextCursor with the same states; stale cursors fail and require restarting. Full titles, descriptions, evidence, files and linked design: adashi_get_task."
     )]
     fn list_tasks(
         &self,
-        Parameters(params): Parameters<ListTasksParams>,
+        Parameters(mut params): Parameters<ListTasksParams>,
     ) -> Result<Json<TaskListResult>, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let revision =
-            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
-        let tasks =
-            tasks::load_tasks(&db, project_row_id, params.states.as_deref()).map_err(tool_error)?;
-
+        let limit = params.limit.unwrap_or(25);
+        if !(1..=100).contains(&limit) {
+            return Err(tool_error(
+                "tasks.invalid_limit: limit must be 1..=100".into(),
+            ));
+        }
+        if let Some(states) = &mut params.states {
+            states.sort();
+            states.dedup();
+        }
+        let (project, mut db) = self.open_project(Some(params.project_id.as_str()))?;
+        let tx = db.transaction().map_err(internal_error)?;
+        let project_row_id = project_row_id(&tx).map_err(tool_error)?;
+        let revision = project_state::load_project_revision(&tx, project_row_id)
+            .map_err(tool_error)?
+            .revision;
+        let after_id = if let Some(encoded) = params.cursor {
+            if encoded.len() > 4096 {
+                return Err(tool_error("tasks.invalid_cursor".into()));
+            }
+            let cursor: TaskCursor = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(encoded)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+                .ok_or_else(|| tool_error("tasks.invalid_cursor".into()))?;
+            if cursor.contract_version != 2
+                || cursor.project_id != project.id
+                || cursor.states != params.states
+                || cursor.after_id <= 0
+            {
+                return Err(tool_error(
+                    "tasks.invalid_cursor: keep the original project and states".into(),
+                ));
+            }
+            if cursor.revision != revision {
+                return Err(tool_error(
+                    "tasks.stale_cursor: project changed; restart without cursor".into(),
+                ));
+            }
+            cursor.after_id
+        } else {
+            0
+        };
+        let (mut tasks, filtered_total) = tasks::load_task_summaries(
+            &tx,
+            project_row_id,
+            params.states.as_deref(),
+            after_id,
+            limit + 1,
+        )
+        .map_err(tool_error)?;
+        let has_more = tasks.len() > limit as usize;
+        tasks.truncate(limit as usize);
+        let next_cursor = if has_more {
+            let cursor = TaskCursor {
+                contract_version: 2,
+                project_id: project.id.clone(),
+                revision,
+                states: params.states,
+                after_id: tasks.last().unwrap().id,
+            };
+            Some(
+                base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .encode(serde_json::to_vec(&cursor).map_err(internal_error)?),
+            )
+        } else {
+            None
+        };
+        tx.commit().map_err(internal_error)?;
         Ok(Json(TaskListResult {
+            contract_version: 2,
             project_id: project.id,
             project_name: project.name,
-            revision: revision.revision,
+            revision,
             tasks,
+            filtered_total,
+            has_more,
+            next_cursor,
         }))
     }
 
@@ -694,23 +754,40 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_get_memory",
-        description = "Read the bounded project summary, recent important handovers, memory protocol, and retention limits. Use when memory was not already supplied at run.start. Writing memory is optional; do not log routine work."
+        description = "Explicit memory detail: current summary/protocol and retained historical handovers (max 20, total retention 12,000 characters). Filter notes by literal case-insensitive query, exact runId and/or taskId (AND). Omitted filters select all active notes; includeSuperseded=true also returns resolved notes marked supersededByVersion. retainedNotes/matchedNotes describe this complete bounded selection. History is dated evidence, not current state."
     )]
     fn get_memory(
         &self,
-        Parameters(params): Parameters<ProjectParams>,
-    ) -> Result<Json<MemoryResult>, ErrorData> {
+        Parameters(params): Parameters<MemoryParams>,
+    ) -> Result<Json<MemoryReadResult>, ErrorData> {
         let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let memory = memory::load_memory(&db, project_row_id).map_err(tool_error)?;
+        let mut memory = memory::load_memory(&db, project_row_id).map_err(tool_error)?;
+        let retained = memory::load_retained_notes(&db, project_row_id).map_err(tool_error)?;
+        let retained_notes = retained.len() as u32;
+        let query = params.query.as_deref().map(str::to_lowercase);
+        memory.notes = retained
+            .into_iter()
+            .filter(|note| {
+                (params.include_superseded || note.superseded_by_version.is_none())
+                    && query
+                        .as_ref()
+                        .is_none_or(|q| note.body.to_lowercase().contains(q))
+                    && params.run_id.as_ref().is_none_or(|id| &note.run_id == id)
+                    && params.task_id.is_none_or(|id| note.task_id == Some(id))
+            })
+            .collect();
+        let matched_notes = memory.notes.len() as u32;
         let revision =
             project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
 
-        Ok(Json(MemoryResult {
+        Ok(Json(MemoryReadResult {
             project_id: project.id,
             project_name: project.name,
             revision: revision.revision,
             memory,
+            retained_notes,
+            matched_notes,
         }))
     }
 
@@ -1398,7 +1475,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_update_memory",
-        description = "Replace the shared summary (at most 4,000 characters) under expectedVersion. Normal agents optionally append important handovers instead. Automatic retention removes oldest notes to keep summary plus notes within 12,000 characters and 20 notes. Retries return current bounded memory."
+        description = "Authorized coordinator only: replace the shared current summary under expectedVersion (max 4,000 characters; <=2,000 fits startup). Optionally mark exact reviewed supersededNoteIds resolved by this summary version, atomically. Unknown/duplicate ids and stale versions fail; concurrently appended notes remain active. Resolved notes retain provenance within normal retention, retrievable with includeSuperseded=true. Normal agents append important handovers instead."
     )]
     fn update_memory(
         &self,
@@ -1406,12 +1483,13 @@ impl AdashiMcpServer {
     ) -> Result<Json<MemoryResult>, ErrorData> {
         let (project, mut db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let (memory, revision) = memory::compact_memory(
+        let (memory, revision) = memory::compact_memory_review(
             &mut db,
             project_row_id,
             params.expected_version,
             &params.operation_id,
             params.memory,
+            &params.superseded_note_ids,
         )
         .map_err(tool_error)?;
 
@@ -1726,256 +1804,6 @@ pub fn run_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
     })
 }
 
-fn format_memory_run_start_context(memory: &ProjectMemory) -> String {
-    let mut output = String::new();
-    let _ = writeln!(output, "# Adashi Memory Context (Generated)");
-    let _ = writeln!(output, "Updated: {}", memory.updated_at);
-    let _ = writeln!(output);
-    let _ = writeln!(output, "Protocol:");
-    let _ = writeln!(output, "{}", memory.rule.trim());
-    let _ = writeln!(output);
-    let _ = writeln!(output, "Current project memory:");
-
-    let memory_body = memory.memory.trim();
-    if memory_body.is_empty() && memory.notes.is_empty() {
-        let _ = writeln!(output, "(No project memory has been recorded yet.)");
-    } else if !memory_body.is_empty() {
-        let _ = writeln!(output, "Summary:\n{}", memory_body);
-    }
-    if !memory.notes.is_empty() {
-        let _ = writeln!(output, "\nImportant handovers (newest first):");
-        for note in memory.notes.iter().rev() {
-            let _ = writeln!(output, "\n### {}\n{}", note.created_at, note.body.trim());
-        }
-    }
-
-    output.trim().to_string()
-}
-
-fn load_fixed_hook_prompt_for_injection(
-    db: &rusqlite::Connection,
-    project_row_id: i64,
-    intend: &str,
-) -> Result<Option<String>, ErrorData> {
-    let key = match intend {
-        "design" => DESIGN_AUTHORING_HOOK_KEY,
-        "implementation" => IMPLEMENTATION_GUIDANCE_HOOK_KEY,
-        _ => return Ok(None),
-    };
-    let prompt = fixed_hooks::load_prompt(db, project_row_id, key).map_err(tool_error)?;
-    Ok(prompt
-        .map(|prompt| prompt.trim().to_string())
-        .filter(|prompt| !prompt.is_empty()))
-}
-
-fn format_design_run_start_context(intend: &str, overview: &DesignOverviewResult) -> String {
-    let title = if intend == "implementation" {
-        "Formal Design Implementation Guide"
-    } else {
-        "Formal Design Authoring Context"
-    };
-    let mut output = String::new();
-    let _ = writeln!(output, "# {title} (Generated)");
-    let _ = writeln!(
-        output,
-        "Workspace: {} (revision {})",
-        overview.workspace_name, overview.revision
-    );
-    if !overview.workspace_description.trim().is_empty() {
-        let _ = writeln!(
-            output,
-            "Purpose: {}",
-            one_line(&overview.workspace_description, 220)
-        );
-    }
-    let _ = writeln!(output);
-
-    if intend == "implementation" {
-        let _ = writeln!(
-            output,
-            "Use this formal design as implementation guidance. Align touched code with the bound design ids below; fetch a narrower scope only when the injected context is insufficient for the specific files, symbols, or component you are changing."
-        );
-    } else {
-        let _ = writeln!(
-            output,
-            "Use this generated overview as the already-loaded design context. Store design conclusions with `adashi_design_save`; fetch a narrower scope only when the current design task needs more detail than the injected overview."
-        );
-    }
-    let _ = writeln!(
-        output,
-        "The MCP remains deterministic: agents choose scopes and artifact types from explicit ids, bindings, and metadata."
-    );
-    let _ = writeln!(output);
-
-    let _ = writeln!(output, "Supported UML artifact types:");
-    for artifact_type in &overview.uml_artifact_types {
-        let _ = writeln!(
-            output,
-            "- {} (`{}`): {}",
-            artifact_type.artifact_label,
-            artifact_type.diagram_type,
-            one_line(&artifact_type.description, 160)
-        );
-    }
-    let _ = writeln!(output);
-
-    let _ = writeln!(output, "C4 design index:");
-    for line in format_element_index(&overview.elements, 48) {
-        let _ = writeln!(output, "{line}");
-    }
-    let _ = writeln!(output);
-
-    let attached_diagrams = overview
-        .diagrams
-        .iter()
-        .filter(|diagram| diagram.attached_to_external_id.is_some())
-        .collect::<Vec<_>>();
-    if !attached_diagrams.is_empty() {
-        let _ = writeln!(output, "Attached UML artifacts:");
-        for diagram in attached_diagrams.iter().take(24) {
-            let attached_to = diagram.attached_to_external_id.as_deref().unwrap_or("");
-            let target_type = diagram
-                .attached_to_target_type
-                .as_deref()
-                .unwrap_or("design");
-            let _ = writeln!(
-                output,
-                "- `{}` {} `{}` attached to {} `{}`",
-                diagram.key, diagram.artifact_label, diagram.diagram_type, target_type, attached_to
-            );
-        }
-        if attached_diagrams.len() > 24 {
-            let _ = writeln!(
-                output,
-                "- ... {} more attached artifacts",
-                attached_diagrams.len() - 24
-            );
-        }
-        let _ = writeln!(output);
-    }
-
-    if !overview.bindings.is_empty() {
-        let _ = writeln!(output, "Design bindings:");
-        for binding in overview.bindings.iter().take(40) {
-            let _ = writeln!(
-                output,
-                "- {} `{}` -> design `{}`",
-                binding.target_type, binding.target, binding.design_external_id
-            );
-        }
-        if overview.bindings.len() > 40 {
-            let _ = writeln!(
-                output,
-                "- ... {} more bindings",
-                overview.bindings.len() - 40
-            );
-        }
-        let _ = writeln!(output);
-    }
-
-    let design_decisions = overview
-        .relationships
-        .iter()
-        .filter(|relationship| relationship.tags.contains("Design Decision"))
-        .collect::<Vec<_>>();
-    if !design_decisions.is_empty() {
-        let _ = writeln!(output, "Stored design-decision relationships:");
-        for relationship in design_decisions.iter().take(16) {
-            let _ = writeln!(
-                output,
-                "- `{}` -> `{}`: {}",
-                relationship.source_external_id,
-                relationship.destination_external_id,
-                one_line(&relationship.description, 180)
-            );
-        }
-    }
-
-    output.trim().to_string()
-}
-
-fn format_element_index(elements: &[design::DesignElementRecord], limit: usize) -> Vec<String> {
-    let element_by_id = elements
-        .iter()
-        .map(|element| (element.external_id.as_str(), element))
-        .collect::<HashMap<_, _>>();
-    let mut sorted = elements.iter().collect::<Vec<_>>();
-    sorted.sort_by(|left, right| {
-        element_depth_for_prompt(left, &element_by_id)
-            .cmp(&element_depth_for_prompt(right, &element_by_id))
-            .then_with(|| left.parent_external_id.cmp(&right.parent_external_id))
-            .then_with(|| left.name.cmp(&right.name))
-    });
-
-    let mut lines = sorted
-        .iter()
-        .take(limit)
-        .map(|element| {
-            let depth = element_depth_for_prompt(element, &element_by_id).min(5);
-            let indent = "  ".repeat(depth);
-            format!(
-                "- {indent}{} `{}` {} - {}",
-                element.element_type,
-                element.external_id,
-                element.name,
-                one_line(&element.description, 140)
-            )
-        })
-        .collect::<Vec<_>>();
-
-    if elements.len() > limit {
-        lines.push(format!(
-            "- ... {} more design elements",
-            elements.len() - limit
-        ));
-    }
-
-    lines
-}
-
-fn element_depth_for_prompt(
-    element: &design::DesignElementRecord,
-    element_by_id: &HashMap<&str, &design::DesignElementRecord>,
-) -> usize {
-    let mut depth = 0;
-    let mut current = element.parent_external_id.as_deref();
-    while let Some(parent_id) = current {
-        depth += 1;
-        current = element_by_id
-            .get(parent_id)
-            .and_then(|parent| parent.parent_external_id.as_deref());
-    }
-    depth
-}
-
-fn one_line(text: &str, limit: usize) -> String {
-    trim_for_injection(
-        &text.split_whitespace().collect::<Vec<_>>().join(" "),
-        limit,
-    )
-}
-
-fn trim_for_injection(text: &str, limit: usize) -> String {
-    let text = text.trim();
-    if text.len() <= limit {
-        return text.to_string();
-    }
-
-    let mut end = 0;
-    for (index, _) in text.char_indices() {
-        if index > limit {
-            break;
-        }
-        end = index;
-    }
-
-    format!(
-        "{}\n\n[Truncated to {} bytes for lifecycle injection. Fetch the dedicated MCP resource if exact full context is required.]",
-        text[..end].trim_end(),
-        limit
-    )
-}
-
 fn single_resource_guard(
     operation_id: String,
     resource_kind: &str,
@@ -2140,44 +1968,6 @@ fn internal_error(err: impl std::fmt::Display) -> ErrorData {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn run_start_includes_note_only_memory_newest_first() {
-        let mut db = rusqlite::Connection::open_in_memory().unwrap();
-        crate::schema::migrate(&mut db).unwrap();
-        db.execute(
-            "INSERT INTO projects(name, slug) VALUES ('Memory test','memory-test')",
-            [],
-        )
-        .unwrap();
-        crate::state::ensure_project_state(&db).unwrap();
-        for (id, body) in [
-            ("first", "Important earlier decision"),
-            ("second", "Important latest blocker"),
-        ] {
-            crate::memory::append_note(
-                &mut db,
-                1,
-                crate::memory::AppendMemoryNote {
-                    note_id: id.into(),
-                    operation_id: id.into(),
-                    run_id: id.into(),
-                    task_id: None,
-                    body: body.into(),
-                },
-            )
-            .unwrap();
-        }
-        let memory = crate::memory::load_memory(&db, 1).unwrap();
-        assert!(memory.memory.is_empty());
-        let context = super::format_memory_run_start_context(&memory);
-        assert!(!context.contains("No project memory"));
-        assert!(context.contains("Writing memory is optional"));
-        assert!(
-            context.find("Important latest blocker").unwrap()
-                < context.find("Important earlier decision").unwrap()
-        );
-    }
-
     use super::*;
     use crate::mockups::CreateMockupInput;
     use crate::settings::{AppSettings, ProjectSettings, WindowSettings};

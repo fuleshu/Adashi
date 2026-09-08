@@ -47,6 +47,18 @@ CREATE TABLE IF NOT EXISTS project_memory_notes (
 CREATE INDEX IF NOT EXISTS idx_project_memory_notes_project_created
     ON project_memory_notes(project_id, id);
 
+-- A coordinator resolves exact handovers while preserving their original provenance.
+-- Retention still budgets resolved notes; this is not an unbounded archive.
+CREATE TABLE IF NOT EXISTS project_memory_note_resolutions (
+    project_id INTEGER NOT NULL,
+    note_id TEXT NOT NULL,
+    summary_version INTEGER NOT NULL,
+    operation_id TEXT NOT NULL,
+    resolved_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(project_id, note_id),
+    FOREIGN KEY(project_id, note_id) REFERENCES project_memory_notes(project_id, note_id) ON DELETE CASCADE
+);
+
 INSERT OR IGNORE INTO resource_versions(project_id, resource_kind, resource_id)
 SELECT w.project_id, 'design.element', e.external_id
 FROM c4_elements e

@@ -3,6 +3,111 @@ use serde::{Deserialize, Serialize};
 
 use crate::concurrency;
 
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, rmcp::schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskState {
+    Open,
+    Finished,
+    Confirmed,
+}
+
+#[derive(Clone, Debug, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TaskSummary {
+    pub id: i64,
+    pub number: i64,
+    pub title: String,
+    pub title_truncated: bool,
+    pub state: TaskState,
+    pub version: i64,
+}
+
+/// Query only identifying columns. Detail hydration belongs to load_task.
+pub fn load_task_summaries(
+    db: &Connection,
+    project_id: i64,
+    states: Option<&[TaskState]>,
+    after_id: i64,
+    limit: u32,
+) -> Result<(Vec<TaskSummary>, i64), String> {
+    let filter = states
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|e| e.to_string())?;
+    let total = db
+        .query_row(
+            "SELECT COUNT(*) FROM agent_tasks WHERE project_id=?1
+         AND (?2 IS NULL OR state IN (SELECT value FROM json_each(?2)))",
+            params![project_id, filter],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let mut statement = db.prepare(
+        "SELECT t.id, t.number, substr(t.title,1,240), t.state, COALESCE(rv.version, 0), length(t.title)>240
+         FROM agent_tasks t LEFT JOIN resource_versions rv
+           ON rv.project_id=t.project_id AND rv.resource_kind='task' AND rv.resource_id=CAST(t.id AS TEXT)
+         WHERE t.project_id=?1 AND (?2 IS NULL OR t.state IN (SELECT value FROM json_each(?2)))
+           AND t.id>?3 ORDER BY t.id LIMIT ?4"
+    ).map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map(params![project_id, filter, after_id, limit], |row| {
+            let state: String = row.get(3)?;
+            let state = match state.as_str() {
+                "open" => TaskState::Open,
+                "finished" => TaskState::Finished,
+                "confirmed" => TaskState::Confirmed,
+                _ => return Err(rusqlite::Error::InvalidQuery),
+            };
+            Ok(TaskSummary {
+                id: row.get(0)?,
+                number: row.get(1)?,
+                title: row.get(2)?,
+                title_truncated: row.get(5)?,
+                state,
+                version: row.get(4)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    Ok((
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|e| e.to_string())?,
+        total,
+    ))
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::*;
+
+    #[test]
+    fn summaries_bound_titles_and_never_hydrate_detail_columns() {
+        let mut db = Connection::open_in_memory().unwrap();
+        crate::schema::migrate(&mut db).unwrap();
+        db.execute("INSERT INTO projects(name,slug) VALUES('P','p')", [])
+            .unwrap();
+        db.execute("INSERT INTO agent_tasks(project_id,number,title,description,state,created_files) VALUES(1,1,?1,?2,'open','invalid json')",
+            params!["界".repeat(10_000), "large detail ".repeat(10_000)]).unwrap();
+        let (tasks, total) = load_task_summaries(&db, 1, Some(&[TaskState::Open]), 0, 25).unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].title.chars().count(), 240);
+        assert!(tasks[0].title_truncated);
+        assert!(serde_json::to_vec(&tasks).unwrap().len() < 1024);
+        assert!(load_task_summaries(&db, 1, Some(&[]), 0, 25)
+            .unwrap()
+            .0
+            .is_empty());
+        assert_eq!(
+            load_task_summaries(&db, 1, None, tasks[0].id, 25)
+                .unwrap()
+                .1,
+            1
+        );
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]

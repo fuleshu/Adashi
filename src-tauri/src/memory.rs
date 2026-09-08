@@ -13,12 +13,19 @@ const LEGACY_UPDATE_MEMORY_RULE: &str = r#"LONG-TERM MEMORY PROTOCOL:
 - At the end of every successful task or major discussion, you MUST call `adashi_update_memory`.
 - Summarize what you just built, any API quirks you discovered, and what the next logical steps are. Do not ask for permission to do this, just update the memory through Adashi."#;
 
-pub const DEFAULT_MEMORY_RULE: &str = r#"PROJECT MEMORY PROTOCOL:
+const LEGACY_BOUNDED_MEMORY_RULE: &str = r#"PROJECT MEMORY PROTOCOL:
 - Read the memory supplied at run.start, or call `adashi_get_memory` if it was not supplied.
 - Writing memory is optional. Only use `adashi_append_memory_note` for an IMPORTANT handover that will materially help a future run: a durable decision, a non-obvious constraint, or an unresolved blocker with a concrete next step.
 - Skip routine task summaries, successful checks, tool-availability confirmations, repeated facts, and anything already captured in tasks, design, or QA. If nothing important changed, do not write a note.
 - Keep each handover focused and within 1,000 characters, keyed by the current run and optional task. Normal agents must not replace the shared summary.
 - Adashi retains at most 12,000 characters across the summary and up to 20 recent handovers, removing oldest notes first. Memory is a short handover aid, not a log or archive."#;
+
+pub const DEFAULT_MEMORY_RULE: &str = r#"PROJECT MEMORY PROTOCOL:
+- run.start supplies the current summary within a separate 2,000-character budget, never the handover log. For relevant prior decisions, constraints or blockers, call adashi_get_memory with query, runId or taskId. General requests may need memory too; operational requests can select memoryContext=protocolOnly.
+- Historical handovers are dated evidence, not authoritative current state. Resolved notes are hidden by default; includeSuperseded=true retrieves their provenance. If summary is omitted, retrieve it before work requiring project constraints.
+- Writing is optional: append only important durable decisions, non-obvious constraints, or unresolved blockers with a concrete next step. Skip routine reports, checks, tool confirmations and facts already in tasks, design or QA.
+- Keep complete handovers within 1,000 characters. Normal agents must not replace the shared summary. Only an authorized coordinator may update the summary and resolve explicitly reviewed note ids under expectedVersion.
+- Retention is separate: summary <=4,000 characters, <=20 handovers, <=12,000 total characters, oldest removed first. Oversized new writes fail; legacy omissions are explicit."#;
 
 pub const MAX_MEMORY_CHARS: usize = 12_000;
 pub const MAX_SUMMARY_CHARS: usize = 4_000;
@@ -43,6 +50,8 @@ pub struct MemoryNote {
     pub task_id: Option<i64>,
     pub body: String,
     pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub superseded_by_version: Option<i64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
@@ -95,8 +104,12 @@ fn maintain_memory(db: &Connection, project_id: i64) -> Result<(), String> {
         )
         .map_err(|error| error.to_string())?;
     let legacy_rule = rule.replace("\r\n", "\n");
-    let migrated =
-        [LEGACY_APPEND_MEMORY_RULE, LEGACY_UPDATE_MEMORY_RULE].contains(&legacy_rule.trim());
+    let migrated = [
+        LEGACY_APPEND_MEMORY_RULE,
+        LEGACY_UPDATE_MEMORY_RULE,
+        LEGACY_BOUNDED_MEMORY_RULE,
+    ]
+    .contains(&legacy_rule.trim());
     if migrated {
         db.execute(
             "UPDATE project_memory SET protocol_rule=?1 WHERE project_id=?2",
@@ -123,6 +136,34 @@ fn maintain_memory(db: &Connection, project_id: i64) -> Result<(), String> {
     Ok(())
 }
 
+const LEGACY_OMISSION: &str = "[Legacy content omitted at a complete boundary to meet retention limits; this is an excerpt, not a current summary. Review the source task or design before relying on it.]";
+
+fn bounded_legacy_excerpt(body: &str, limit: usize) -> String {
+    let budget = limit.saturating_sub(LEGACY_OMISSION.chars().count() + 2);
+    let prefix: String = body.chars().take(budget).collect();
+    let mut end = 0;
+    for (index, ch) in prefix.char_indices() {
+        let next = index + ch.len_utf8();
+        if matches!(ch, '.' | '!' | '?' | '。' | '！' | '？')
+            && body
+                .get(next..)
+                .and_then(|s| s.chars().next())
+                .is_none_or(char::is_whitespace)
+        {
+            end = next;
+        }
+        if prefix[..next].ends_with("\n\n") {
+            end = next;
+        }
+    }
+    let complete = prefix[..end].trim();
+    if complete.is_empty() {
+        LEGACY_OMISSION.into()
+    } else {
+        format!("{complete}\n\n{LEGACY_OMISSION}")
+    }
+}
+
 fn touch_memory(db: &Connection, project_id: i64) -> Result<(), String> {
     db.execute(
         "UPDATE project_memory SET updated_at=CURRENT_TIMESTAMP WHERE project_id=?1",
@@ -133,35 +174,54 @@ fn touch_memory(db: &Connection, project_id: i64) -> Result<(), String> {
 }
 
 fn enforce_retention(db: &Connection, project_id: i64) -> Result<bool, String> {
-    // The canonical summary is not a chronological log; preserve its leading context.
-    let summary_changed = db
-        .execute(
-            "UPDATE project_memory SET memory_body=substr(memory_body, 1, ?1)
-         WHERE project_id=?2 AND length(memory_body)>?1",
-            params![MAX_SUMMARY_CHARS, project_id],
+    // Legacy repair is an explicit excerpt, not an invented summary. Preserve only
+    // complete paragraphs/sentences and label omitted material; never cut a word.
+    let summary: String = db
+        .query_row(
+            "SELECT memory_body FROM project_memory WHERE project_id=?1",
+            [project_id],
+            |r| r.get(0),
         )
-        .map_err(|error| error.to_string())?
-        > 0;
+        .map_err(|e| e.to_string())?;
+    let summary_changed = summary.chars().count() > MAX_SUMMARY_CHARS;
     if summary_changed {
+        db.execute(
+            "UPDATE project_memory SET memory_body=?1 WHERE project_id=?2",
+            params![
+                bounded_legacy_excerpt(&summary, MAX_SUMMARY_CHARS),
+                project_id
+            ],
+        )
+        .map_err(|e| e.to_string())?;
         concurrency::bump_version(db, project_id, "memory.canonical", "canonical")?;
     }
     let summary_len: usize = db
         .query_row(
             "SELECT length(memory_body) FROM project_memory WHERE project_id=?1",
             [project_id],
-            |row| row.get(0),
+            |r| r.get(0),
         )
-        .map_err(|error| error.to_string())?;
-    // A legacy note may itself exceed the entire budget. Keep its beginning and
-    // always select a contiguous suffix of notes, ordered by insertion id.
-    let notes_changed = db
-        .execute(
-            "UPDATE project_memory_notes SET body=substr(body, 1, ?1)
-         WHERE project_id=?2 AND length(body)>?1",
-            params![MAX_NOTE_CHARS, project_id],
+        .map_err(|e| e.to_string())?;
+    let mut statement = db
+        .prepare(
+            "SELECT id, body FROM project_memory_notes WHERE project_id=?1 AND length(body)>?2",
         )
-        .map_err(|error| error.to_string())?
-        > 0;
+        .map_err(|e| e.to_string())?;
+    let oversized = statement
+        .query_map(params![project_id, MAX_NOTE_CHARS], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    let notes_changed = !oversized.is_empty();
+    for (id, body) in oversized {
+        db.execute(
+            "UPDATE project_memory_notes SET body=?1 WHERE id=?2",
+            params![bounded_legacy_excerpt(&body, MAX_NOTE_CHARS), id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
     let first_retained: Option<i64> = db
         .query_row(
             "SELECT MIN(id) FROM (
@@ -301,6 +361,18 @@ pub fn compact_memory(
     operation_id: &str,
     memory: String,
 ) -> Result<(ProjectMemory, i64), String> {
+    compact_memory_review(db, project_id, expected_version, operation_id, memory, &[])
+}
+
+/// Only an authorized coordinator supplies the exact reviewed note ids.
+pub fn compact_memory_review(
+    db: &mut Connection,
+    project_id: i64,
+    expected_version: i64,
+    operation_id: &str,
+    memory: String,
+    superseded_note_ids: &[String],
+) -> Result<(ProjectMemory, i64), String> {
     if operation_id.trim().is_empty() {
         return Err("operationId is required".to_string());
     }
@@ -323,14 +395,44 @@ pub fn compact_memory(
         expected_version,
     )?;
     let current = load_memory(&tx, project_id)?;
-    if current.memory == memory {
+    let unique = superseded_note_ids
+        .iter()
+        .collect::<std::collections::HashSet<_>>();
+    if unique.len() != superseded_note_ids.len() {
+        return Err("memory.duplicate_note: supply each reviewed note id once".into());
+    }
+    let mut unresolved = Vec::new();
+    for id in superseded_note_ids {
+        let resolution: Option<Option<i64>> = tx.query_row(
+            "SELECT r.summary_version FROM project_memory_notes n LEFT JOIN project_memory_note_resolutions r
+             ON r.project_id=n.project_id AND r.note_id=n.note_id WHERE n.project_id=?1 AND n.note_id=?2",
+            params![project_id, id], |r| r.get(0),
+        ).optional().map_err(|e| e.to_string())?;
+        match resolution {
+            None => return Err(format!("memory.unknown_note: {id}")),
+            Some(None) => unresolved.push(id),
+            Some(Some(_)) => {}
+        }
+    }
+    if !unresolved.is_empty() && memory.trim().is_empty() {
+        return Err(
+            "memory.summary_required: record the reviewed current state before resolving notes"
+                .into(),
+        );
+    }
+    if current.memory == memory && unresolved.is_empty() {
         record_memory_mutation(&tx, project_id, operation_id)?;
         let revision = state::load_project_revision(&tx, project_id)?.revision;
         tx.commit().map_err(|error| error.to_string())?;
         return Ok((current, revision));
     }
     tx.execute("UPDATE project_memory SET memory_body=?1, updated_at=CURRENT_TIMESTAMP WHERE project_id=?2", params![memory, project_id]).map_err(|error| error.to_string())?;
-    concurrency::bump_version(&tx, project_id, "memory.canonical", "canonical")?;
+    let summary_version =
+        concurrency::bump_version(&tx, project_id, "memory.canonical", "canonical")?;
+    for id in unresolved {
+        tx.execute("INSERT INTO project_memory_note_resolutions(project_id,note_id,summary_version,operation_id) VALUES(?1,?2,?3,?4)",
+            params![project_id, id, summary_version.version, operation_id]).map_err(|e| e.to_string())?;
+    }
     enforce_retention(&tx, project_id)?;
     let revision = state::bump_project_revision(&tx, project_id)?.revision;
     let result = load_memory(&tx, project_id)?;
@@ -426,12 +528,19 @@ fn ensure_memory_versions(db: &Connection, project_id: i64) -> Result<(), String
 }
 
 fn load_notes(db: &Connection, project_id: i64) -> Result<Vec<MemoryNote>, String> {
+    Ok(load_retained_notes(db, project_id)?
+        .into_iter()
+        .filter(|n| n.superseded_by_version.is_none())
+        .collect())
+}
+
+pub fn load_retained_notes(db: &Connection, project_id: i64) -> Result<Vec<MemoryNote>, String> {
     let mut statement = db
         .prepare(
-            "SELECT note_id, operation_id, run_id, task_id, body, created_at
-             FROM project_memory_notes
-             WHERE project_id=?1
-             ORDER BY id",
+            "SELECT n.note_id, n.operation_id, n.run_id, n.task_id, n.body, n.created_at, r.summary_version
+             FROM project_memory_notes n LEFT JOIN project_memory_note_resolutions r
+               ON r.project_id=n.project_id AND r.note_id=n.note_id
+             WHERE n.project_id=?1 ORDER BY n.id",
         )
         .map_err(|error| error.to_string())?;
     let rows = statement
@@ -447,9 +556,10 @@ fn load_note_by_operation(
     operation_id: &str,
 ) -> Result<Option<MemoryNote>, String> {
     db.query_row(
-        "SELECT note_id, operation_id, run_id, task_id, body, created_at
-         FROM project_memory_notes
-         WHERE project_id=?1 AND operation_id=?2",
+        "SELECT n.note_id, n.operation_id, n.run_id, n.task_id, n.body, n.created_at, r.summary_version
+         FROM project_memory_notes n LEFT JOIN project_memory_note_resolutions r
+           ON r.project_id=n.project_id AND r.note_id=n.note_id
+         WHERE n.project_id=?1 AND n.operation_id=?2",
         params![project_id, operation_id.trim()],
         read_note,
     )
@@ -465,6 +575,7 @@ fn read_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryNote> {
         task_id: row.get(3)?,
         body: row.get(4)?,
         created_at: row.get(5)?,
+        superseded_by_version: row.get(6)?,
     })
 }
 
@@ -748,10 +859,10 @@ mod tests {
         }
         concurrency::record_no_op(&db, 1, "old-snapshot", &serde_json::json!({"memoryVersion":1,"protocolVersion":1,"notes":[{"body":"old log"}],"memory":"old summary"})).unwrap();
         let memory = load_memory(&db, 1).unwrap();
-        assert_eq!(memory.memory.chars().count(), MAX_SUMMARY_CHARS);
-        assert_eq!(memory.notes.len(), 8);
-        assert_eq!(memory.notes[0].note_id, "32");
-        assert_eq!(memory.notes[0].body.chars().count(), MAX_NOTE_CHARS);
+        assert_eq!(memory.memory, LEGACY_OMISSION);
+        assert_eq!(memory.notes.len(), MAX_NOTES);
+        assert_eq!(memory.notes[0].note_id, "20");
+        assert_eq!(memory.notes[0].body, LEGACY_OMISSION);
         assert_eq!(memory.memory_version, 2);
         assert_ne!(memory.updated_at, "2000-01-01");
         let revision = state::load_project_revision(&db, 1).unwrap().revision;
@@ -804,5 +915,84 @@ mod tests {
             concurrency::load_version(&db, 1, "memory.canonical", "canonical").unwrap(),
             1
         );
+    }
+
+    #[test]
+    fn legacy_excerpts_end_at_complete_unicode_boundaries_and_label_omissions() {
+        let body = format!(
+            "A complete fact about 🦀.\n\n{}",
+            "unfinished ".repeat(1000)
+        );
+        let excerpt = bounded_legacy_excerpt(&body, MAX_NOTE_CHARS);
+        assert_eq!(
+            excerpt,
+            format!("A complete fact about 🦀.\n\n{LEGACY_OMISSION}")
+        );
+        assert!(excerpt.chars().count() <= MAX_NOTE_CHARS);
+        assert_eq!(
+            bounded_legacy_excerpt(&"x".repeat(2000), MAX_NOTE_CHARS),
+            LEGACY_OMISSION
+        );
+    }
+
+    #[test]
+    fn coordinator_resolution_is_atomic_versioned_and_preserves_parallel_notes() {
+        let mut db = database();
+        append_note(&mut db, 1, note("old", "old-op", "Old finding.")).unwrap();
+        let version = load_memory(&db, 1).unwrap().memory_version;
+        append_note(
+            &mut db,
+            1,
+            note("parallel", "parallel-op", "New unrelated blocker."),
+        )
+        .unwrap();
+        assert!(compact_memory_review(
+            &mut db,
+            1,
+            version,
+            "bad",
+            "Current state.".into(),
+            &["old".into(), "missing".into()]
+        )
+        .is_err());
+        assert_eq!(load_memory(&db, 1).unwrap().notes.len(), 2);
+        let (current, revision) = compact_memory_review(
+            &mut db,
+            1,
+            version,
+            "review",
+            "Current state.".into(),
+            &["old".into()],
+        )
+        .unwrap();
+        assert_eq!(current.memory_version, version + 1);
+        assert_eq!(current.notes.len(), 1);
+        assert_eq!(current.notes[0].note_id, "parallel");
+        let retained = load_retained_notes(&db, 1).unwrap();
+        assert_eq!(retained[0].body, "Old finding.");
+        assert_eq!(
+            retained[0].superseded_by_version,
+            Some(current.memory_version)
+        );
+        let (_, replay_revision) = compact_memory_review(
+            &mut db,
+            1,
+            version,
+            "review",
+            "Current state.".into(),
+            &["old".into()],
+        )
+        .unwrap();
+        assert_eq!(revision, replay_revision);
+        assert!(compact_memory_review(
+            &mut db,
+            1,
+            version,
+            "stale",
+            "Stale state.".into(),
+            &["parallel".into()]
+        )
+        .unwrap_err()
+        .contains("resource.conflict"));
     }
 }

@@ -19,12 +19,13 @@ At each hook, call the Adashi MCP tool `adashi_get_rule_injections` with:
 
 ```json
 {
+  "projectId": "<configured project id or name>",
   "intend": "general | design | implementation",
   "hook": "run.start | task.start | task.end | run.end"
 }
 ```
 
-If the MCP call returns rules, treat the returned `injectionPrompt` as active instructions for that hook. Apply the injected prompt before continuing. If the call returns no rules, continue normally.
+Treat every nonempty `injectionPrompt` as active instructions for that hook, even when `rules` is empty: required generated sections are independent of optional rules. Apply the prompt once before continuing. In contract v2, `rules` and `sections` contain metadata only; `status: "empty"` explicitly means no instructions apply. Clients may cache sections by project, intend, hook, section id and contentVersion, but must still call every required lifecycle hook and apply changed sections.
 
 For multi-task requests, call `task.start` and `task.end` for each task using the same run-level intend unless the user clearly changes the nature of a specific task. Do not invent new intend or hook names.
 

@@ -1,0 +1,24 @@
+{
+  "projectId": "aworkit-1787212362967",
+  "projectName": "Aworkit",
+  "projectFolder": "C:\\src\\Aworkit",
+  "expectedVersion": 1,
+  "operationId": "context-efficiency-aworkit-memory-review-20260908",
+  "memory": "Reviewed 2026-09-08: Workspace Instructions, context compaction and context compression are implemented; see docs/design-workspace-instructions.md, docs/context-compaction.md and docs/context-compression.md. Earlier absence-of-compaction claims are superseded. Keep original tool/conversation evidence immutable: never replay tools; preserve frozen authority and owner isolation. Restore instructions using surviving event references, not summary prose. The 14 resolved handovers are dated history, not current status. Recheck source and design for later changes.",
+  "supersededNoteIds": [
+    "instruction-loader-source-explanation-20260908",
+    "instruction-plugin-selection-design-recorded-20260908",
+    "instruction-persistence-scope-discussion-20260908",
+    "native-context-compaction-audit-20260908",
+    "workspace-instructions-implementation-baseline-20260908",
+    "context-inspection-editing-20260908",
+    "workspace-instructions-implementation",
+    "merge-content-main-20260908",
+    "adashi-mcp-tool-visibility-confirmed-20260821",
+    "graph-additional-context-origin-20260908",
+    "context-compaction-20260908",
+    "headroom-context-compression-20260908",
+    "chat-polish-20260908",
+    "raw-json-resize-fix"
+  ]
+}
