@@ -174,6 +174,7 @@ fn load_dashboard_payload(
         .ok_or_else(|| "No design workspace has been seeded".to_string())?;
 
     let project_row_id = load_project_row_id(db)?;
+    let memory = memory::load_memory(db, project_row_id)?;
     let revision = project_state::load_project_revision(db, project_row_id)?.revision;
     let structurizr_view_key = db
         .query_row(
@@ -213,7 +214,7 @@ fn load_dashboard_payload(
         rules: rules::load_rules(db)?,
         rule_templates: load_rule_templates(state)?,
         fixed_hook_prompts: fixed_hooks::load_fixed_hook_prompts(db, project_row_id)?,
-        memory: memory::load_memory(db, project_row_id)?,
+        memory,
     })
 }
 

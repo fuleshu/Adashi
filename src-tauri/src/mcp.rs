@@ -694,7 +694,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_get_memory",
-        description = "Read the SQL-backed Adashi long-term memory protocol and current project memory. Agents should call this before starting any task when this MCP server is present."
+        description = "Read the bounded project summary, recent important handovers, memory protocol, and retention limits. Use when memory was not already supplied at run.start. Writing memory is optional; do not log routine work."
     )]
     fn get_memory(
         &self,
@@ -702,9 +702,9 @@ impl AdashiMcpServer {
     ) -> Result<Json<MemoryResult>, ErrorData> {
         let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        let memory = memory::load_memory(&db, project_row_id).map_err(tool_error)?;
         let revision =
             project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
-        let memory = memory::load_memory(&db, project_row_id).map_err(tool_error)?;
 
         Ok(Json(MemoryResult {
             project_id: project.id,
@@ -1398,7 +1398,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_update_memory",
-        description = "Coordinator-only canonical memory compaction conditioned on expectedVersion. Normal agents append notes with adashi_append_memory_note; compaction never deletes notes."
+        description = "Replace the shared summary (at most 4,000 characters) under expectedVersion. Normal agents optionally append important handovers instead. Automatic retention removes oldest notes to keep summary plus notes within 12,000 characters and 20 notes. Retries return current bounded memory."
     )]
     fn update_memory(
         &self,
@@ -1452,7 +1452,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_append_memory_note",
-        description = "Append one immutable idempotent project-memory handoff note keyed by run and optional task. Normal agents use this instead of replacing canonical memory."
+        description = "Optionally append one IMPORTANT handover, at most 1,000 characters, keyed by run and optional task. Skip routine task logs, checks, repeated facts, and tool-availability confirmations. Oldest notes expire automatically above 12,000 total memory characters or 20 notes; retries cannot restore expired notes."
     )]
     fn append_memory_note(
         &self,
@@ -1737,10 +1737,16 @@ fn format_memory_run_start_context(memory: &ProjectMemory) -> String {
     let _ = writeln!(output, "Current project memory:");
 
     let memory_body = memory.memory.trim();
-    if memory_body.is_empty() {
+    if memory_body.is_empty() && memory.notes.is_empty() {
         let _ = writeln!(output, "(No project memory has been recorded yet.)");
-    } else {
-        let _ = writeln!(output, "{}", trim_for_injection(memory_body, 16_000));
+    } else if !memory_body.is_empty() {
+        let _ = writeln!(output, "Summary:\n{}", memory_body);
+    }
+    if !memory.notes.is_empty() {
+        let _ = writeln!(output, "\nImportant handovers (newest first):");
+        for note in memory.notes.iter().rev() {
+            let _ = writeln!(output, "\n### {}\n{}", note.created_at, note.body.trim());
+        }
     }
 
     output.trim().to_string()
@@ -2134,6 +2140,44 @@ fn internal_error(err: impl std::fmt::Display) -> ErrorData {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn run_start_includes_note_only_memory_newest_first() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        crate::schema::migrate(&mut db).unwrap();
+        db.execute(
+            "INSERT INTO projects(name, slug) VALUES ('Memory test','memory-test')",
+            [],
+        )
+        .unwrap();
+        crate::state::ensure_project_state(&db).unwrap();
+        for (id, body) in [
+            ("first", "Important earlier decision"),
+            ("second", "Important latest blocker"),
+        ] {
+            crate::memory::append_note(
+                &mut db,
+                1,
+                crate::memory::AppendMemoryNote {
+                    note_id: id.into(),
+                    operation_id: id.into(),
+                    run_id: id.into(),
+                    task_id: None,
+                    body: body.into(),
+                },
+            )
+            .unwrap();
+        }
+        let memory = crate::memory::load_memory(&db, 1).unwrap();
+        assert!(memory.memory.is_empty());
+        let context = super::format_memory_run_start_context(&memory);
+        assert!(!context.contains("No project memory"));
+        assert!(context.contains("Writing memory is optional"));
+        assert!(
+            context.find("Important latest blocker").unwrap()
+                < context.find("Important earlier decision").unwrap()
+        );
+    }
+
     use super::*;
     use crate::mockups::CreateMockupInput;
     use crate::settings::{AppSettings, ProjectSettings, WindowSettings};

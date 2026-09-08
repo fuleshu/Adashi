@@ -2181,10 +2181,9 @@ button {
 }
 
 .memory-grid {
-  align-content: start;
-  display: grid;
-  gap: 22px;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
   height: 100%;
   min-height: 0;
 }
@@ -2356,6 +2355,76 @@ button {
 
 .memory-panel {
   grid-template-rows: auto minmax(0, auto);
+}
+
+.memory-content-panel {
+  flex: 1;
+  min-height: 0;
+  order: -1;
+  overflow-y: auto;
+}
+
+.memory-rule-panel {
+  display: block;
+  flex: none;
+  max-height: 50%;
+  overflow-y: auto;
+}
+
+.memory-rule-panel > summary {
+  cursor: pointer;
+  display: list-item;
+}
+
+.memory-rule-panel > summary h3 {
+  display: inline;
+}
+
+.memory-rule-panel[open] > summary {
+  margin-bottom: 14px;
+}
+
+.memory-guidance {
+  color: #58656a;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.memory-notes {
+  display: grid;
+  gap: 14px;
+}
+
+.memory-notes h4,
+.memory-note p {
+  margin: 0;
+}
+
+.memory-note {
+  border-top: 1px solid #ddd8cd;
+  padding-top: 12px;
+}
+
+.memory-note time {
+  color: #58656a;
+  font-size: 12px;
+}
+
+.memory-note p {
+  line-height: 1.5;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.memory-summary summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.memory-summary .memory-guidance {
+  margin: 12px 0;
 }
 
 .rules-list-panel {

@@ -345,6 +345,7 @@ type FixedHookPrompt = {
 };
 
 type ProjectMemory = {
+  limits: { totalChars: number; summaryChars: number; noteChars: number; notes: number };
   memoryVersion: number;
   protocolVersion: number;
   notes: Array<{ noteId: string; operationId: string; runId: string; taskId?: number | null; body: string; createdAt: string }>;
@@ -4655,34 +4656,56 @@ function MemoryView({
 
   return (
     <section className="memory-grid">
-      <section className="memory-panel">
-        <div className="rules-panel-heading">
+      <details className="memory-panel memory-rule-panel">
+        <summary className="rules-panel-heading">
           <h3>Memory Rule</h3>
-        </div>
+        </summary>
         <MarkdownEditor
-          key={`memory-rule-${memory.updatedAt}`}
+          key={`memory-rule-${memory.protocolVersion}`}
           value={memory.rule}
           onBlur={saveRule}
           placeholder="Write the long-term memory protocol in Markdown..."
-          minHeight="360px"
-          maxHeight="460px"
-          height="460px"
+          minHeight="180px"
+          maxHeight="260px"
+          height="260px"
         />
-      </section>
+      </details>
 
-      <section className="memory-panel">
+      <section className="memory-panel memory-content-panel">
         <div className="rules-panel-heading">
           <h3>Current Memory</h3>
         </div>
-        <MarkdownEditor
-          key={`memory-body-${memory.updatedAt}`}
-          value={memory.memory}
-          onBlur={saveMemory}
-          placeholder="Current project memory..."
-          minHeight="360px"
-          maxHeight="460px"
-          height="460px"
-        />
+        <p className="memory-guidance">
+          Important handovers are optional. Up to {memory.limits.totalChars.toLocaleString()} characters
+          and {memory.limits.notes} handovers are kept; the oldest handovers are removed automatically.
+        </p>
+        {!memory.memory.trim() && memory.notes.length === 0 && (
+          <p className="memory-guidance">No important handovers have been recorded yet.</p>
+        )}
+        {memory.notes.length > 0 && (
+          <section aria-label="Important handovers" className="memory-notes">
+            <h4>Important handovers ({memory.notes.length})</h4>
+            {[...memory.notes].reverse().map((note) => (
+              <article className="memory-note" key={note.noteId}>
+                <time>{note.createdAt}</time>
+                <p>{note.body}</p>
+              </article>
+            ))}
+          </section>
+        )}
+        <details className="memory-summary" open={Boolean(memory.memory.trim())}>
+          <summary>Shared summary</summary>
+          <p className="memory-guidance">Keep durable context within {memory.limits.summaryChars.toLocaleString()} characters.</p>
+          <MarkdownEditor
+            key={`memory-body-${memory.memoryVersion}`}
+            value={memory.memory}
+            onBlur={saveMemory}
+            placeholder="Optional shared project summary..."
+            minHeight="180px"
+            maxHeight="360px"
+            height="260px"
+          />
+        </details>
       </section>
     </section>
   );

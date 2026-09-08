@@ -47,15 +47,11 @@ When no usable project is configured, Adashi shows a blocking onboarding flow in
 
 ### Project Memory
 
-Each project has editable long-term memory and a memory protocol. Agents can read this memory through MCP before starting work, so stable project knowledge does not need to be repeated in every prompt.
+Project memory is a short handover aid. Writing a note is optional: save only important decisions, non-obvious constraints, or unresolved blockers with a concrete next step. Skip routine task reports, successful checks, repeated facts, and tool-availability confirmations. Tasks, formal design, and QA hold their own detail.
 
-Typical memory entries include:
+The dashboard and `run.start` injection show the shared summary and retained handovers, with newest handovers first. `adashi_get_memory` exposes the same content and its limits. New notes are limited to 1,000 characters and the editable shared summary to 4,000 characters. Adashi retains at most 20 notes and 12,000 characters across summary and notes, deleting oldest notes first. Oversized new writes are rejected with guidance to shorten them.
 
-- Architectural decisions
-- Recent implementation notes
-- Known tool quirks
-- Verification commands
-- Project-specific boundaries and preferences
+Opening existing project memory automatically replaces either old built-in mandatory-write protocol; custom protocols remain unchanged. Existing oversized summaries and individual notes retain their beginning, then oldest notes are deleted until the total budget is met. This runs transactionally and updates the project revision. Memory operation receipts retain identity without historical bodies: retries return current memory, and expired note operations cannot resurrect deleted notes. SQLite may reuse freed pages without shrinking the database file immediately.
 
 ### Lifecycle Rule Injection
 
