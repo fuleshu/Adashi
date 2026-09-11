@@ -128,9 +128,9 @@ pub fn build(
         } else if memory.memory.chars().count() <= SUMMARY_BUDGET {
             format!("Current summary:\n{}", memory.memory.trim())
         } else {
-            format!("Current summary omitted in full: exceeds the {SUMMARY_BUDGET}-character startup budget. Retrieve it with adashi_get_memory before work that needs project constraints.")
+            format!("Current summary omitted in full: exceeds the {SUMMARY_BUDGET}-character startup budget. Retrieve it with adashi_memory operation get before work that needs project constraints.")
         };
-        let body = format!("# Project memory\n{summary}\nHistorical handovers are not current state and are not injected. Use adashi_get_memory with query, runId or taskId when relevant; superseded notes require includeSuperseded=true.");
+        let body = format!("# Project memory\n{summary}\nHistorical handovers are not current state and are not injected. Use adashi_memory operation get with query, runId or taskId when relevant; superseded notes require includeSuperseded=true.");
         result.push(
             "memory.summary",
             "memory",
@@ -166,7 +166,7 @@ fn design_index(db: &Connection, project_id: i64) -> Result<String, String> {
         "SELECT COUNT(*) FROM c4_elements e JOIN design_workspaces w ON w.id=e.workspace_id WHERE w.project_id=?1",
         [project_id], |row| row.get(0),
     ).map_err(|e| e.to_string())?;
-    let mut output = String::from("# Formal design index\nRetrieve relevant guidance with adashi_design_get_bindings(files/symbols), adashi_design_get_scope(elementId) or adashi_design_get_by_ids(ids). Use adashi_design_search(query) for entries absent here. UML types: class, sequence, flow, state; UI mockups are separate.\n");
+    let mut output = String::from("# Formal design index\nRetrieve relevant guidance with adashi_design operations get_bindings(files/symbols), get_scope(elementId) or get_by_ids(ids). Use the search operation(query) for entries absent here. UML types: class, sequence, flow, state; UI mockups are separate.\n");
     let footer = "\nIndex only: descriptions, relationships, artifacts, bindings and source require explicit retrieval.";
     let mut statement = db.prepare(
         "SELECT e.external_id, e.parent_external_id, e.element_type, e.name, COALESCE(rv.version,0)

@@ -20,8 +20,16 @@ const LEGACY_BOUNDED_MEMORY_RULE: &str = r#"PROJECT MEMORY PROTOCOL:
 - Keep each handover focused and within 1,000 characters, keyed by the current run and optional task. Normal agents must not replace the shared summary.
 - Adashi retains at most 12,000 characters across the summary and up to 20 recent handovers, removing oldest notes first. Memory is a short handover aid, not a log or archive."#;
 
-pub const DEFAULT_MEMORY_RULE: &str = r#"PROJECT MEMORY PROTOCOL:
+/// Previous default that referenced the pre-grouping tool names; migrated on load.
+const LEGACY_V2_MEMORY_RULE: &str = r#"PROJECT MEMORY PROTOCOL:
 - run.start supplies the current summary within a separate 2,000-character budget, never the handover log. For relevant prior decisions, constraints or blockers, call adashi_get_memory with query, runId or taskId. General requests may need memory too; operational requests can select memoryContext=protocolOnly.
+- Historical handovers are dated evidence, not authoritative current state. Resolved notes are hidden by default; includeSuperseded=true retrieves their provenance. If summary is omitted, retrieve it before work requiring project constraints.
+- Writing is optional: append only important durable decisions, non-obvious constraints, or unresolved blockers with a concrete next step. Skip routine reports, checks, tool confirmations and facts already in tasks, design or QA.
+- Keep complete handovers within 1,000 characters. Normal agents must not replace the shared summary. Only an authorized coordinator may update the summary and resolve explicitly reviewed note ids under expectedVersion.
+- Retention is separate: summary <=4,000 characters, <=20 handovers, <=12,000 total characters, oldest removed first. Oversized new writes fail; legacy omissions are explicit."#;
+
+pub const DEFAULT_MEMORY_RULE: &str = r#"PROJECT MEMORY PROTOCOL:
+- run.start supplies the current summary within a separate 2,000-character budget, never the handover log. For relevant prior decisions, constraints or blockers, call adashi_memory with operation get and query, runId or taskId. General requests may need memory too; operational requests can select memoryContext=protocolOnly.
 - Historical handovers are dated evidence, not authoritative current state. Resolved notes are hidden by default; includeSuperseded=true retrieves their provenance. If summary is omitted, retrieve it before work requiring project constraints.
 - Writing is optional: append only important durable decisions, non-obvious constraints, or unresolved blockers with a concrete next step. Skip routine reports, checks, tool confirmations and facts already in tasks, design or QA.
 - Keep complete handovers within 1,000 characters. Normal agents must not replace the shared summary. Only an authorized coordinator may update the summary and resolve explicitly reviewed note ids under expectedVersion.
@@ -108,6 +116,7 @@ fn maintain_memory(db: &Connection, project_id: i64) -> Result<(), String> {
         LEGACY_APPEND_MEMORY_RULE,
         LEGACY_UPDATE_MEMORY_RULE,
         LEGACY_BOUNDED_MEMORY_RULE,
+        LEGACY_V2_MEMORY_RULE,
     ]
     .contains(&legacy_rule.trim());
     if migrated {

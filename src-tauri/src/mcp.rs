@@ -14,6 +14,7 @@ use crate::tasks::{
     self, FinishTask, NewTask, Task, TaskDesignSpecificationLink, TaskDesignSpecificationLinkInput,
     UpdateTask,
 };
+use rmcp::handler::server::tool::IntoCallToolResult;
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::{CallToolResult, ContentBlock, ErrorData};
 use rmcp::transport::stdio;
@@ -71,7 +72,7 @@ struct ProjectParams {
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct MemoryParams {
+struct GetMemoryParams {
     project_id: String,
     /// Literal case-insensitive substring in retained note bodies.
     query: Option<String>,
@@ -578,12 +579,253 @@ struct ResourceIntentListResult {
     intents: Vec<ResourceIntent>,
 }
 
+/// Capability menu for the consolidated design/mockup tool. The model reads these
+/// values straight from the JSON schema, so no memorization is required.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum DesignOperation {
+    Save,
+    GetScope,
+    GetByIds,
+    Search,
+    GetOverview,
+    GetBindings,
+    SetElementDescriptions,
+    MockupListPendingRevisions,
+    MockupGetRevisionContext,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum TasksOperation {
+    Create,
+    List,
+    Update,
+    Finish,
+    Delete,
+    Get,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum QaOperation {
+    CreateJob,
+    UpdateJob,
+    DeleteJob,
+    ListJobs,
+    RunJobs,
+    ListRuns,
+    GetJob,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum MemoryOperation {
+    Get,
+    Append,
+    Update,
+    UpdateRule,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum RulesOperation {
+    List,
+    Create,
+    Update,
+    Delete,
+    GetRuleInjections,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum IntentsOperation {
+    Publish,
+    List,
+}
+
+/// Consolidated design/mockup arguments. `operation` selects the sub-API; fields not
+/// used by the selected operation are ignored. Per-operation required fields are
+/// validated at call time.
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DesignParams {
+    operation: DesignOperation,
+    project_id: String,
+    /// get_overview: how deep to expand the C4/UML tree.
+    #[schemars(schema_with = "nonnegative_count_schema")]
+    max_depth: Option<usize>,
+    /// get_scope: root element id.
+    element_id: Option<String>,
+    /// get_scope: include ancestors.
+    include_ancestors: Option<bool>,
+    /// get_scope: child expansion depth.
+    #[schemars(schema_with = "nonnegative_count_schema")]
+    children_depth: Option<usize>,
+    /// get_scope: include canonical source.
+    include_source: Option<bool>,
+    /// search: text query.
+    query: Option<String>,
+    /// search: kinds to restrict results to.
+    kinds: Option<Vec<String>>,
+    /// search: result limit.
+    #[schemars(schema_with = "nonnegative_count_schema")]
+    limit: Option<usize>,
+    /// get_by_ids: stored design ids.
+    ids: Option<Vec<String>>,
+    /// get_bindings: files to resolve bindings for.
+    files: Option<Vec<String>>,
+    /// get_bindings: symbols to resolve bindings for.
+    symbols: Option<Vec<String>>,
+    /// save: mutation guard.
+    guard: Option<MutationGuard>,
+    /// save: human intent for the change.
+    change_intent: Option<String>,
+    /// save: heterogeneous changeset.
+    changes: Option<Vec<DesignChange>>,
+    /// set_element_descriptions: exact externalId/description updates.
+    updates: Option<Vec<ElementDescriptionUpdate>>,
+    /// mockup_get_revision_context: mockup external id.
+    external_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TasksParams {
+    operation: TasksOperation,
+    project_id: String,
+    /// create/update/finish/delete: idempotency key.
+    operation_id: Option<String>,
+    /// create (required) / update: task title.
+    title: Option<String>,
+    /// create/update: task description.
+    description: Option<String>,
+    /// create/update: ordered design specification links.
+    design_specification_links: Option<Vec<TaskDesignSpecificationLinkInput>>,
+    /// update: new state.
+    state: Option<String>,
+    /// update/finish/delete: expected task version.
+    expected_version: Option<i64>,
+    /// update/finish/delete/get: task id.
+    task_id: Option<i64>,
+    /// finish: completion memo.
+    completion_memo: Option<String>,
+    /// finish: files created.
+    created_files: Option<Vec<String>>,
+    /// finish: files changed.
+    changed_files: Option<Vec<String>>,
+    /// list: states filter (omitted=all, empty=none).
+    states: Option<Vec<tasks::TaskState>>,
+    /// list: page size (default 25, 1..=100).
+    limit: Option<u32>,
+    /// list: opaque continuation cursor.
+    cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct QaParams {
+    operation: QaOperation,
+    project_id: String,
+    /// list_jobs / run_jobs: selection filters.
+    query: Option<QaJobQuery>,
+    /// get_job/update_job/delete_job: job id.
+    qa_job_id: Option<i64>,
+    /// create_job/update_job/delete_job/run_jobs: idempotency key.
+    operation_id: Option<String>,
+    /// update_job/delete_job: expected job version.
+    expected_version: Option<i64>,
+    /// create_job/update_job: name, command, etc.
+    name: Option<String>,
+    description: Option<String>,
+    command: Option<String>,
+    working_directory: Option<String>,
+    shell: Option<String>,
+    timeout_seconds: Option<i64>,
+    enabled: Option<bool>,
+    design_specification_links: Option<Vec<QaDesignLinkInput>>,
+    task_ids: Option<Vec<i64>>,
+    tags: Option<Vec<String>>,
+    /// run_jobs: trigger source label.
+    trigger_source: Option<String>,
+    /// list_runs: max runs returned.
+    limit: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MemoryParams {
+    operation: MemoryOperation,
+    project_id: String,
+    /// get: literal case-insensitive substring in note bodies.
+    query: Option<String>,
+    /// get (filter) / append (note run id).
+    run_id: Option<String>,
+    /// get (filter) / append (note task id).
+    task_id: Option<i64>,
+    /// get: include resolved notes with provenance.
+    #[serde(default)]
+    include_superseded: bool,
+    /// append: note id.
+    note_id: Option<String>,
+    /// append: note body.
+    body: Option<String>,
+    /// append/update/update_rule: idempotency key.
+    operation_id: Option<String>,
+    /// update/update_rule: expected version.
+    expected_version: Option<i64>,
+    /// update: replacement shared summary.
+    memory: Option<String>,
+    /// update: reviewed note ids resolved by this summary.
+    #[serde(default)]
+    superseded_note_ids: Vec<String>,
+    /// update_rule: replacement memory protocol rule.
+    rule: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RulesParams {
+    operation: RulesOperation,
+    project_id: String,
+    /// get_rule_injections/create/update: rule intend.
+    intend: Option<String>,
+    /// get_rule_injections/create/update: lifecycle hook.
+    hook: Option<String>,
+    /// get_rule_injections: memory context mode.
+    #[serde(default)]
+    memory_context: MemoryContext,
+    /// create/update/delete: idempotency key.
+    operation_id: Option<String>,
+    /// create/update: rule name.
+    name: Option<String>,
+    /// create/update: enabled flag.
+    enabled: Option<bool>,
+    /// create/update: rule prompt.
+    prompt: Option<String>,
+    /// update/delete: expected rule version.
+    expected_version: Option<i64>,
+    /// update/delete: rule id.
+    rule_id: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct IntentsParams {
+    operation: IntentsOperation,
+    project_id: String,
+    /// publish: agent run id.
+    agent_run_id: Option<String>,
+    /// publish: resource kind.
+    resource_kind: Option<String>,
+    /// publish: resource id.
+    resource_id: Option<String>,
+    /// publish: time-to-live in seconds.
+    ttl_seconds: Option<i64>,
+}
+
 #[tool_router(server_handler)]
 impl AdashiMcpServer {
-    #[tool(
-        name = "adashi_list_rules",
-        description = "List all Adashi rule prompts for a project."
-    )]
     fn list_rules(
         &self,
         Parameters(params): Parameters<ProjectParams>,
@@ -597,10 +839,6 @@ impl AdashiMcpServer {
         }))
     }
 
-    #[tool(
-        name = "adashi_get_rule_injections",
-        description = "Lifecycle v2: apply injectionPrompt once at EVERY required hook, even if rules is empty. Sections/rules contain metadata only; status=empty means no instructions apply. run.start supplies the full memory protocol plus a bounded current summary (memoryContext=protocolOnly skips summary), never the handover log. Design/implementation add full fixed guidance and a bounded design index; retrieve scope/bindings explicitly. Cache by project, intend, hook, section id and contentVersion; apply changed sections."
-    )]
     fn get_rule_injections(
         &self,
         Parameters(params): Parameters<RuleInjectionParams>,
@@ -619,10 +857,6 @@ impl AdashiMcpServer {
         .map_err(tool_error)
     }
 
-    #[tool(
-        name = "adashi_list_tasks",
-        description = "v2 bounded summaries (id, number, title, titleTruncated, state, version); title is at most 240 characters. states omitted/null means ALL; [] means NONE; invalid values fail. Default limit 25, max 100. filteredTotal/hasMore distinguish complete empty results from partial pages. Follow nextCursor with the same states; stale cursors fail and require restarting. Full titles, descriptions, evidence, files and linked design: adashi_get_task."
-    )]
     fn list_tasks(
         &self,
         Parameters(mut params): Parameters<ListTasksParams>,
@@ -708,11 +942,6 @@ impl AdashiMcpServer {
         }))
     }
 
-    #[tool(
-        name = "adashi_get_task",
-        description = "Read one Adashi task and return all linked design specification branches. Directly linked UI mockups include their full stored revision content and an accepted PNG image content block; mockups discovered only through a wider design branch remain lightweight summaries.",
-        output_schema = rmcp::handler::server::tool::schema_for_type::<TaskReadResult>()
-    )]
     fn get_task(
         &self,
         Parameters(params): Parameters<TaskIdParams>,
@@ -752,13 +981,9 @@ impl AdashiMcpServer {
         Ok(result)
     }
 
-    #[tool(
-        name = "adashi_get_memory",
-        description = "Explicit memory detail: current summary/protocol and retained historical handovers (max 20, total retention 12,000 characters). Filter notes by literal case-insensitive query, exact runId and/or taskId (AND). Omitted filters select all active notes; includeSuperseded=true also returns resolved notes marked supersededByVersion. retainedNotes/matchedNotes describe this complete bounded selection. History is dated evidence, not current state."
-    )]
     fn get_memory(
         &self,
-        Parameters(params): Parameters<MemoryParams>,
+        Parameters(params): Parameters<GetMemoryParams>,
     ) -> Result<Json<MemoryReadResult>, ErrorData> {
         let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
@@ -791,10 +1016,6 @@ impl AdashiMcpServer {
         }))
     }
 
-    #[tool(
-        name = "adashi_create_rule",
-        description = "Create an Adashi rule prompt for a project."
-    )]
     fn create_rule(
         &self,
         Parameters(params): Parameters<CreateRuleParams>,
@@ -836,10 +1057,6 @@ impl AdashiMcpServer {
         }))
     }
 
-    #[tool(
-        name = "adashi_update_rule",
-        description = "Update an Adashi rule prompt by id. The write bumps the project revision so the desktop UI can merge the changed rule automatically."
-    )]
     fn update_rule(
         &self,
         Parameters(params): Parameters<UpdateRuleParams>,
@@ -899,10 +1116,6 @@ impl AdashiMcpServer {
         }))
     }
 
-    #[tool(
-        name = "adashi_delete_rule",
-        description = "Delete an Adashi rule prompt by id."
-    )]
     fn delete_rule(
         &self,
         Parameters(params): Parameters<DeleteRuleParams>,
@@ -943,10 +1156,6 @@ impl AdashiMcpServer {
         }))
     }
 
-    #[tool(
-        name = "adashi_create_task",
-        description = "Create a project-local Adashi task with optional ordered design specification links. The write bumps project revision."
-    )]
     fn create_task(
         &self,
         Parameters(params): Parameters<CreateTaskParams>,
@@ -995,10 +1204,6 @@ impl AdashiMcpServer {
         }))
     }
 
-    #[tool(
-        name = "adashi_update_task",
-        description = "Update selected fields of an Adashi task, including state and full ordered design specification link replacement. Omitted fields keep current values."
-    )]
     fn update_task(
         &self,
         Parameters(params): Parameters<UpdateTaskParams>,
@@ -1065,10 +1270,6 @@ impl AdashiMcpServer {
         }))
     }
 
-    #[tool(
-        name = "adashi_finish_task",
-        description = "Mark an Adashi task finished. This is AI-owned and records a completion memo plus created and changed files."
-    )]
     fn finish_task(
         &self,
         Parameters(params): Parameters<FinishTaskParams>,
@@ -1134,10 +1335,6 @@ impl AdashiMcpServer {
         }))
     }
 
-    #[tool(
-        name = "adashi_delete_task",
-        description = "Delete a project-local Adashi task by id. The write bumps project revision."
-    )]
     fn delete_task(
         &self,
         Parameters(params): Parameters<DeleteTaskParams>,
@@ -1193,10 +1390,6 @@ impl AdashiMcpServer {
         }))
     }
 
-    #[tool(
-        name = "adashi_list_qa_jobs",
-        description = "List project-local QA jobs with derived state and optional filters by state, tag, task link, design link, enabled flag, or explicit job ids."
-    )]
     fn list_qa_jobs(
         &self,
         Parameters(params): Parameters<ListQaJobsParams>,
@@ -1215,10 +1408,6 @@ impl AdashiMcpServer {
         }))
     }
 
-    #[tool(
-        name = "adashi_get_qa_job",
-        description = "Read one project-local QA job with links, tags, latest evidence, and derived state."
-    )]
     fn get_qa_job(
         &self,
         Parameters(params): Parameters<QaJobIdParams>,
@@ -1237,10 +1426,6 @@ impl AdashiMcpServer {
         }))
     }
 
-    #[tool(
-        name = "adashi_create_qa_job",
-        description = "Create a reusable project-local QA job definition with optional design links, task links, and tags. The write bumps project revision."
-    )]
     fn create_qa_job(
         &self,
         Parameters(params): Parameters<CreateQaJobParams>,
@@ -1292,10 +1477,6 @@ impl AdashiMcpServer {
         }))
     }
 
-    #[tool(
-        name = "adashi_update_qa_job",
-        description = "Update a QA job definition, replacing provided design links, task links, or tags when those arrays are present. The write bumps project revision."
-    )]
     fn update_qa_job(
         &self,
         Parameters(params): Parameters<UpdateQaJobParams>,
@@ -1367,10 +1548,6 @@ impl AdashiMcpServer {
         }))
     }
 
-    #[tool(
-        name = "adashi_delete_qa_job",
-        description = "Delete a reusable project-local QA job definition. Historical run groups remain, but deleted job evidence is cascaded with the job definition in v1."
-    )]
     fn delete_qa_job(
         &self,
         Parameters(params): Parameters<DeleteQaJobParams>,
@@ -1412,10 +1589,6 @@ impl AdashiMcpServer {
         }))
     }
 
-    #[tool(
-        name = "adashi_run_qa_jobs",
-        description = "Run enabled QA jobs selected by explicit ids or query filters. Creates an immutable ad hoc run group and per-job evidence; v1 does not persist batch definitions."
-    )]
     fn run_qa_jobs(
         &self,
         Parameters(params): Parameters<RunQaJobsParams>,
@@ -1451,10 +1624,6 @@ impl AdashiMcpServer {
         }))
     }
 
-    #[tool(
-        name = "adashi_list_qa_runs",
-        description = "List immutable QA execution groups with per-job run evidence, newest first."
-    )]
     fn list_qa_runs(
         &self,
         Parameters(params): Parameters<ListQaRunsParams>,
@@ -1473,10 +1642,6 @@ impl AdashiMcpServer {
         }))
     }
 
-    #[tool(
-        name = "adashi_update_memory",
-        description = "Authorized coordinator only: replace the shared current summary under expectedVersion (max 4,000 characters; <=2,000 fits startup). Optionally mark exact reviewed supersededNoteIds resolved by this summary version, atomically. Unknown/duplicate ids and stale versions fail; concurrently appended notes remain active. Resolved notes retain provenance within normal retention, retrievable with includeSuperseded=true. Normal agents append important handovers instead."
-    )]
     fn update_memory(
         &self,
         Parameters(params): Parameters<UpdateMemoryParams>,
@@ -1501,10 +1666,6 @@ impl AdashiMcpServer {
         }))
     }
 
-    #[tool(
-        name = "adashi_update_memory_rule",
-        description = "Replace the separately versioned SQL-backed memory protocol rule using expectedVersion and operationId."
-    )]
     fn update_memory_rule(
         &self,
         Parameters(params): Parameters<UpdateMemoryRuleParams>,
@@ -1528,10 +1689,6 @@ impl AdashiMcpServer {
         }))
     }
 
-    #[tool(
-        name = "adashi_append_memory_note",
-        description = "Optionally append one IMPORTANT handover, at most 1,000 characters, keyed by run and optional task. Skip routine task logs, checks, repeated facts, and tool-availability confirmations. Oldest notes expire automatically above 12,000 total memory characters or 20 notes; retries cannot restore expired notes."
-    )]
     fn append_memory_note(
         &self,
         Parameters(params): Parameters<AppendMemoryNoteParams>,
@@ -1558,10 +1715,6 @@ impl AdashiMcpServer {
         }))
     }
 
-    #[tool(
-        name = "adashi_publish_resource_intent",
-        description = "Publish or renew one expiring advisory resource intent. Intents help agents schedule work but never grant write authority or block a valid versioned commit."
-    )]
     fn publish_resource_intent(
         &self,
         Parameters(params): Parameters<PublishIntentParams>,
@@ -1584,10 +1737,6 @@ impl AdashiMcpServer {
         }))
     }
 
-    #[tool(
-        name = "adashi_list_resource_intents",
-        description = "List live advisory resource intents after pruning expired rows."
-    )]
     fn list_resource_intents(
         &self,
         Parameters(params): Parameters<ProjectParams>,
@@ -1602,10 +1751,6 @@ impl AdashiMcpServer {
         }))
     }
 
-    #[tool(
-        name = "adashi_design_get_overview",
-        description = "Read a compact top-down C4/UML design overview and attached UI mockup inventory for the selected project. Mockups are returned as a separate artifact kind and are not added to umlArtifactTypes. This is deterministic retrieval; the agent chooses the relevant design scope and artifact type."
-    )]
     fn design_get_overview(
         &self,
         Parameters(params): Parameters<DesignOverviewParams>,
@@ -1617,10 +1762,6 @@ impl AdashiMcpServer {
         Ok(Json(overview))
     }
 
-    #[tool(
-        name = "adashi_design_get_scope",
-        description = "Read an explicit C4 branch by element id, optionally including ancestors, children, typed UML artifacts attached to elements or relationships, bindings, relationships, and canonical source."
-    )]
     fn design_get_scope(
         &self,
         Parameters(params): Parameters<DesignScopeParams>,
@@ -1639,10 +1780,6 @@ impl AdashiMcpServer {
         Ok(Json(scope))
     }
 
-    #[tool(
-        name = "adashi_design_search",
-        description = "Run deterministic text search over stored design elements, relationships, typed UML artifacts, UI mockups, and source. The agent must reason over the hits; the MCP does not infer task context."
-    )]
     fn design_search(
         &self,
         Parameters(params): Parameters<DesignSearchParams>,
@@ -1660,10 +1797,6 @@ impl AdashiMcpServer {
         Ok(Json(result))
     }
 
-    #[tool(
-        name = "adashi_design_get_by_ids",
-        description = "Read explicit design elements, relationships, typed UML artifacts, UI mockups, supported UML artifact types, and bindings by stored design ids."
-    )]
     fn design_get_by_ids(
         &self,
         Parameters(params): Parameters<DesignByIdsParams>,
@@ -1674,10 +1807,6 @@ impl AdashiMcpServer {
         Ok(Json(result))
     }
 
-    #[tool(
-        name = "adashi_design_get_bindings",
-        description = "Read design artifacts explicitly bound to files or symbols, including typed UML artifact metadata when bindings target diagrams. This is stored traceability, not task interpretation."
-    )]
     fn design_get_bindings(
         &self,
         Parameters(params): Parameters<DesignBindingsParams>,
@@ -1694,10 +1823,6 @@ impl AdashiMcpServer {
         Ok(Json(result))
     }
 
-    #[tool(
-        name = "adashi_design_save",
-        description = "Advanced transactional save for heterogeneous formal C4, Mermaid UML, binding, and UI-mockup changesets. For element-description work, use adashi_design_set_element_descriptions instead: it has a smaller schema and cannot accidentally create relationships or UML. This advanced tool uses a closed tagged union, protects generated Structurizr artifacts, rejects all-no-op retries without bumping revision, and returns only a compact outcome. UI mockups remain separate from umlArtifactTypes; proposals still require explicit user acceptance."
-    )]
     fn design_save(
         &self,
         Parameters(params): Parameters<DesignSaveParams>,
@@ -1715,10 +1840,6 @@ impl AdashiMcpServer {
         Ok(Json(result))
     }
 
-    #[tool(
-        name = "adashi_design_set_element_descriptions",
-        description = "Atomically set complete descriptions on existing C4 elements only. Use this narrow tool for description-filling tasks instead of adashi_design_save. Each update contains exactly externalId and description: it cannot create elements, relationships, UML, bindings, or mockups. Unknown ids, duplicate ids, empty descriptions, stale revisions, and all-no-op retries are rejected without storing or bumping revision. Success returns a compact outcome."
-    )]
     fn design_set_element_descriptions(
         &self,
         Parameters(params): Parameters<SetElementDescriptionsParams>,
@@ -1735,10 +1856,6 @@ impl AdashiMcpServer {
         Ok(Json(result))
     }
 
-    #[tool(
-        name = "adashi_mockup_list_pending_revisions",
-        description = "List project-local UI mockups awaiting an AI revision or user acceptance. Returns stored facts only."
-    )]
     fn mockup_list_pending_revisions(
         &self,
         Parameters(params): Parameters<ProjectParams>,
@@ -1757,10 +1874,6 @@ impl AdashiMcpServer {
         }))
     }
 
-    #[tool(
-        name = "adashi_mockup_get_revision_context",
-        description = "Read deterministic UI mockup revision facts: accepted and working SVG, lightweight manifest, ordered edit operations, vector annotations, proposal metadata, and an Adashi-rendered PNG image content block. Performs no AI interpretation."
-    )]
     fn mockup_get_revision_context(
         &self,
         Parameters(params): Parameters<MockupContextParams>,
@@ -1788,6 +1901,451 @@ impl AdashiMcpServer {
         let mut result = CallToolResult::structured(structured);
         result.content.push(ContentBlock::image(png, "image/png"));
         Ok(result)
+    }
+
+    #[tool(
+        name = "adashi_design",
+        description = "Formal C4/UML design, binding, and UI-mockup API. Select an `operation`: save (transactional changeset), get_scope (read a C4 branch), get_by_ids (read explicit ids), search (text search), get_overview (top-down overview), get_bindings (file/symbol bindings), set_element_descriptions (set C4 element descriptions), mockup_list_pending_revisions, mockup_get_revision_context. Required fields are listed per operation in the schema.",
+        annotations(read_only_hint = true, destructive_hint = false)
+    )]
+    fn design(
+        &self,
+        Parameters(params): Parameters<DesignParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match params.operation {
+            DesignOperation::Save => {
+                let guard = required(params.guard, "guard")?;
+                let change_intent = required(params.change_intent, "changeIntent")?;
+                let changes = required(params.changes, "changes")?;
+                self.design_save(Parameters(DesignSaveParams {
+                    project_id: params.project_id,
+                    guard,
+                    change_intent,
+                    changes,
+                }))?
+                .into_call_tool_result()
+            }
+            DesignOperation::GetScope => {
+                let element_id = required(params.element_id, "elementId")?;
+                self.design_get_scope(Parameters(DesignScopeParams {
+                    project_id: params.project_id,
+                    element_id,
+                    include_ancestors: params.include_ancestors,
+                    children_depth: params.children_depth,
+                    include_source: params.include_source,
+                }))?
+                .into_call_tool_result()
+            }
+            DesignOperation::GetByIds => {
+                let ids = required(params.ids, "ids")?;
+                self.design_get_by_ids(Parameters(DesignByIdsParams {
+                    project_id: params.project_id,
+                    ids,
+                }))?
+                .into_call_tool_result()
+            }
+            DesignOperation::Search => {
+                let query = required(params.query, "query")?;
+                self.design_search(Parameters(DesignSearchParams {
+                    project_id: params.project_id,
+                    query,
+                    kinds: params.kinds,
+                    limit: params.limit,
+                }))?
+                .into_call_tool_result()
+            }
+            DesignOperation::GetOverview => self
+                .design_get_overview(Parameters(DesignOverviewParams {
+                    project_id: params.project_id,
+                    max_depth: params.max_depth,
+                }))?
+                .into_call_tool_result(),
+            DesignOperation::GetBindings => self
+                .design_get_bindings(Parameters(DesignBindingsParams {
+                    project_id: params.project_id,
+                    files: params.files,
+                    symbols: params.symbols,
+                }))?
+                .into_call_tool_result(),
+            DesignOperation::SetElementDescriptions => {
+                let guard = required(params.guard, "guard")?;
+                let updates = required(params.updates, "updates")?;
+                self.design_set_element_descriptions(Parameters(SetElementDescriptionsParams {
+                    project_id: params.project_id,
+                    guard,
+                    updates,
+                }))?
+                .into_call_tool_result()
+            }
+            DesignOperation::MockupListPendingRevisions => self
+                .mockup_list_pending_revisions(Parameters(ProjectParams {
+                    project_id: params.project_id,
+                }))?
+                .into_call_tool_result(),
+            DesignOperation::MockupGetRevisionContext => {
+                let external_id = required(params.external_id, "externalId")?;
+                self.mockup_get_revision_context(Parameters(MockupContextParams {
+                    project_id: params.project_id,
+                    external_id,
+                }))?
+                .into_call_tool_result()
+            }
+        }
+    }
+
+    #[tool(
+        name = "adashi_tasks",
+        description = "Project task API. Select an `operation`: create, list, update, finish, delete, get. Required fields are listed per operation in the schema.",
+        annotations(read_only_hint = true, destructive_hint = false)
+    )]
+    fn tasks(
+        &self,
+        Parameters(params): Parameters<TasksParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match params.operation {
+            TasksOperation::Create => {
+                let operation_id = required(params.operation_id, "operationId")?;
+                let title = required(params.title, "title")?;
+                self.create_task(Parameters(CreateTaskParams {
+                    project_id: params.project_id,
+                    operation_id,
+                    title,
+                    description: params.description,
+                    design_specification_links: params.design_specification_links,
+                }))?
+                .into_call_tool_result()
+            }
+            TasksOperation::List => self
+                .list_tasks(Parameters(ListTasksParams {
+                    project_id: params.project_id,
+                    states: params.states,
+                    limit: params.limit,
+                    cursor: params.cursor,
+                }))?
+                .into_call_tool_result(),
+            TasksOperation::Update => {
+                let operation_id = required(params.operation_id, "operationId")?;
+                let expected_version = required(params.expected_version, "expectedVersion")?;
+                let task_id = required(params.task_id, "taskId")?;
+                self.update_task(Parameters(UpdateTaskParams {
+                    project_id: params.project_id,
+                    operation_id,
+                    expected_version,
+                    task_id,
+                    title: params.title,
+                    description: params.description,
+                    state: params.state,
+                    design_specification_links: params.design_specification_links,
+                }))?
+                .into_call_tool_result()
+            }
+            TasksOperation::Finish => {
+                let operation_id = required(params.operation_id, "operationId")?;
+                let expected_version = required(params.expected_version, "expectedVersion")?;
+                let task_id = required(params.task_id, "taskId")?;
+                let completion_memo = required(params.completion_memo, "completionMemo")?;
+                self.finish_task(Parameters(FinishTaskParams {
+                    project_id: params.project_id,
+                    operation_id,
+                    expected_version,
+                    task_id,
+                    completion_memo,
+                    created_files: params.created_files,
+                    changed_files: params.changed_files,
+                }))?
+                .into_call_tool_result()
+            }
+            TasksOperation::Delete => {
+                let operation_id = required(params.operation_id, "operationId")?;
+                let expected_version = required(params.expected_version, "expectedVersion")?;
+                let task_id = required(params.task_id, "taskId")?;
+                self.delete_task(Parameters(DeleteTaskParams {
+                    project_id: params.project_id,
+                    task_id,
+                    operation_id,
+                    expected_version,
+                }))?
+                .into_call_tool_result()
+            }
+            TasksOperation::Get => {
+                let task_id = required(params.task_id, "taskId")?;
+                self.get_task(Parameters(TaskIdParams {
+                    project_id: params.project_id,
+                    task_id,
+                }))?
+                .into_call_tool_result()
+            }
+        }
+    }
+
+    #[tool(
+        name = "adashi_qa",
+        description = "QA job definitions and execution API. Select an `operation`: create_job, update_job, delete_job, list_jobs, run_jobs, list_runs, get_job. Required fields are listed per operation in the schema.",
+        annotations(read_only_hint = false, destructive_hint = true)
+    )]
+    fn qa(&self, Parameters(params): Parameters<QaParams>) -> Result<CallToolResult, ErrorData> {
+        match params.operation {
+            QaOperation::ListJobs => self
+                .list_qa_jobs(Parameters(ListQaJobsParams {
+                    project_id: params.project_id,
+                    query: params.query,
+                }))?
+                .into_call_tool_result(),
+            QaOperation::GetJob => {
+                let qa_job_id = required(params.qa_job_id, "qaJobId")?;
+                self.get_qa_job(Parameters(QaJobIdParams {
+                    project_id: params.project_id,
+                    qa_job_id,
+                }))?
+                .into_call_tool_result()
+            }
+            QaOperation::CreateJob => {
+                let operation_id = required(params.operation_id, "operationId")?;
+                let name = required(params.name, "name")?;
+                let command = required(params.command, "command")?;
+                self.create_qa_job(Parameters(CreateQaJobParams {
+                    project_id: params.project_id,
+                    operation_id,
+                    name,
+                    description: params.description,
+                    command,
+                    working_directory: params.working_directory,
+                    shell: params.shell,
+                    timeout_seconds: params.timeout_seconds,
+                    enabled: params.enabled,
+                    design_specification_links: params.design_specification_links,
+                    task_ids: params.task_ids,
+                    tags: params.tags,
+                }))?
+                .into_call_tool_result()
+            }
+            QaOperation::UpdateJob => {
+                let operation_id = required(params.operation_id, "operationId")?;
+                let expected_version = required(params.expected_version, "expectedVersion")?;
+                let qa_job_id = required(params.qa_job_id, "qaJobId")?;
+                self.update_qa_job(Parameters(UpdateQaJobParams {
+                    project_id: params.project_id,
+                    operation_id,
+                    expected_version,
+                    qa_job_id,
+                    name: params.name,
+                    description: params.description,
+                    command: params.command,
+                    working_directory: params.working_directory,
+                    shell: params.shell,
+                    timeout_seconds: params.timeout_seconds,
+                    enabled: params.enabled,
+                    design_specification_links: params.design_specification_links,
+                    task_ids: params.task_ids,
+                    tags: params.tags,
+                }))?
+                .into_call_tool_result()
+            }
+            QaOperation::DeleteJob => {
+                let operation_id = required(params.operation_id, "operationId")?;
+                let expected_version = required(params.expected_version, "expectedVersion")?;
+                let qa_job_id = required(params.qa_job_id, "qaJobId")?;
+                self.delete_qa_job(Parameters(DeleteQaJobParams {
+                    project_id: params.project_id,
+                    qa_job_id,
+                    operation_id,
+                    expected_version,
+                }))?
+                .into_call_tool_result()
+            }
+            QaOperation::RunJobs => {
+                let operation_id = required(params.operation_id, "operationId")?;
+                let query = required(params.query, "query")?;
+                self.run_qa_jobs(Parameters(RunQaJobsParams {
+                    project_id: params.project_id,
+                    operation_id,
+                    query,
+                    trigger_source: params.trigger_source,
+                }))?
+                .into_call_tool_result()
+            }
+            QaOperation::ListRuns => self
+                .list_qa_runs(Parameters(ListQaRunsParams {
+                    project_id: params.project_id,
+                    limit: params.limit,
+                }))?
+                .into_call_tool_result(),
+        }
+    }
+
+    #[tool(
+        name = "adashi_memory",
+        description = "Project memory API. Select an `operation`: get (summary, protocol and notes), append (add a handover note), update (coordinator summary replacement), update_rule (memory protocol rule). Required fields are listed per operation in the schema.",
+        annotations(read_only_hint = true, destructive_hint = false)
+    )]
+    fn memory(
+        &self,
+        Parameters(params): Parameters<MemoryParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match params.operation {
+            MemoryOperation::Get => self
+                .get_memory(Parameters(GetMemoryParams {
+                    project_id: params.project_id,
+                    query: params.query,
+                    run_id: params.run_id,
+                    task_id: params.task_id,
+                    include_superseded: params.include_superseded,
+                }))?
+                .into_call_tool_result(),
+            MemoryOperation::Append => {
+                let note_id = required(params.note_id, "noteId")?;
+                let operation_id = required(params.operation_id, "operationId")?;
+                let run_id = required(params.run_id, "runId")?;
+                let body = required(params.body, "body")?;
+                self.append_memory_note(Parameters(AppendMemoryNoteParams {
+                    project_id: params.project_id,
+                    note_id,
+                    operation_id,
+                    run_id,
+                    task_id: params.task_id,
+                    body,
+                }))?
+                .into_call_tool_result()
+            }
+            MemoryOperation::Update => {
+                let operation_id = required(params.operation_id, "operationId")?;
+                let expected_version = required(params.expected_version, "expectedVersion")?;
+                let memory = required(params.memory, "memory")?;
+                self.update_memory(Parameters(UpdateMemoryParams {
+                    project_id: params.project_id,
+                    operation_id,
+                    expected_version,
+                    memory,
+                    superseded_note_ids: params.superseded_note_ids,
+                }))?
+                .into_call_tool_result()
+            }
+            MemoryOperation::UpdateRule => {
+                let operation_id = required(params.operation_id, "operationId")?;
+                let expected_version = required(params.expected_version, "expectedVersion")?;
+                let rule = required(params.rule, "rule")?;
+                self.update_memory_rule(Parameters(UpdateMemoryRuleParams {
+                    project_id: params.project_id,
+                    operation_id,
+                    expected_version,
+                    rule,
+                }))?
+                .into_call_tool_result()
+            }
+        }
+    }
+
+    #[tool(
+        name = "adashi_rules",
+        description = "Lifecycle rule prompts and injection API. Select an `operation`: list, create, update, delete, get_rule_injections. Required fields are listed per operation in the schema.",
+        annotations(read_only_hint = true, destructive_hint = false)
+    )]
+    fn rules(
+        &self,
+        Parameters(params): Parameters<RulesParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match params.operation {
+            RulesOperation::List => self
+                .list_rules(Parameters(ProjectParams {
+                    project_id: params.project_id,
+                }))?
+                .into_call_tool_result(),
+            RulesOperation::Create => {
+                let operation_id = required(params.operation_id, "operationId")?;
+                let name = required(params.name, "name")?;
+                let enabled = required(params.enabled, "enabled")?;
+                let intend = required(params.intend, "intend")?;
+                let hook = required(params.hook, "hook")?;
+                let prompt = required(params.prompt, "prompt")?;
+                self.create_rule(Parameters(CreateRuleParams {
+                    project_id: params.project_id,
+                    operation_id,
+                    name,
+                    enabled,
+                    intend,
+                    hook,
+                    prompt,
+                }))?
+                .into_call_tool_result()
+            }
+            RulesOperation::Update => {
+                let operation_id = required(params.operation_id, "operationId")?;
+                let expected_version = required(params.expected_version, "expectedVersion")?;
+                let rule_id = required(params.rule_id, "ruleId")?;
+                let name = required(params.name, "name")?;
+                let enabled = required(params.enabled, "enabled")?;
+                let intend = required(params.intend, "intend")?;
+                let hook = required(params.hook, "hook")?;
+                let prompt = required(params.prompt, "prompt")?;
+                self.update_rule(Parameters(UpdateRuleParams {
+                    project_id: params.project_id,
+                    operation_id,
+                    expected_version,
+                    rule_id,
+                    name,
+                    enabled,
+                    intend,
+                    hook,
+                    prompt,
+                }))?
+                .into_call_tool_result()
+            }
+            RulesOperation::Delete => {
+                let operation_id = required(params.operation_id, "operationId")?;
+                let expected_version = required(params.expected_version, "expectedVersion")?;
+                let rule_id = required(params.rule_id, "ruleId")?;
+                self.delete_rule(Parameters(DeleteRuleParams {
+                    project_id: params.project_id,
+                    operation_id,
+                    expected_version,
+                    rule_id,
+                }))?
+                .into_call_tool_result()
+            }
+            RulesOperation::GetRuleInjections => {
+                let intend = required(params.intend, "intend")?;
+                let hook = required(params.hook, "hook")?;
+                self.get_rule_injections(Parameters(RuleInjectionParams {
+                    project_id: params.project_id,
+                    intend,
+                    hook,
+                    memory_context: params.memory_context,
+                }))?
+                .into_call_tool_result()
+            }
+        }
+    }
+
+    #[tool(
+        name = "adashi_intents",
+        description = "Advisory resource-intent coordination API. Select an `operation`: publish (create/renew an expiring intent) or list (live intents after pruning). Required fields are listed per operation in the schema.",
+        annotations(read_only_hint = true, destructive_hint = false)
+    )]
+    fn intents(
+        &self,
+        Parameters(params): Parameters<IntentsParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match params.operation {
+            IntentsOperation::Publish => {
+                let agent_run_id = required(params.agent_run_id, "agentRunId")?;
+                let resource_kind = required(params.resource_kind, "resourceKind")?;
+                let resource_id = required(params.resource_id, "resourceId")?;
+                let ttl_seconds = required(params.ttl_seconds, "ttlSeconds")?;
+                self.publish_resource_intent(Parameters(PublishIntentParams {
+                    project_id: params.project_id,
+                    agent_run_id,
+                    resource_kind,
+                    resource_id,
+                    ttl_seconds,
+                }))?
+                .into_call_tool_result()
+            }
+            IntentsOperation::List => self
+                .list_resource_intents(Parameters(ProjectParams {
+                    project_id: params.project_id,
+                }))?
+                .into_call_tool_result(),
+        }
     }
 }
 
@@ -1955,6 +2513,17 @@ fn load_task_design_specifications(
         .collect()
 }
 
+fn missing_field(field: &str) -> ErrorData {
+    ErrorData::invalid_params(
+        format!("missing required field '{field}' for this operation"),
+        None,
+    )
+}
+
+fn required<T>(value: Option<T>, field: &str) -> Result<T, ErrorData> {
+    value.ok_or_else(|| missing_field(field))
+}
+
 fn tool_error(message: String) -> ErrorData {
     let value = serde_json::from_str::<serde_json::Value>(&message)
         .unwrap_or_else(|_| json!({ "message": message }));
@@ -1972,6 +2541,82 @@ mod tests {
     use crate::mockups::CreateMockupInput;
     use crate::settings::{AppSettings, ProjectSettings, WindowSettings};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn resolve_ref<'a>(schema: &'a serde_json::Value, reference: &str) -> &'a serde_json::Value {
+        let path = reference.strip_prefix("#/").unwrap_or(reference);
+        let mut current = schema;
+        for segment in path.split('/') {
+            current = current
+                .get(segment)
+                .unwrap_or_else(|| panic!("missing {segment} in schema"));
+        }
+        current
+    }
+
+    #[test]
+    fn capability_operation_enums_are_self_describing() {
+        let cases = [
+            (
+                serde_json::to_value(rmcp::schemars::schema_for!(DesignParams)).unwrap(),
+                vec![
+                    "save",
+                    "get_scope",
+                    "get_by_ids",
+                    "search",
+                    "get_overview",
+                    "get_bindings",
+                    "set_element_descriptions",
+                    "mockup_list_pending_revisions",
+                    "mockup_get_revision_context",
+                ],
+            ),
+            (
+                serde_json::to_value(rmcp::schemars::schema_for!(TasksParams)).unwrap(),
+                vec!["create", "list", "update", "finish", "delete", "get"],
+            ),
+            (
+                serde_json::to_value(rmcp::schemars::schema_for!(QaParams)).unwrap(),
+                vec![
+                    "create_job",
+                    "update_job",
+                    "delete_job",
+                    "list_jobs",
+                    "run_jobs",
+                    "list_runs",
+                    "get_job",
+                ],
+            ),
+            (
+                serde_json::to_value(rmcp::schemars::schema_for!(MemoryParams)).unwrap(),
+                vec!["get", "append", "update", "update_rule"],
+            ),
+            (
+                serde_json::to_value(rmcp::schemars::schema_for!(RulesParams)).unwrap(),
+                vec!["list", "create", "update", "delete", "get_rule_injections"],
+            ),
+            (
+                serde_json::to_value(rmcp::schemars::schema_for!(IntentsParams)).unwrap(),
+                vec!["publish", "list"],
+            ),
+        ];
+
+        for (schema, expected) in cases {
+            let operation = &schema["properties"]["operation"];
+            let resolved = match operation.get("$ref").and_then(|value| value.as_str()) {
+                Some(reference) => resolve_ref(&schema, reference),
+                None => operation,
+            };
+            assert_eq!(resolved.get("type"), Some(&json!("string")));
+            let enum_values = resolved["enum"]
+                .as_array()
+                .expect("operation must be a string enum");
+            let values: Vec<&str> = enum_values
+                .iter()
+                .map(|value| value.as_str().unwrap())
+                .collect();
+            assert_eq!(values, expected);
+        }
+    }
 
     #[test]
     fn element_description_contract_is_closed_narrow_and_compact() {

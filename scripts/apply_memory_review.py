@@ -37,7 +37,7 @@ def main():
             def call(name, **arguments):
                 return body(client.request("tools/call", {"name": name,
                     "arguments": {"projectId": plan["projectId"], **arguments}}))
-            before = call("adashi_get_memory", includeSuperseded=True)
+            before = call("adashi_memory", operation="get", includeSuperseded=True)
             assert before["memory"]["memoryVersion"] == plan["expectedVersion"], "Summary changed; review again."
             retained = {n["noteId"]: n for n in before["memory"]["notes"]}
             assert set(plan["supersededNoteIds"]) <= retained.keys()
@@ -45,9 +45,9 @@ def main():
             assert len(plan["memory"]) <= limits["summaryChars"], "Summary exceeds its limit."
             assert len(retained) <= limits["notes"], "Retained note count exceeds its limit."
             assert len(plan["memory"]) + sum(len(n["body"]) for n in retained.values()) <= limits["totalChars"], "Cleanup would evict retained notes; shorten the summary first."
-            updated = call("adashi_update_memory", **{k: plan[k] for k in
+            updated = call("adashi_memory", operation="update", **{k: plan[k] for k in
                            ("operationId", "expectedVersion", "memory", "supersededNoteIds")})
-            after = call("adashi_get_memory", includeSuperseded=True)
+            after = call("adashi_memory", operation="get", includeSuperseded=True)
             assert updated["memory"]["memory"] == plan["memory"]
             assert not (set(n["noteId"] for n in updated["memory"]["notes"]) & set(plan["supersededNoteIds"]))
             assert retained.keys() <= {n["noteId"] for n in after["memory"]["notes"]}, "A retained note is missing after cleanup."

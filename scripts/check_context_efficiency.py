@@ -114,16 +114,16 @@ def populate(db_path, fixture):
 def verify(client, measurements, fixture):
     tools = client.request("tools/list", {})["result"]["tools"]
     by_name = {tool["name"]: tool for tool in tools}
-    list_schema = by_name["adashi_list_tasks"]["inputSchema"]
+    list_schema = by_name["adashi_tasks"]["inputSchema"]
     assert '"open"' in json.dumps(list_schema) and '"confirmed"' in json.dumps(list_schema)
-    assert body(client.call("adashi_list_tasks", states=[]))["filteredTotal"] == 0
+    assert body(client.call("adashi_tasks", operation="list", states=[]))["filteredTotal"] == 0
     for args in ({"states": ["invalid"]}, {"states": ["OPEN"]}, {"limit": 0},
                  {"limit": 101}, {"cursor": "invalid"}):
-        response = client.call("adashi_list_tasks", **args)
+        response = client.call("adashi_tasks", operation="list", **args)
         assert "error" in response or response["result"].get("isError"), response
     ids, cursor = [], None
     while True:
-        page = body(client.call("adashi_list_tasks", limit=7, **({"cursor": cursor} if cursor else {})))
+        page = body(client.call("adashi_tasks", operation="list", limit=7, **({"cursor": cursor} if cursor else {})))
         assert page["filteredTotal"] == fixture["tasks"]
         assert len(page["tasks"]) <= 7
         for task in page["tasks"]:
@@ -134,15 +134,15 @@ def verify(client, measurements, fixture):
             break
         cursor = page["nextCursor"]
     assert len(ids) == len(set(ids)) == fixture["tasks"]
-    detail = body(client.call("adashi_get_task", taskId=ids[0]))
+    detail = body(client.call("adashi_tasks", operation="get", taskId=ids[0]))
     assert detail["task"]["description"] == fixture["description"]
-    first = body(client.call("adashi_list_tasks", limit=1))
-    mismatch = client.call("adashi_list_tasks", states=["finished"], cursor=first["nextCursor"])
+    first = body(client.call("adashi_tasks", operation="list", limit=1))
+    mismatch = client.call("adashi_tasks", operation="list", states=["finished"], cursor=first["nextCursor"])
     assert "error" in mismatch or mismatch["result"].get("isError")
 
     for intend in ("general", "design", "implementation"):
         for hook in ("run.start", "task.start", "task.end", "run.end"):
-            result = body(client.call("adashi_get_rule_injections", intend=intend, hook=hook))
+            result = body(client.call("adashi_rules", operation="get_rule_injections", intend=intend, hook=hook))
             assert result["contractVersion"] == 2
             assert "generatedContext" not in result and "memoryRule" not in result
             prompt = result["injectionPrompt"].encode("utf-8")
@@ -154,38 +154,38 @@ def verify(client, measurements, fixture):
                 assert result["status"] == "empty" and result["injectionPrompt"] == ""
             if intend == "implementation" and hook == "run.start":
                 assert result["injectionPrompt"].count(fixture["rule"]) == 1
-            again = body(client.call("adashi_get_rule_injections", intend=intend, hook=hook))
+            again = body(client.call("adashi_rules", operation="get_rule_injections", intend=intend, hook=hook))
             assert result == again
-    operational = body(client.call("adashi_get_rule_injections", intend="general", hook="run.start", memoryContext="protocolOnly"))
+    operational = body(client.call("adashi_rules", operation="get_rule_injections", intend="general", hook="run.start", memoryContext="protocolOnly"))
     assert [s["kind"] for s in operational["sections"]] == ["protocol"]
-    memory = body(client.call("adashi_get_memory", runId="run-3"))
+    memory = body(client.call("adashi_memory", operation="get", runId="run-3"))
     assert memory["matchedNotes"] == 1 and memory["memory"]["notes"][0]["noteId"] == "note-3"
     summary = "Current fixture constraint: preserve the public API."
     old_version = memory["memory"]["memoryVersion"]
-    reviewed = body(client.call("adashi_update_memory", operationId="review", expectedVersion=old_version,
+    reviewed = body(client.call("adashi_memory", operation="update", operationId="review", expectedVersion=old_version,
                                memory=summary, supersededNoteIds=["note-3"]))
     assert all(n["noteId"] != "note-3" for n in reviewed["memory"]["notes"])
-    historical = body(client.call("adashi_get_memory", runId="run-3", includeSuperseded=True))
+    historical = body(client.call("adashi_memory", operation="get", runId="run-3", includeSuperseded=True))
     assert historical["memory"]["notes"][0]["supersededByVersion"] == old_version + 1
-    stale = client.call("adashi_list_tasks", cursor=first["nextCursor"])
+    stale = client.call("adashi_tasks", operation="list", cursor=first["nextCursor"])
     assert "error" in stale or stale["result"].get("isError")
-    start = body(client.call("adashi_get_rule_injections", intend="general", hook="run.start"))
+    start = body(client.call("adashi_rules", operation="get_rule_injections", intend="general", hook="run.start"))
     assert start["injectionPrompt"].count(summary) == 1
     large_summary = "A complete current constraint. " * 100
-    body(client.call("adashi_update_memory", operationId="large-summary",
+    body(client.call("adashi_memory", operation="update", operationId="large-summary",
                      expectedVersion=old_version + 1, memory=large_summary))
-    bounded = body(client.call("adashi_get_rule_injections", intend="general", hook="run.start"))
+    bounded = body(client.call("adashi_rules", operation="get_rule_injections", intend="general", hook="run.start"))
     assert large_summary not in bounded["injectionPrompt"]
     assert "omitted in full" in bounded["injectionPrompt"]
-    full = body(client.call("adashi_get_memory"))
+    full = body(client.call("adashi_memory", operation="get"))
     assert full["memory"]["memory"] == large_summary
     custom_protocol = "Required custom protocol 🦀. " * 200
-    body(client.call("adashi_update_memory_rule", operationId="custom-protocol",
+    body(client.call("adashi_memory", operation="update_rule", operationId="custom-protocol",
                      expectedVersion=full["memory"]["protocolVersion"], rule=custom_protocol))
-    required = body(client.call("adashi_get_rule_injections", intend="general", hook="run.start", memoryContext="protocolOnly"))
+    required = body(client.call("adashi_rules", operation="get_rule_injections", intend="general", hook="run.start", memoryContext="protocolOnly"))
     assert required["injectionPrompt"] == custom_protocol.strip()
     # Lifecycle validity is independent of optional rule presence and context budgets.
-    response = client.call("adashi_get_rule_injections", intend="general", hook="run.invalid")
+    response = client.call("adashi_rules", operation="get_rule_injections", intend="general", hook="run.invalid")
     assert "error" in response or response["result"].get("isError")
     measurements["checks"] = "passed"
 
@@ -211,18 +211,18 @@ def main():
         }), encoding="utf-8")
         client = Client(args.binary, root)
         try:
-            body(client.call("adashi_get_memory"))
+            body(client.call("adashi_memory", operation="get"))
         finally:
             client.close()
         populate(project / ".adashi/adashi.sqlite3", fixture)
         client = Client(args.binary, root)
         try:
             cases = {
-                "general_start": ("adashi_get_rule_injections", {"intend": "general", "hook": "run.start"}),
-                "design_start": ("adashi_get_rule_injections", {"intend": "design", "hook": "run.start"}),
-                "implementation_start": ("adashi_get_rule_injections", {"intend": "implementation", "hook": "run.start"}),
-                "open_tasks": ("adashi_list_tasks", {"states": ["open"]}),
-                "all_tasks": ("adashi_list_tasks", {}),
+                "general_start": ("adashi_rules", {"operation": "get_rule_injections", "intend": "general", "hook": "run.start"}),
+                "design_start": ("adashi_rules", {"operation": "get_rule_injections", "intend": "design", "hook": "run.start"}),
+                "implementation_start": ("adashi_rules", {"operation": "get_rule_injections", "intend": "implementation", "hook": "run.start"}),
+                "open_tasks": ("adashi_tasks", {"operation": "list", "states": ["open"]}),
+                "all_tasks": ("adashi_tasks", {"operation": "list"}),
             }
             measurements = {}
             for label, (name, params) in cases.items():

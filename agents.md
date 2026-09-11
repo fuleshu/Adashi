@@ -15,11 +15,12 @@ Use these lifecycle hooks:
 - `task.end`: before marking each concrete task complete.
 - `run.end`: before the final response for the overall user request.
 
-At each hook, call the Adashi MCP tool `adashi_get_rule_injections` with:
+At each hook, call the Adashi MCP tool `adashi_rules` with operation `get_rule_injections`:
 
 ```json
 {
   "projectId": "<configured project id or name>",
+  "operation": "get_rule_injections",
   "intend": "general | design | implementation",
   "hook": "run.start | task.start | task.end | run.end"
 }

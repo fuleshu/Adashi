@@ -49,7 +49,7 @@ When no usable project is configured, Adashi shows a blocking onboarding flow in
 
 Project memory is a short handover aid. Writing a note is optional: save only important decisions, non-obvious constraints, or unresolved blockers with a concrete next step. Skip routine task reports, successful checks, repeated facts, and tool-availability confirmations. Tasks, formal design, and QA hold their own detail.
 
-The dashboard shows the shared summary and active handovers. `run.start` supplies only the current summary, within a separate 2,000-character budget, and the full memory protocol. It never injects the handover log. `memoryContext: "protocolOnly"` skips the summary for operational requests; general requests that need prior decisions can still retrieve memory. `adashi_get_memory` supports explicit `query`, `runId`, and `taskId` filters. New notes are limited to 1,000 characters and the editable shared summary to 4,000 characters. Adashi retains at most 20 notes and 12,000 characters across summary and notes, deleting oldest notes first. Oversized new writes are rejected.
+The dashboard shows the shared summary and active handovers. `run.start` supplies only the current summary, within a separate 2,000-character budget, and the full memory protocol. It never injects the handover log. `memoryContext: "protocolOnly"` skips the summary for operational requests; general requests that need prior decisions can still retrieve memory. `adashi_memory` (operation `get`) supports explicit `query`, `runId`, and `taskId` filters. New notes are limited to 1,000 characters and the editable shared summary to 4,000 characters. Adashi retains at most 20 notes and 12,000 characters across summary and notes, deleting oldest notes first. Oversized new writes are rejected.
 
 Opening memory migrates exact old built-in protocols; custom protocols remain unchanged. Oversized legacy bodies become excerpts ending at complete sentence or paragraph boundaries, with an explicit omission notice. This is not semantic summarization and cannot recover text clipped by previous versions. Oldest notes are then removed until retention limits are met. Maintenance is transactional and updates affected versions and the project revision. An authorized coordinator can replace the summary and resolve explicitly reviewed `supersededNoteIds` atomically under `expectedVersion`. Resolved notes retain their original provenance within normal retention and are available with `includeSuperseded: true`; they are excluded from active memory. Concurrently appended notes remain active. Replay receipts never restore stale bodies.
 
@@ -286,7 +286,7 @@ command = "C:\\src\\Adashi\\src-tauri\\target\\release\\adashi-mcp.exe"
 args = []
 ```
 
-When the MCP server is available, agents should call `adashi_get_rule_injections` at lifecycle hooks and pass the relevant `projectId` for the project they are working on.
+When the MCP server is available, agents should call `adashi_rules` (operation `get_rule_injections`) at lifecycle hooks and pass the relevant `projectId` for the project they are working on.
 
 ## Current Status
 

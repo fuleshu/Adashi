@@ -24,17 +24,32 @@ Use the injected formal design as implementation guidance.
 - Retrieve narrower design scope or bindings only when the injected implementation guide is insufficient for the files, symbols, or component being changed.
 - If implementation discovers the design is stale, report the mismatch instead of silently drifting away from the formal design."#;
 
-pub const DEFAULT_DESIGN_AUTHORING_PROMPT: &str = r#"# Formal Design Authoring Hook
+/// Previous defaults that referenced the pre-grouping tool names; migrated on load.
+const LEGACY_V2_DESIGN_AUTHORING_PROMPT: &str = r#"# Formal Design Authoring Hook
 
 The startup design index identifies retrieval entry points, not full design guidance.
 - Select relevant ids with the index or adashi_design_search; read their scopes, artifacts and file/symbol bindings before changing formal design.
 - Preserve intended responsibilities and relationships unless the user authorizes a redesign.
 - Persist coherent C4/UML/binding changes with adashi_design_save. Do not store design conclusions as chat notes."#;
 
-pub const DEFAULT_IMPLEMENTATION_GUIDANCE_PROMPT: &str = r#"# Formal Design Implementation Guide
+const LEGACY_V2_IMPLEMENTATION_GUIDANCE_PROMPT: &str = r#"# Formal Design Implementation Guide
 
 The startup design index identifies retrieval entry points, not full implementation guidance.
 - Retrieve design bound to touched files/symbols with adashi_design_get_bindings, then relevant scopes/artifacts by explicit ids.
+- Align code with those responsibilities and relationships unless the user authorizes a redesign.
+- If implementation discovers stale design, report the mismatch instead of silently drifting away from it."#;
+
+pub const DEFAULT_DESIGN_AUTHORING_PROMPT: &str = r#"# Formal Design Authoring Hook
+
+The startup design index identifies retrieval entry points, not full design guidance.
+- Select relevant ids with the index or the adashi_design search operation; read their scopes, artifacts and file/symbol bindings before changing formal design.
+- Preserve intended responsibilities and relationships unless the user authorizes a redesign.
+- Persist coherent C4/UML/binding changes with the adashi_design save operation. Do not store design conclusions as chat notes."#;
+
+pub const DEFAULT_IMPLEMENTATION_GUIDANCE_PROMPT: &str = r#"# Formal Design Implementation Guide
+
+The startup design index identifies retrieval entry points, not full implementation guidance.
+- Retrieve design bound to touched files/symbols with the adashi_design get_bindings operation, then relevant scopes/artifacts by explicit ids.
 - Align code with those responsibilities and relationships unless the user authorizes a redesign.
 - If implementation discovers stale design, report the mismatch instead of silently drifting away from it."#;
 
@@ -206,19 +221,28 @@ fn migrate_builtin_prompt(
     project_id: i64,
     definition: FixedHookDefinition,
 ) -> Result<(), String> {
-    let legacy = if definition.key == DESIGN_AUTHORING_HOOK_KEY {
-        LEGACY_DESIGN_AUTHORING_PROMPT
+    let legacy_prompts: &[&str] = if definition.key == DESIGN_AUTHORING_HOOK_KEY {
+        &[
+            LEGACY_DESIGN_AUTHORING_PROMPT,
+            LEGACY_V2_DESIGN_AUTHORING_PROMPT,
+        ]
     } else {
-        LEGACY_IMPLEMENTATION_GUIDANCE_PROMPT
+        &[
+            LEGACY_IMPLEMENTATION_GUIDANCE_PROMPT,
+            LEGACY_V2_IMPLEMENTATION_GUIDANCE_PROMPT,
+        ]
     };
     db.execute_batch("SAVEPOINT fixed_prompt_migration")
         .map_err(|e| e.to_string())?;
     let result = (|| {
-        let changed = db.execute(
-            "UPDATE fixed_hook_prompts SET prompt=?1, updated_at=CURRENT_TIMESTAMP
-             WHERE project_id=?2 AND key=?3 AND trim(replace(prompt, char(13)||char(10), char(10)))=?4",
-            params![definition.default_prompt, project_id, definition.key, legacy],
-        ).map_err(|e| e.to_string())?;
+        let mut changed = 0;
+        for legacy in legacy_prompts {
+            changed += db.execute(
+                "UPDATE fixed_hook_prompts SET prompt=?1, updated_at=CURRENT_TIMESTAMP
+                 WHERE project_id=?2 AND key=?3 AND trim(replace(prompt, char(13)||char(10), char(10)))=?4",
+                params![definition.default_prompt, project_id, definition.key, legacy],
+            ).map_err(|e| e.to_string())?;
+        }
         if changed > 0 {
             crate::concurrency::bump_version(db, project_id, "fixed-hook", definition.key)?;
             crate::state::bump_project_revision(db, project_id)?;
