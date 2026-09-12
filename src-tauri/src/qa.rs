@@ -15,6 +15,9 @@ const DEFAULT_SHELL: &str = "powershell";
 #[cfg(not(windows))]
 const DEFAULT_SHELL: &str = "bash";
 const OUTPUT_LIMIT: usize = 200_000;
+/// Bounded listing budgets. Listings never inline console output; details do.
+const DEFAULT_RUN_LIST_LIMIT: i64 = 20;
+const MAX_RUN_LIST_LIMIT: i64 = 100;
 
 pub(crate) fn platform_default_shell() -> &'static str {
     DEFAULT_SHELL
@@ -100,6 +103,64 @@ pub struct QaRun {
     pub job_runs: Vec<QaJobRun>,
 }
 
+/// Bounded run facts embedded in a job listing: status and timing only.
+/// Console output and command snapshots require get_job or get_run.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(rmcp::schemars::JsonSchema)]
+pub struct QaJobRunSummary {
+    pub id: i64,
+    pub qa_run_id: i64,
+    pub status: String,
+    pub exit_code: Option<i64>,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub duration_ms: Option<i64>,
+}
+
+/// Bounded job projection for listings: metadata plus latest-run status and timing.
+/// Deliberately excludes command, commandSnapshot, output and runHistory.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(rmcp::schemars::JsonSchema)]
+pub struct QaJobSummary {
+    pub id: i64,
+    pub version: i64,
+    pub number: i64,
+    pub name: String,
+    pub enabled: bool,
+    pub derived_state: String,
+    pub tags: Vec<String>,
+    pub latest_run: Option<QaJobRunSummary>,
+}
+
+/// Per-job outcome inside a bounded run listing.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(rmcp::schemars::JsonSchema)]
+pub struct QaRunJobStatus {
+    pub qa_job_id: i64,
+    pub status: String,
+    pub exit_code: Option<i64>,
+    pub duration_ms: Option<i64>,
+}
+
+/// Bounded run projection for listings: run metadata plus per-job outcomes.
+/// Console output requires get_run.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(rmcp::schemars::JsonSchema)]
+pub struct QaRunSummary {
+    pub id: i64,
+    pub trigger_source: String,
+    pub query_snapshot: String,
+    pub status: String,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub summary: String,
+    pub jobs: Vec<QaRunJobStatus>,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(rmcp::schemars::JsonSchema)]
@@ -166,7 +227,27 @@ pub fn load_jobs(
         .collect::<Result<Vec<_>, _>>()?;
 
     if let Some(query) = query {
-        jobs.retain(|job| matches_query(job, query));
+        jobs.retain(|job| {
+            let task_ids = job
+                .task_links
+                .iter()
+                .map(|link| link.task_id)
+                .collect::<Vec<_>>();
+            let design_ids = job
+                .design_specification_links
+                .iter()
+                .map(|link| link.design_external_id.clone())
+                .collect::<Vec<_>>();
+            matches_query(
+                job.id,
+                job.enabled,
+                &job.derived_state,
+                &job.tags,
+                &task_ids,
+                &design_ids,
+                query,
+            )
+        });
     }
 
     jobs.sort_by(|left, right| {
@@ -179,6 +260,139 @@ pub fn load_jobs(
 
 pub fn load_job(db: &Connection, project_id: i64, qa_job_id: i64) -> Result<QaJob, String> {
     hydrate_job(db, project_id, load_job_row(db, project_id, qa_job_id)?)
+}
+
+/// Bounded listing projection: job metadata plus latest-run timing, never console output.
+///
+/// `after` is the exclusive `(stateRank, number)` position of the previous page, matching the
+/// listing sort order. Returns at most `limit` jobs plus the total number of matching jobs.
+pub fn load_job_summaries(
+    db: &Connection,
+    project_id: i64,
+    query: Option<&QaJobQuery>,
+    after: Option<(i32, i64)>,
+    limit: i64,
+) -> Result<(Vec<QaJobSummary>, i64), String> {
+    let rows = load_job_rows(db, project_id)?;
+    let mut summaries = Vec::with_capacity(rows.len());
+
+    for row in rows {
+        let latest_run = load_latest_job_run_summary(db, row.id)?;
+        let tags = load_tags(db, row.id)?;
+        let task_ids = load_task_link_ids(db, row.id)?;
+        let design_ids = load_design_link_ids(db, row.id)?;
+        let derived_state = derive_state(
+            db,
+            row.id,
+            &row.updated_at,
+            latest_run.as_ref().map(|run| run.status.as_str()),
+            latest_run.as_ref().and_then(|run| run.finished_at.as_deref()),
+        )?;
+
+        if let Some(query) = query {
+            if !matches_query(
+                row.id,
+                row.enabled,
+                &derived_state,
+                &tags,
+                &task_ids,
+                &design_ids,
+                query,
+            ) {
+                continue;
+            }
+        }
+
+        summaries.push(QaJobSummary {
+            id: row.id,
+            version: concurrency::load_version(db, project_id, "qa.job", &row.id.to_string())?,
+            number: row.number,
+            name: row.name,
+            enabled: row.enabled,
+            derived_state,
+            tags,
+            latest_run,
+        });
+    }
+
+    summaries.sort_by(|left, right| {
+        state_rank(&left.derived_state)
+            .cmp(&state_rank(&right.derived_state))
+            .then_with(|| left.number.cmp(&right.number))
+    });
+    let filtered_total = summaries.len() as i64;
+
+    let mut page = summaries
+        .into_iter()
+        .filter(|job| match after {
+            None => true,
+            Some((rank, number)) => (state_rank(&job.derived_state), job.number) > (rank, number),
+        })
+        .collect::<Vec<_>>();
+    page.truncate(limit.max(0) as usize);
+
+    Ok((page, filtered_total))
+}
+
+fn load_latest_job_run_summary(
+    db: &Connection,
+    qa_job_id: i64,
+) -> Result<Option<QaJobRunSummary>, String> {
+    db.query_row(
+        "SELECT id, qa_run_id, status, exit_code, started_at, finished_at, duration_ms
+         FROM qa_job_runs
+         WHERE qa_job_id = ?1
+         ORDER BY id DESC
+         LIMIT 1",
+        params![qa_job_id],
+        read_job_run_summary,
+    )
+    .optional()
+    .map_err(|err| err.to_string())
+}
+
+fn read_job_run_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<QaJobRunSummary> {
+    Ok(QaJobRunSummary {
+        id: row.get(0)?,
+        qa_run_id: row.get(1)?,
+        status: row.get(2)?,
+        exit_code: row.get(3)?,
+        started_at: row.get(4)?,
+        finished_at: row.get(5)?,
+        duration_ms: row.get(6)?,
+    })
+}
+
+fn load_task_link_ids(db: &Connection, qa_job_id: i64) -> Result<Vec<i64>, String> {
+    let mut statement = db
+        .prepare(
+            "SELECT task_id FROM qa_job_task_links
+             WHERE qa_job_id = ?1
+             ORDER BY sort_order, id",
+        )
+        .map_err(|err| err.to_string())?;
+    let rows = statement
+        .query_map(params![qa_job_id], |row| row.get::<_, i64>(0))
+        .map_err(|err| err.to_string())?;
+
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|err| err.to_string())
+}
+
+fn load_design_link_ids(db: &Connection, qa_job_id: i64) -> Result<Vec<String>, String> {
+    let mut statement = db
+        .prepare(
+            "SELECT design_external_id FROM qa_job_design_links
+             WHERE qa_job_id = ?1
+             ORDER BY sort_order, id",
+        )
+        .map_err(|err| err.to_string())?;
+    let rows = statement
+        .query_map(params![qa_job_id], |row| row.get::<_, String>(0))
+        .map_err(|err| err.to_string())?;
+
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|err| err.to_string())
 }
 
 pub fn create_job(db: &Connection, project_id: i64, input: NewQaJob) -> Result<QaJob, String> {
@@ -406,7 +620,9 @@ pub fn load_runs(
     project_id: i64,
     limit: Option<i64>,
 ) -> Result<Vec<QaRun>, String> {
-    let limit = limit.unwrap_or(20).clamp(1, 100);
+    let limit = limit
+        .unwrap_or(DEFAULT_RUN_LIST_LIMIT)
+        .clamp(1, MAX_RUN_LIST_LIMIT);
     let mut statement = db
         .prepare(
             "SELECT id, trigger_source, query_snapshot, status, started_at, finished_at, summary
@@ -422,6 +638,70 @@ pub fn load_runs(
 
     rows.map(|row| hydrate_run(db, row.map_err(|err| err.to_string())?))
         .collect()
+}
+
+/// Bounded run listing: run metadata plus per-job outcomes, never console output.
+pub fn load_run_summaries(
+    db: &Connection,
+    project_id: i64,
+    limit: Option<i64>,
+) -> Result<Vec<QaRunSummary>, String> {
+    let limit = limit
+        .unwrap_or(DEFAULT_RUN_LIST_LIMIT)
+        .clamp(1, MAX_RUN_LIST_LIMIT);
+    let mut statement = db
+        .prepare(
+            "SELECT id, trigger_source, query_snapshot, status, started_at, finished_at, summary
+             FROM qa_runs
+             WHERE project_id = ?1
+             ORDER BY id DESC
+             LIMIT ?2",
+        )
+        .map_err(|err| err.to_string())?;
+    let rows = statement
+        .query_map(params![project_id, limit], read_run_row)
+        .map_err(|err| err.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|err| err.to_string())?;
+
+    rows.into_iter()
+        .map(|row| {
+            Ok(QaRunSummary {
+                id: row.id,
+                trigger_source: row.trigger_source,
+                query_snapshot: row.query_snapshot,
+                status: row.status,
+                started_at: row.started_at,
+                finished_at: row.finished_at,
+                summary: row.summary,
+                jobs: load_run_job_statuses(db, row.id)?,
+            })
+        })
+        .collect()
+}
+
+fn load_run_job_statuses(db: &Connection, qa_run_id: i64) -> Result<Vec<QaRunJobStatus>, String> {
+    let mut statement = db
+        .prepare(
+            "SELECT qa_job_id, status, exit_code, duration_ms
+             FROM qa_job_runs
+             WHERE qa_run_id = ?1
+             ORDER BY id",
+        )
+        .map_err(|err| err.to_string())?;
+    let rows = statement
+        .query_map(params![qa_run_id], |row| {
+            Ok(QaRunJobStatus {
+                qa_job_id: row.get(0)?,
+                status: row.get(1)?,
+                exit_code: row.get(2)?,
+                duration_ms: row.get(3)?,
+            })
+        })
+        .map_err(|err| err.to_string())?;
+
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|err| err.to_string())
 }
 
 pub fn load_run(db: &Connection, project_id: i64, qa_run_id: i64) -> Result<QaRun, String> {
@@ -443,7 +723,13 @@ fn hydrate_job(db: &Connection, project_id: i64, row: QaJobRow) -> Result<QaJob,
     let design_specification_links = load_design_links(db, row.id)?;
     let task_links = load_task_links(db, row.id)?;
     let tags = load_tags(db, row.id)?;
-    let derived_state = derive_state(db, &row, latest_run.as_ref())?;
+    let derived_state = derive_state(
+        db,
+        row.id,
+        &row.updated_at,
+        latest_run.as_ref().map(|run| run.status.as_str()),
+        latest_run.as_ref().and_then(|run| run.finished_at.as_deref()),
+    )?;
 
     Ok(QaJob {
         id: row.id,
@@ -481,23 +767,24 @@ fn hydrate_run(db: &Connection, row: QaRunRow) -> Result<QaRun, String> {
     })
 }
 
+/// Derives the job state from bounded run facts, so listings never need run output.
 fn derive_state(
     db: &Connection,
-    job: &QaJobRow,
-    latest_run: Option<&QaJobRun>,
+    job_id: i64,
+    job_updated_at: &str,
+    latest_status: Option<&str>,
+    latest_finished_at: Option<&str>,
 ) -> Result<String, String> {
-    let Some(latest_run) = latest_run else {
+    let Some(latest_status) = latest_status else {
         return Ok("needs-rerun".to_string());
     };
 
-    if latest_run.status == "running" {
+    if latest_status == "running" {
         return Ok("running".to_string());
     }
 
-    if latest_run
-        .finished_at
-        .as_deref()
-        .map(|finished_at| finished_at < job.updated_at.as_str())
+    if latest_finished_at
+        .map(|finished_at| finished_at < job_updated_at)
         .unwrap_or(true)
     {
         return Ok("needs-rerun".to_string());
@@ -512,7 +799,7 @@ fn derive_state(
                 WHERE l.qa_job_id = ?1
                   AND t.updated_at > ?2
             )",
-            params![job.id, latest_run.finished_at.as_deref().unwrap_or("")],
+            params![job_id, latest_finished_at.unwrap_or("")],
             |row| row.get::<_, i64>(0),
         )
         .map_err(|err| err.to_string())?
@@ -521,22 +808,32 @@ fn derive_state(
         return Ok("needs-rerun".to_string());
     }
 
-    match latest_run.status.as_str() {
+    match latest_status {
         "passed" => Ok("green".to_string()),
         "failed" | "timed_out" => Ok("red".to_string()),
         _ => Ok("needs-rerun".to_string()),
     }
 }
 
-fn matches_query(job: &QaJob, query: &QaJobQuery) -> bool {
+/// Single source of truth for QA job filtering, shared by full jobs and bounded summaries.
+#[allow(clippy::too_many_arguments)]
+fn matches_query(
+    job_id: i64,
+    enabled: bool,
+    derived_state: &str,
+    tags: &[String],
+    task_ids: &[i64],
+    design_external_ids: &[String],
+    query: &QaJobQuery,
+) -> bool {
     if let Some(job_ids) = &query.job_ids {
-        if !job_ids.contains(&job.id) {
+        if !job_ids.contains(&job_id) {
             return false;
         }
     }
 
-    if let Some(enabled) = query.enabled {
-        if job.enabled != enabled {
+    if let Some(wanted_enabled) = query.enabled {
+        if enabled != wanted_enabled {
             return false;
         }
     }
@@ -547,50 +844,46 @@ fn matches_query(job: &QaJob, query: &QaJobQuery) -> bool {
             .map(|state| state.trim().to_ascii_lowercase())
             .filter(|state| !state.is_empty())
             .collect::<Vec<_>>();
-        if !states.is_empty() && !states.contains(&job.derived_state) {
+        if !states.is_empty() && !states.iter().any(|state| state == derived_state) {
             return false;
         }
     }
 
-    if let Some(tags) = &query.tags {
-        let wanted = tags
+    if let Some(tags_query) = &query.tags {
+        let wanted = tags_query
             .iter()
             .map(|tag| tag.trim().to_ascii_lowercase())
             .filter(|tag| !tag.is_empty())
             .collect::<Vec<_>>();
         if !wanted.is_empty()
-            && !wanted.iter().all(|tag| {
-                job.tags
-                    .iter()
-                    .any(|candidate| candidate.eq_ignore_ascii_case(tag))
-            })
-        {
-            return false;
-        }
-    }
-
-    if let Some(task_ids) = &query.task_ids {
-        if !task_ids.is_empty()
-            && !task_ids
+            && !wanted
                 .iter()
-                .all(|task_id| job.task_links.iter().any(|link| link.task_id == *task_id))
+                .all(|tag| tags.iter().any(|candidate| candidate.eq_ignore_ascii_case(tag)))
         {
             return false;
         }
     }
 
-    if let Some(design_external_ids) = &query.design_external_ids {
-        let wanted = design_external_ids
+    if let Some(wanted_task_ids) = &query.task_ids {
+        if !wanted_task_ids.is_empty()
+            && !wanted_task_ids
+                .iter()
+                .all(|task_id| task_ids.contains(task_id))
+        {
+            return false;
+        }
+    }
+
+    if let Some(design_query) = &query.design_external_ids {
+        let wanted = design_query
             .iter()
             .map(|id| id.trim())
             .filter(|id| !id.is_empty())
             .collect::<Vec<_>>();
         if !wanted.is_empty()
-            && !wanted.iter().all(|design_id| {
-                job.design_specification_links
-                    .iter()
-                    .any(|link| link.design_external_id == *design_id)
-            })
+            && !wanted
+                .iter()
+                .all(|design_id| design_external_ids.iter().any(|candidate| candidate == design_id))
         {
             return false;
         }
@@ -1186,7 +1479,8 @@ fn touch_job(db: &Connection, qa_job_id: i64) -> Result<(), String> {
     Ok(())
 }
 
-fn state_rank(state: &str) -> i32 {
+/// Total order used by bounded job listings and their continuation cursors.
+pub fn state_rank(state: &str) -> i32 {
     match state {
         "running" => 0,
         "red" => 1,

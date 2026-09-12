@@ -1,7 +1,11 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Instruction-file name used for generated architecture blocks when nothing else is set.
+pub const DEFAULT_ARCHITECTURE_FILE_NAME: &str = "AGENTS.md";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -11,6 +15,35 @@ pub struct AppSettings {
     pub last_active_project_id: Option<String>,
     #[serde(default)]
     pub rule_templates: Vec<RuleTemplate>,
+    #[serde(default)]
+    pub architecture_projection: ArchitectureProjectionSettings,
+}
+
+/// In-tree architecture projection configuration.
+///
+/// The design database stays canonical; these settings control the generated instruction-file
+/// blocks that make the model visible in the folders an agent already reads.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchitectureProjectionSettings {
+    /// Instruction-file name for generated blocks, for example `AGENTS.md`.
+    pub file_name: String,
+    /// Project ids that opted in to in-tree projection. Empty means no project writes files.
+    #[serde(default)]
+    pub enabled_project_ids: Vec<String>,
+    /// Per-project file-name overrides, keyed by project id.
+    #[serde(default)]
+    pub project_file_names: BTreeMap<String, String>,
+}
+
+impl Default for ArchitectureProjectionSettings {
+    fn default() -> Self {
+        Self {
+            file_name: DEFAULT_ARCHITECTURE_FILE_NAME.to_string(),
+            enabled_project_ids: Vec::new(),
+            project_file_names: BTreeMap::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -214,6 +247,77 @@ pub fn delete_rule_template(settings: &mut AppSettings, template_id: &str) -> Re
     }
 }
 
+/// Validated instruction-file name: the given name when it is a plain file name inside its
+/// folder, otherwise the default. Path separators are rejected so a name cannot escape.
+pub fn sanitize_architecture_file_name(name: &str) -> String {
+    let name = name.trim();
+    if valid_instruction_file_name(name) {
+        name.to_string()
+    } else {
+        DEFAULT_ARCHITECTURE_FILE_NAME.to_string()
+    }
+}
+
+/// Resolves the instruction-file name for one project: the per-project override when valid,
+/// otherwise the global default. The result is always a plain file name inside its folder.
+pub fn architecture_file_name(settings: &AppSettings, project_id: &str) -> String {
+    if let Some(name) = settings
+        .architecture_projection
+        .project_file_names
+        .get(project_id)
+    {
+        if valid_instruction_file_name(name) {
+            return name.trim().to_string();
+        }
+    }
+
+    sanitize_architecture_file_name(&settings.architecture_projection.file_name)
+}
+
+/// Whether a project opted in to generated in-tree architecture projection.
+pub fn architecture_projection_enabled(settings: &AppSettings, project_id: &str) -> bool {
+    settings
+        .architecture_projection
+        .enabled_project_ids
+        .iter()
+        .any(|id| id == project_id)
+}
+
+/// A file name is accepted only when it stays inside the folder it is written to.
+fn valid_instruction_file_name(name: &str) -> bool {
+    let name = name.trim();
+    !name.is_empty()
+        && name != "."
+        && name != ".."
+        && !name.contains('/')
+        && !name.contains('\\')
+        && !name.contains(':')
+}
+
+fn normalize_architecture_projection(settings: &mut AppSettings) {
+    let known_projects = settings
+        .projects
+        .iter()
+        .map(|project| project.id.clone())
+        .collect::<Vec<_>>();
+    let projection = &mut settings.architecture_projection;
+
+    projection.file_name = projection.file_name.trim().to_string();
+    if !valid_instruction_file_name(&projection.file_name) {
+        projection.file_name = DEFAULT_ARCHITECTURE_FILE_NAME.to_string();
+    }
+
+    projection
+        .enabled_project_ids
+        .retain(|id| known_projects.contains(id));
+    projection.enabled_project_ids.sort();
+    projection.enabled_project_ids.dedup();
+
+    projection
+        .project_file_names
+        .retain(|id, name| known_projects.contains(id) && valid_instruction_file_name(name));
+}
+
 fn normalize(mut settings: AppSettings) -> AppSettings {
     if settings.window.width < 640 {
         settings.window.width = 1440;
@@ -239,6 +343,7 @@ fn normalize(mut settings: AppSettings) -> AppSettings {
     }
 
     normalize_rule_templates(&mut settings.rule_templates);
+    normalize_architecture_projection(&mut settings);
     settings
 }
 
@@ -248,6 +353,7 @@ fn default_settings() -> AppSettings {
         last_active_project_id: None,
         projects: Vec::new(),
         rule_templates: Vec::new(),
+        architecture_projection: ArchitectureProjectionSettings::default(),
     }
 }
 
@@ -380,6 +486,97 @@ fn validate_rule_template_hook(hook: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn architecture_file_name_rejects_paths_and_honours_overrides() {
+        let mut settings = AppSettings {
+            window: WindowSettings::default(),
+            projects: vec![ProjectSettings {
+                id: "p".to_string(),
+                name: "P".to_string(),
+                folder: "C:\\p".to_string(),
+            }],
+            last_active_project_id: Some("p".to_string()),
+            rule_templates: Vec::new(),
+            architecture_projection: ArchitectureProjectionSettings::default(),
+        };
+
+        assert_eq!(architecture_file_name(&settings, "p"), DEFAULT_ARCHITECTURE_FILE_NAME);
+        assert!(!architecture_projection_enabled(&settings, "p"));
+
+        settings.architecture_projection.file_name = "CLAUDE.md".to_string();
+        assert_eq!(architecture_file_name(&settings, "p"), "CLAUDE.md");
+
+        // A name that could escape its folder falls back instead of being written.
+        for bad in [
+            "../../etc/passwd",
+            "..\\escape.md",
+            "sub/dir.md",
+            "C:\\absolute.md",
+            "",
+            "   ",
+            "..",
+            ".",
+        ] {
+            settings.architecture_projection.file_name = bad.to_string();
+            assert_eq!(
+                architecture_file_name(&settings, "p"),
+                DEFAULT_ARCHITECTURE_FILE_NAME,
+                "{bad:?} must fall back to the default"
+            );
+        }
+
+        settings.architecture_projection.file_name = DEFAULT_ARCHITECTURE_FILE_NAME.to_string();
+        settings
+            .architecture_projection
+            .project_file_names
+            .insert("p".to_string(), "PROJECT.md".to_string());
+        assert_eq!(architecture_file_name(&settings, "p"), "PROJECT.md");
+
+        settings
+            .architecture_projection
+            .enabled_project_ids
+            .push("p".to_string());
+        assert!(architecture_projection_enabled(&settings, "p"));
+    }
+
+    #[test]
+    fn normalize_drops_projection_configuration_for_unknown_projects() {
+        let path = test_settings_path("projection-normalize");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            r#"{
+  "window": { "width": 1024, "height": 768, "x": null, "y": null },
+  "projects": [{ "id": "adashi", "name": "Adashi", "folder": "C:\\src\\Adashi" }],
+  "lastActiveProjectId": "adashi",
+  "ruleTemplates": [],
+  "architectureProjection": {
+    "fileName": "   ",
+    "enabledProjectIds": ["adashi", "gone", "adashi"],
+    "projectFileNames": { "adashi": "PROJECT.md", "gone": "X.md", "adashi2": "a/b.md" }
+  }
+}"#,
+        )
+        .unwrap();
+
+        let settings = load_or_init(&path).unwrap();
+        assert_eq!(
+            settings.architecture_projection.file_name,
+            DEFAULT_ARCHITECTURE_FILE_NAME
+        );
+        assert_eq!(
+            settings.architecture_projection.enabled_project_ids,
+            vec!["adashi".to_string()]
+        );
+        assert_eq!(
+            settings.architecture_projection.project_file_names.len(),
+            1,
+            "unknown and invalid overrides are dropped"
+        );
+        assert_eq!(architecture_file_name(&settings, "adashi"), "PROJECT.md");
+        let _ = fs::remove_file(path);
+    }
 
     #[test]
     fn legacy_settings_load_without_rule_templates_normalizes_to_empty_list() {

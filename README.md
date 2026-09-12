@@ -55,6 +55,12 @@ Opening memory migrates exact old built-in protocols; custom protocols remain un
 
 See [the compact MCP contract and migration guide](docs/context-efficiency.md) for lifecycle section caching, bounded task pages, compatibility, and measured before/after results.
 
+### Architecture Projection
+
+Adashi keeps the formal design database as the single source of truth, and can additionally project it into the project tree so coding agents read the architecture where they already work. When enabled for a project, Adashi generates a bounded block into the instruction file of the project root and of every folder that contains design-bound files. The block carries the responsibilities and boundaries of the elements that own code there — the information that stops an agent inventing a parallel mechanism that already exists.
+
+Projections are marked as generated, wrapped in `adashi:architecture` markers, and overwritten on regeneration, so the design is edited in Adashi and never in the file. The instruction-file name is configurable in settings and defaults to `AGENTS.md`. Generation is opt-in per project, and disabling it removes every block Adashi wrote. See [the architecture projection contract](docs/architecture-projection.md).
+
 ### Lifecycle Rule Injection
 
 Adashi exposes lifecycle hooks for agent runs:

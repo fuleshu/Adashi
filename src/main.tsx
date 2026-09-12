@@ -405,6 +405,12 @@ type ProjectSettings = {
   folder: string;
 };
 
+type ArchitectureProjectionSettings = {
+  fileName: string;
+  enabledProjectIds: string[];
+  projectFileNames: Record<string, string>;
+};
+
 type AppSettings = {
   window: {
     width: number;
@@ -415,6 +421,26 @@ type AppSettings = {
   projects: ProjectSettings[];
   lastActiveProjectId?: string | null;
   ruleTemplates: RuleTemplate[];
+  architectureProjection: ArchitectureProjectionSettings;
+};
+
+type ProjectionFileStatus = {
+  path: string;
+  state: "current" | "stale" | "drifted" | "missing";
+};
+
+type ProjectionStatus = {
+  enabled: boolean;
+  fileName: string;
+  revision: number;
+  error?: string;
+  files: ProjectionFileStatus[];
+};
+
+type PromptWarning = {
+  source: string;
+  label: string;
+  unknownTools: string[];
 };
 
 type DashboardPayload = {
@@ -442,12 +468,21 @@ type DashboardPayload = {
   ruleTemplates: RuleTemplate[];
   fixedHookPrompts: FixedHookPrompt[];
   memory: ProjectMemory;
+  architectureProjection: ProjectionStatus;
+  promptWarnings: PromptWarning[];
 };
 
 type ProjectRevision = {
   projectId: string;
   revision: number;
   updatedAt: string;
+};
+
+const PROJECTION_STATE_TITLES: Record<ProjectionFileStatus["state"], string> = {
+  current: "Matches the current design revision",
+  stale: "Rendered from an older design revision",
+  drifted: "Block was edited outside Adashi",
+  missing: "File or block is absent",
 };
 
 const MERMAID_THEME_VARIABLES = {
@@ -818,7 +853,9 @@ function App() {
           <SettingsView
             key={`${payload.projectId}:settings`}
             activeProjectId={payload.projectId}
+            architectureProjection={payload.architectureProjection}
             fixedHookPrompts={payload.fixedHookPrompts}
+            promptWarnings={payload.promptWarnings}
             settings={settings}
             onAdd={(updatedSettings, projectId) => {
               setSettings(updatedSettings);
@@ -835,6 +872,10 @@ function App() {
               );
             }}
             onError={setError}
+            onSettingsChange={(updatedSettings) => {
+              setSettings(updatedSettings);
+              loadDashboard(payload.projectId, "merge");
+            }}
           />
         </div>
         <div className="workspace-tab" hidden={activeView !== "rules"}>
@@ -3184,21 +3225,42 @@ function ProjectCreationForm({
 
 function SettingsView({
   activeProjectId,
+  architectureProjection,
   fixedHookPrompts,
+  promptWarnings,
   settings,
   onAdd,
   onDashboardChange,
   onDelete,
   onError,
+  onSettingsChange,
 }: {
   activeProjectId: string;
+  architectureProjection: ProjectionStatus;
   fixedHookPrompts: FixedHookPrompt[];
+  promptWarnings: PromptWarning[];
   settings: AppSettings;
   onAdd: (settings: AppSettings, projectId: string) => void;
   onDashboardChange: (payload: DashboardPayload) => void;
   onDelete: (settings: AppSettings) => void;
   onError: (message: string) => void;
+  onSettingsChange: (settings: AppSettings) => void;
 }) {
+  const [architectureFileName, setArchitectureFileName] = React.useState(
+    settings.architectureProjection.fileName,
+  );
+  const [projectFileName, setProjectFileName] = React.useState(
+    settings.architectureProjection.projectFileNames[activeProjectId] ?? "",
+  );
+
+  React.useEffect(() => {
+    setArchitectureFileName(settings.architectureProjection.fileName);
+  }, [settings.architectureProjection.fileName]);
+
+  React.useEffect(() => {
+    setProjectFileName(settings.architectureProjection.projectFileNames[activeProjectId] ?? "");
+  }, [activeProjectId, settings.architectureProjection.projectFileNames]);
+
   function remove(projectId: string) {
     invoke<AppSettings>("delete_project", { projectId })
       .then(onDelete)
@@ -3216,6 +3278,27 @@ function SettingsView({
       },
     })
       .then(onDashboardChange)
+      .catch((reason) => onError(formatMutationError(reason)));
+  }
+
+  function saveArchitectureFileName() {
+    invoke<AppSettings>("set_architecture_file_name", { fileName: architectureFileName })
+      .then(onSettingsChange)
+      .catch((reason) => onError(formatMutationError(reason)));
+  }
+
+  function submitArchitectureFileName(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    saveArchitectureFileName();
+  }
+
+  function updateProjectProjection(enabled: boolean, fileName: string) {
+    invoke<AppSettings>("set_project_architecture_projection", {
+      projectId: activeProjectId,
+      enabled,
+      fileName: fileName.trim() || null,
+    })
+      .then(onSettingsChange)
       .catch((reason) => onError(formatMutationError(reason)));
   }
 
@@ -3250,6 +3333,119 @@ function SettingsView({
         <h3>Add Project</h3>
         <ProjectCreationForm buttonLabel="Add" onCreated={onAdd} onError={onError} />
       </section>
+
+      <section className="data-panel settings-panel settings-architecture-panel">
+        <div className="rules-panel-heading">
+          <h3>Architecture Projection</h3>
+        </div>
+
+        <div className="architecture-section">
+          <p className="eyebrow">Global</p>
+          <form className="settings-form" onSubmit={submitArchitectureFileName}>
+            <label>
+              <span>Instruction file name</span>
+              <div className="folder-picker-row">
+                <input
+                  aria-label="Architecture projection file name"
+                  onChange={(event) => setArchitectureFileName(event.target.value)}
+                  placeholder="AGENTS.md"
+                  value={architectureFileName}
+                />
+                <button type="submit">Save</button>
+              </div>
+            </label>
+          </form>
+        </div>
+
+        <div className="architecture-section">
+          <p className="eyebrow">This project</p>
+          <label className="settings-toggle-row architecture-toggle-row">
+            <input
+              checked={architectureProjection.enabled}
+              onChange={(event) => updateProjectProjection(event.target.checked, projectFileName)}
+              type="checkbox"
+            />
+            <span>Write architecture projections into this project</span>
+          </label>
+          <label className="architecture-override-field">
+            <span>Per-project file name override (optional)</span>
+            <input
+              aria-label="Per-project architecture projection file name"
+              onChange={(event) => setProjectFileName(event.target.value)}
+              onBlur={(event) => updateProjectProjection(architectureProjection.enabled, event.target.value)}
+              placeholder={`Default: ${settings.architectureProjection.fileName}`}
+              value={projectFileName}
+            />
+          </label>
+        </div>
+      </section>
+
+      <section className="data-panel settings-panel settings-projection-status-panel">
+        <div className="rules-panel-heading">
+          <h3>Projection Status</h3>
+          <span className="projection-revision">revision {architectureProjection.revision}</span>
+        </div>
+
+        {architectureProjection.error ? (
+          <div className="projection-error" role="alert">
+            <strong>Last projection failed</strong>
+            <p>{architectureProjection.error}</p>
+          </div>
+        ) : null}
+
+        <div className="projection-file-name-row">
+          <span>Instruction file</span>
+          <code>{architectureProjection.fileName}</code>
+        </div>
+
+        {architectureProjection.files.length === 0 ? (
+          <div className="empty-state compact">
+            {architectureProjection.enabled
+              ? "No projection files found for this project."
+              : "Projection is disabled for this project."}
+          </div>
+        ) : (
+          <ul className="projection-file-list">
+            {architectureProjection.files.map((file) => (
+              <li className="projection-file-row" key={file.path}>
+                <span
+                  className={`pill projection-state-${file.state}`}
+                  title={PROJECTION_STATE_TITLES[file.state]}
+                >
+                  {file.state}
+                </span>
+                <code>{file.path}</code>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {promptWarnings.length > 0 ? (
+        <section className="data-panel settings-panel settings-prompt-warnings-panel">
+          <div className="rules-panel-heading">
+            <h3>Prompt Warnings</h3>
+          </div>
+          <p className="prompt-warnings-note">
+            These stored prompts name MCP tools that no longer exist.
+          </p>
+          <ul className="prompt-warning-list">
+            {promptWarnings.map((warning) => (
+              <li className="prompt-warning-row" key={warning.source}>
+                <div className="prompt-warning-heading">
+                  <strong>{warning.label}</strong>
+                  <span>{warning.source}</span>
+                </div>
+                <div className="prompt-warning-tools">
+                  {warning.unknownTools.map((tool) => (
+                    <code key={tool}>{tool}</code>
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <section className="data-panel settings-panel settings-design-protocol-panel">
         <div className="rules-panel-heading">

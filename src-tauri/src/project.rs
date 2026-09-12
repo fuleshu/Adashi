@@ -61,6 +61,7 @@ mod tests {
             ],
             last_active_project_id: Some("adashi".to_string()),
             rule_templates: Vec::<RuleTemplate>::new(),
+            architecture_projection: Default::default(),
         }
     }
 

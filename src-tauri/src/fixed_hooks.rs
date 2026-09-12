@@ -124,6 +124,10 @@ pub fn ensure_fixed_hook_prompts(db: &Connection) -> Result<(), String> {
             params![project_id, LEGACY_DESIGN_RULE_NAME],
         )
         .map_err(|err| err.to_string())?;
+
+        // Repair runs last: it rewrites identifiers, so it must not change stored text before
+        // the exact-text legacy comparisons above have had their chance to match.
+        crate::prompt_hygiene::repair_stored_prompts(db, project_id)?;
     }
 
     Ok(())

@@ -7,6 +7,8 @@ mod mcp;
 mod memory;
 mod mockups;
 mod project;
+mod projection;
+mod prompt_hygiene;
 mod qa;
 mod rules;
 mod schema;

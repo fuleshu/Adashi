@@ -1,7 +1,7 @@
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 #[cfg(test)]
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -17,9 +17,12 @@ use crate::mockups::{
     CreateMockupInput, MockupMutationInput, MockupSummary, SaveDraftInput, UiMockup,
 };
 use crate::qa::{NewQaJob, QaDesignLinkInput, QaJob, QaJobQuery, QaRun, UpdateQaJob};
+use crate::projection::{self, ProjectionStatus};
+use crate::prompt_hygiene::{self, PromptWarning};
 use crate::rules::{NewRule, Rule, UpdateRule};
 use crate::settings::{
     AppSettings, ProjectSettings, RuleTemplate, RuleTemplateDraft, WindowSettings,
+    architecture_file_name, architecture_projection_enabled,
 };
 use crate::state as project_state;
 use crate::tasks::{FinishTask, NewTask, Task, TaskDesignSpecificationLinkInput, UpdateTask};
@@ -59,6 +62,8 @@ struct DashboardPayload {
     rule_templates: Vec<RuleTemplate>,
     fixed_hook_prompts: Vec<FixedHookPrompt>,
     memory: ProjectMemory,
+    architecture_projection: ProjectionStatus,
+    prompt_warnings: Vec<PromptWarning>,
 }
 
 #[derive(Serialize)]
@@ -190,6 +195,40 @@ fn load_dashboard_payload(
         .map_err(|err| err.to_string())?
         .unwrap_or_else(|| "ProjectContext".to_string());
 
+    let architecture_projection = {
+        let settings = state
+            .settings
+            .lock()
+            .map_err(|_| "Settings lock poisoned".to_string())?
+            .clone();
+        let file_name = architecture_file_name(&settings, &project.id);
+        let enabled = architecture_projection_enabled(&settings, &project.id);
+        // Opening or refreshing a project keeps its projections current. Regeneration is
+        // idempotent and only writes when the rendered content actually changed.
+        let mut status = projection::status(
+            db,
+            project_row_id,
+            Path::new(&project.folder),
+            &file_name,
+            enabled,
+        )?;
+        if let Err(error) = projection::regenerate(
+            db,
+            project_row_id,
+            Path::new(&project.folder),
+            &file_name,
+            enabled,
+        ) {
+            status.error = Some(error);
+        }
+        status
+    };
+
+    let rules = rules::load_rules(db)?;
+    let rule_templates = load_rule_templates(state)?;
+    let fixed_hook_prompts = fixed_hooks::load_fixed_hook_prompts(db, project_row_id)?;
+    let prompt_warnings = collect_prompt_warnings(&rules, &fixed_hook_prompts, &rule_templates);
+
     Ok(DashboardPayload {
         project_id: project.id,
         project_name: project.name,
@@ -211,11 +250,51 @@ fn load_dashboard_payload(
         qa_checks: load_qa_checks(&db)?,
         qa_jobs: qa::load_jobs(db, project_row_id, None)?,
         qa_runs: qa::load_runs(db, project_row_id, Some(20))?,
-        rules: rules::load_rules(db)?,
-        rule_templates: load_rule_templates(state)?,
-        fixed_hook_prompts: fixed_hooks::load_fixed_hook_prompts(db, project_row_id)?,
+        rules,
+        rule_templates,
+        fixed_hook_prompts,
         memory,
+        architecture_projection,
+        prompt_warnings,
     })
+}
+
+/// Stored prompts that name tools which no longer exist. Detecting these turns a silent rot
+/// into something a human can repair.
+fn collect_prompt_warnings(
+    rules: &[Rule],
+    fixed_hook_prompts: &[FixedHookPrompt],
+    rule_templates: &[RuleTemplate],
+) -> Vec<PromptWarning> {
+    let mut warnings = Vec::new();
+    for rule in rules {
+        if let Some(warning) = prompt_hygiene::warning_for(
+            &format!("rule:{}", rule.id),
+            &rule.name,
+            &rule.prompt,
+        ) {
+            warnings.push(warning);
+        }
+    }
+    for prompt in fixed_hook_prompts {
+        if let Some(warning) = prompt_hygiene::warning_for(
+            &format!("fixed-hook:{}", prompt.key),
+            &prompt.title,
+            &prompt.prompt,
+        ) {
+            warnings.push(warning);
+        }
+    }
+    for template in rule_templates {
+        if let Some(warning) = prompt_hygiene::warning_for(
+            &format!("rule-template:{}", template.id),
+            &template.name,
+            &template.prompt,
+        ) {
+            warnings.push(warning);
+        }
+    }
+    warnings
 }
 
 #[tauri::command]
@@ -479,6 +558,7 @@ fn delete_project(project_id: String, state: State<'_, AppState>) -> Result<AppS
 
     let initial_len = settings.projects.len();
     settings.projects.retain(|project| project.id != project_id);
+    projection::forget_project(&mut settings, &project_id);
 
     if settings.projects.len() == initial_len {
         return Err(format!("Unknown project id: {project_id}"));
@@ -1544,6 +1624,8 @@ pub fn run() {
             get_project_revision,
             pick_project_folder,
             set_active_project,
+            set_architecture_file_name,
+            set_project_architecture_projection,
             save_rule_template,
             save_mockup_draft,
             request_mockup_revision,
@@ -1623,6 +1705,138 @@ fn verify_project_database(db: &Connection) -> Result<(), String> {
     .map_err(|err| format!("Project database is missing the default design workspace: {err}"))?;
 
     Ok(())
+}
+
+/// Removes blocks left under a previous file name and regenerates under the current one.
+///
+/// A project whose folder is gone is skipped rather than failing the whole refresh: its
+/// projection is unreachable either way.
+fn refresh_architecture_projection(
+    settings: &AppSettings,
+    previous_names: &[(String, String)],
+) -> Result<(), String> {
+    for project in &settings.projects {
+        let folder = Path::new(&project.folder);
+        if !folder.is_dir() {
+            continue;
+        }
+
+        let file_name = architecture_file_name(settings, &project.id);
+        if let Some((_, previous)) = previous_names
+            .iter()
+            .find(|(id, _)| id == &project.id)
+        {
+            if previous != &file_name {
+                projection::remove_managed_blocks(folder, previous)?;
+            }
+        }
+
+        let db = open_project_database(project).map_err(|error| error.to_string())?;
+        let project_row_id = load_project_row_id(&db)?;
+        if architecture_projection_enabled(settings, &project.id) {
+            projection::regenerate(&db, project_row_id, folder, &file_name, true)?;
+        } else {
+            projection::remove_managed_blocks(folder, &file_name)?;
+        }
+    }
+    Ok(())
+}
+
+fn resolved_architecture_names(settings: &AppSettings) -> Vec<(String, String)> {
+    settings
+        .projects
+        .iter()
+        .map(|project| {
+            (
+                project.id.clone(),
+                architecture_file_name(settings, &project.id),
+            )
+        })
+        .collect()
+}
+
+fn store_settings(state: &AppState, settings: AppSettings) -> Result<AppSettings, String> {
+    settings::save(&state.settings_path, &settings).map_err(|error| error.to_string())?;
+    let mut stored = state
+        .settings
+        .lock()
+        .map_err(|_| "Settings lock was poisoned".to_string())?;
+    *stored = settings.clone();
+    Ok(settings)
+}
+
+/// Sets the instruction-file name used for generated architecture blocks. Default `AGENTS.md`.
+///
+/// Renaming removes the previous name's blocks first, so an orphaned block cannot keep being
+/// injected into agents after the setting changes.
+#[tauri::command]
+fn set_architecture_file_name(
+    file_name: String,
+    state: State<'_, AppState>,
+) -> Result<AppSettings, String> {
+    let mut settings = state
+        .settings
+        .lock()
+        .map_err(|_| "Settings lock was poisoned".to_string())?
+        .clone();
+
+    let previous_names = resolved_architecture_names(&settings);
+    settings.architecture_projection.file_name =
+        settings::sanitize_architecture_file_name(&file_name);
+
+    refresh_architecture_projection(&settings, &previous_names)?;
+    store_settings(&state, settings)
+}
+
+/// Opts one project in or out of generated in-tree projection, with an optional per-project
+/// file-name override (`None` clears it and falls back to the global default).
+#[tauri::command]
+fn set_project_architecture_projection(
+    project_id: String,
+    enabled: bool,
+    file_name: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<AppSettings, String> {
+    let mut settings = state
+        .settings
+        .lock()
+        .map_err(|_| "Settings lock was poisoned".to_string())?
+        .clone();
+
+    if !settings.projects.iter().any(|p| p.id == project_id) {
+        return Err(format!("Unknown project id: {project_id}"));
+    }
+
+    let previous_names = resolved_architecture_names(&settings);
+
+    settings
+        .architecture_projection
+        .enabled_project_ids
+        .retain(|id| id != &project_id);
+    if enabled {
+        settings
+            .architecture_projection
+            .enabled_project_ids
+            .push(project_id.clone());
+    }
+
+    match file_name.as_deref().map(str::trim) {
+        Some(name) if !name.is_empty() => {
+            settings
+                .architecture_projection
+                .project_file_names
+                .insert(project_id.clone(), name.to_string());
+        }
+        _ => {
+            settings
+                .architecture_projection
+                .project_file_names
+                .remove(&project_id);
+        }
+    }
+
+    refresh_architecture_projection(&settings, &previous_names)?;
+    store_settings(&state, settings)
 }
 
 fn load_project_row_id(db: &Connection) -> Result<i64, String> {
@@ -1985,7 +2199,7 @@ mod tests {
             window: WindowSettings::default(),
             projects: Vec::new(),
             last_active_project_id: None,
-            rule_templates: Vec::new(),
+            rule_templates: Vec::new(), architecture_projection: Default::default(),
         };
 
         let error = resolve_project_from_settings(&settings, None).unwrap_err();
@@ -2006,7 +2220,7 @@ mod tests {
                 folder: "C:\\src\\Adashi".to_string(),
             }],
             last_active_project_id: Some("adashi".to_string()),
-            rule_templates: Vec::new(),
+            rule_templates: Vec::new(), architecture_projection: Default::default(),
         };
 
         let error = resolve_project_from_settings(&settings, Some("   ")).unwrap_err();
@@ -2027,7 +2241,7 @@ mod tests {
                 folder: "C:\\src\\Adashi".to_string(),
             }],
             last_active_project_id: Some("adashi".to_string()),
-            rule_templates: Vec::new(),
+            rule_templates: Vec::new(), architecture_projection: Default::default(),
         };
 
         let error = resolve_project_from_settings(&settings, Some("raysplatter")).unwrap_err();
@@ -2052,7 +2266,7 @@ mod tests {
                 },
             ],
             last_active_project_id: Some("adashi".to_string()),
-            rule_templates: Vec::new(),
+            rule_templates: Vec::new(), architecture_projection: Default::default(),
         };
 
         let by_id = resolve_project_from_settings(&settings, Some("raysplatter-12345")).unwrap();
@@ -2073,7 +2287,7 @@ mod tests {
                 window: WindowSettings::default(),
                 projects: Vec::new(),
                 last_active_project_id: None,
-                rule_templates: Vec::new(),
+                rule_templates: Vec::new(), architecture_projection: Default::default(),
             })),
         };
 

@@ -24,6 +24,12 @@ The `adashi_tasks` list operation selects only id, number, title, titleTruncated
 - Follow nextCursor with the same project and states. Pages are ordered by stable task id and read under a database transaction. A cursor includes the filter and project revision; any intervening project change produces tasks.stale_cursor rather than silent omissions. Restart enumeration without a cursor. Do not guess or edit cursors.
 - There is no implicit fallback from an empty open-task query to all states.
 
+## QA listings and targeted evidence
+
+The `adashi_qa` list_jobs operation returns bounded job metadata only: id, version, number, name, enabled, derivedState, tags and the latest run's status, exit code, timestamps and duration. It never inlines command, commandSnapshot, output or runHistory. It accepts limit (default 25, range 1..=100) and a validated nextCursor continuation over the derived-state-then-number order; filteredTotal and hasMore distinguish a complete empty result from a partial page, and a stale or filter-mismatched cursor fails explicitly. The list_runs operation likewise returns run metadata plus per-job status, exit code and duration, never console output.
+
+Console evidence is explicit and targeted: get_job returns one job with its latest run and retained history, and get_run returns one run with all of its per-job output. Per-job-run output stays capped at 200,000 characters and only the two newest runs per job are retained, so a targeted detail read remains bounded while a listing stays small regardless of how much the suite printed.
+
 ## Separate startup and retention budgets
 
 The required memory protocol is a separate section and is supplied in full. Default memoryContext=summary supplies at most 2,000 Unicode characters of current summary plus a small retrieval notice, never historical handovers. An oversized summary is omitted in full, with explicit instructions to retrieve it before work needing project constraints. It is never silently clipped. memoryContext=protocolOnly omits that summary section for operational requests. General intent does not imply that memory is irrelevant.

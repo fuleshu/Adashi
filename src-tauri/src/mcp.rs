@@ -6,7 +6,10 @@ use crate::design::{
 use crate::memory::{self, AppendMemoryNote, MemoryNote, ProjectMemory};
 use crate::mockups::{self, MockupSummary, UiMockup};
 use crate::project::{open_project_database, resolve_project_from_settings};
-use crate::qa::{self, NewQaJob, QaDesignLinkInput, QaJob, QaJobQuery, QaRun, UpdateQaJob};
+use crate::qa::{
+    self, NewQaJob, QaDesignLinkInput, QaJob, QaJobQuery, QaJobSummary, QaRun, QaRunSummary,
+    UpdateQaJob,
+};
 use crate::rules::{self, NewRule, Rule, UpdateRule};
 use crate::settings::{self, AppSettings, ProjectSettings};
 use crate::state as project_state;
@@ -217,6 +220,10 @@ struct FinishTaskParams {
 struct ListQaJobsParams {
     project_id: String,
     query: Option<QaJobQuery>,
+    /// Default 25, range 1..=100.
+    limit: Option<i64>,
+    /// Opaque continuation; keep the same query.
+    cursor: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
@@ -224,6 +231,13 @@ struct ListQaJobsParams {
 struct QaJobIdParams {
     project_id: String,
     qa_job_id: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct QaRunIdParams {
+    project_id: String,
+    qa_run_id: i64,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
@@ -287,6 +301,16 @@ struct ListQaRunsParams {
     limit: Option<i64>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct QaJobCursor {
+    contract_version: u32,
+    project_id: String,
+    revision: i64,
+    state_rank: i32,
+    number: i64,
+}
+
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct UpdateMemoryParams {
@@ -333,6 +357,7 @@ struct PublishIntentParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DesignOverviewParams {
     project_id: String,
+    #[serde(default)]
     #[schemars(schema_with = "nonnegative_count_schema")]
     max_depth: Option<usize>,
 }
@@ -343,6 +368,7 @@ struct DesignScopeParams {
     project_id: String,
     element_id: String,
     include_ancestors: Option<bool>,
+    #[serde(default)]
     #[schemars(schema_with = "nonnegative_count_schema")]
     children_depth: Option<usize>,
     include_source: Option<bool>,
@@ -354,6 +380,7 @@ struct DesignSearchParams {
     project_id: String,
     query: String,
     kinds: Option<Vec<String>>,
+    #[serde(default)]
     #[schemars(schema_with = "nonnegative_count_schema")]
     limit: Option<usize>,
 }
@@ -503,10 +530,14 @@ struct DeleteTaskResult {
 #[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct QaJobListResult {
+    contract_version: u32,
     project_id: String,
     project_name: String,
     revision: i64,
-    jobs: Vec<QaJob>,
+    jobs: Vec<QaJobSummary>,
+    filtered_total: i64,
+    has_more: bool,
+    next_cursor: Option<String>,
 }
 
 #[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
@@ -542,7 +573,7 @@ struct QaRunListResult {
     project_id: String,
     project_name: String,
     revision: i64,
-    runs: Vec<QaRun>,
+    runs: Vec<QaRunSummary>,
 }
 
 #[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
@@ -578,6 +609,10 @@ struct ResourceIntentListResult {
     project_name: String,
     intents: Vec<ResourceIntent>,
 }
+
+/// Bounded QA job-listing budget, mirroring the task-list contract.
+const QA_JOB_LIST_DEFAULT_LIMIT: i64 = 25;
+const QA_JOB_LIST_MAX_LIMIT: i64 = 100;
 
 /// Capability menu for the consolidated design/mockup tool. The model reads these
 /// values straight from the JSON schema, so no memorization is required.
@@ -616,6 +651,7 @@ enum QaOperation {
     RunJobs,
     ListRuns,
     GetJob,
+    GetRun,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
@@ -653,6 +689,7 @@ struct DesignParams {
     operation: DesignOperation,
     project_id: String,
     /// get_overview: how deep to expand the C4/UML tree.
+    #[serde(default)]
     #[schemars(schema_with = "nonnegative_count_schema")]
     max_depth: Option<usize>,
     /// get_scope: root element id.
@@ -660,6 +697,7 @@ struct DesignParams {
     /// get_scope: include ancestors.
     include_ancestors: Option<bool>,
     /// get_scope: child expansion depth.
+    #[serde(default)]
     #[schemars(schema_with = "nonnegative_count_schema")]
     children_depth: Option<usize>,
     /// get_scope: include canonical source.
@@ -669,6 +707,7 @@ struct DesignParams {
     /// search: kinds to restrict results to.
     kinds: Option<Vec<String>>,
     /// search: result limit.
+    #[serde(default)]
     #[schemars(schema_with = "nonnegative_count_schema")]
     limit: Option<usize>,
     /// get_by_ids: stored design ids.
@@ -731,6 +770,8 @@ struct QaParams {
     query: Option<QaJobQuery>,
     /// get_job/update_job/delete_job: job id.
     qa_job_id: Option<i64>,
+    /// get_run: run id.
+    qa_run_id: Option<i64>,
     /// create_job/update_job/delete_job/run_jobs: idempotency key.
     operation_id: Option<String>,
     /// update_job/delete_job: expected job version.
@@ -748,8 +789,10 @@ struct QaParams {
     tags: Option<Vec<String>>,
     /// run_jobs: trigger source label.
     trigger_source: Option<String>,
-    /// list_runs: max runs returned.
+    /// list_jobs (default 25) / list_runs (default 20): page size, range 1..=100.
     limit: Option<i64>,
+    /// list_jobs: opaque continuation cursor.
+    cursor: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
@@ -1394,17 +1437,82 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<ListQaJobsParams>,
     ) -> Result<Json<QaJobListResult>, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let revision =
-            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
-        let jobs = qa::load_jobs(&db, project_row_id, params.query.as_ref()).map_err(tool_error)?;
+        let limit = params.limit.unwrap_or(QA_JOB_LIST_DEFAULT_LIMIT);
+        if !(1..=QA_JOB_LIST_MAX_LIMIT).contains(&limit) {
+            return Err(tool_error(format!(
+                "qa.invalid_limit: limit must be 1..={QA_JOB_LIST_MAX_LIMIT}"
+            )));
+        }
+        let (project, mut db) = self.open_project(Some(params.project_id.as_str()))?;
+        let tx = db.transaction().map_err(internal_error)?;
+        let project_row_id = project_row_id(&tx).map_err(tool_error)?;
+        let revision = project_state::load_project_revision(&tx, project_row_id)
+            .map_err(tool_error)?
+            .revision;
+        let after = if let Some(encoded) = params.cursor {
+            if encoded.len() > 4096 {
+                return Err(tool_error("qa.invalid_cursor".into()));
+            }
+            let cursor: QaJobCursor = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(encoded)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+                .ok_or_else(|| tool_error("qa.invalid_cursor".into()))?;
+            if cursor.contract_version != 1
+                || cursor.project_id != project.id
+                || cursor.number <= 0
+                || cursor.state_rank < 0
+            {
+                return Err(tool_error(
+                    "qa.invalid_cursor: keep the original project".into(),
+                ));
+            }
+            if cursor.revision != revision {
+                return Err(tool_error(
+                    "qa.stale_cursor: project changed; restart without cursor".into(),
+                ));
+            }
+            Some((cursor.state_rank, cursor.number))
+        } else {
+            None
+        };
+        let (mut jobs, filtered_total) = qa::load_job_summaries(
+            &tx,
+            project_row_id,
+            params.query.as_ref(),
+            after,
+            limit + 1,
+        )
+        .map_err(tool_error)?;
+        let has_more = jobs.len() > limit as usize;
+        jobs.truncate(limit as usize);
+        let next_cursor = if has_more {
+            let last = jobs.last().expect("a page with more rows is never empty");
+            let cursor = QaJobCursor {
+                contract_version: 1,
+                project_id: project.id.clone(),
+                revision,
+                state_rank: qa::state_rank(&last.derived_state),
+                number: last.number,
+            };
+            Some(
+                base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .encode(serde_json::to_vec(&cursor).map_err(internal_error)?),
+            )
+        } else {
+            None
+        };
+        tx.commit().map_err(internal_error)?;
 
         Ok(Json(QaJobListResult {
+            contract_version: 1,
             project_id: project.id,
             project_name: project.name,
-            revision: revision.revision,
+            revision,
             jobs,
+            filtered_total,
+            has_more,
+            next_cursor,
         }))
     }
 
@@ -1423,6 +1531,24 @@ impl AdashiMcpServer {
             project_name: project.name,
             revision: revision.revision,
             job,
+        }))
+    }
+
+    fn get_qa_run(
+        &self,
+        Parameters(params): Parameters<QaRunIdParams>,
+    ) -> Result<Json<QaRunResult>, ErrorData> {
+        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        let revision =
+            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
+        let run = qa::load_run(&db, project_row_id, params.qa_run_id).map_err(tool_error)?;
+
+        Ok(Json(QaRunResult {
+            project_id: project.id,
+            project_name: project.name,
+            revision: revision.revision,
+            run,
         }))
     }
 
@@ -1632,7 +1758,7 @@ impl AdashiMcpServer {
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let revision =
             project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
-        let runs = qa::load_runs(&db, project_row_id, params.limit).map_err(tool_error)?;
+        let runs = qa::load_run_summaries(&db, project_row_id, params.limit).map_err(tool_error)?;
 
         Ok(Json(QaRunListResult {
             project_id: project.id,
@@ -2080,7 +2206,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_qa",
-        description = "QA job definitions and execution API. Select an `operation`: create_job, update_job, delete_job, list_jobs, run_jobs, list_runs, get_job. Required fields are listed per operation in the schema.",
+        description = "QA job definitions and execution API. Select an `operation`: create_job, update_job, delete_job, list_jobs (bounded job metadata with limit/cursor, never console output), run_jobs, list_runs (bounded run summary, never console output), get_job, get_run (full console output for one job or one run). Required fields are listed per operation in the schema.",
         annotations(read_only_hint = false, destructive_hint = true)
     )]
     fn qa(&self, Parameters(params): Parameters<QaParams>) -> Result<CallToolResult, ErrorData> {
@@ -2089,6 +2215,8 @@ impl AdashiMcpServer {
                 .list_qa_jobs(Parameters(ListQaJobsParams {
                     project_id: params.project_id,
                     query: params.query,
+                    limit: params.limit,
+                    cursor: params.cursor,
                 }))?
                 .into_call_tool_result(),
             QaOperation::GetJob => {
@@ -2170,6 +2298,14 @@ impl AdashiMcpServer {
                     limit: params.limit,
                 }))?
                 .into_call_tool_result(),
+            QaOperation::GetRun => {
+                let qa_run_id = required(params.qa_run_id, "qaRunId")?;
+                self.get_qa_run(Parameters(QaRunIdParams {
+                    project_id: params.project_id,
+                    qa_run_id,
+                }))?
+                .into_call_tool_result()
+            }
         }
     }
 
@@ -2584,6 +2720,7 @@ mod tests {
                     "run_jobs",
                     "list_runs",
                     "get_job",
+                    "get_run",
                 ],
             ),
             (
@@ -2616,6 +2753,158 @@ mod tests {
                 .collect();
             assert_eq!(values, expected);
         }
+    }
+
+    /// The prompt-hygiene registry must match the surface the router actually exposes, so a
+    /// renamed tool cannot silently leave stored prompts pointing at a dead name.
+    #[test]
+    fn tool_name_registry_matches_the_router() {
+        let mut advertised = AdashiMcpServer::tool_router()
+            .list_all()
+            .into_iter()
+            .map(|tool| tool.name.to_string())
+            .collect::<Vec<_>>();
+        advertised.sort();
+
+        let mut registered = crate::prompt_hygiene::MCP_TOOL_NAMES
+            .iter()
+            .map(|name| (*name).to_string())
+            .collect::<Vec<_>>();
+        registered.sort();
+
+        assert_eq!(advertised, registered);
+    }
+
+    #[test]
+    fn qa_listings_stay_bounded_and_never_inline_console_output() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("adashi-mcp-qa-listing-{suffix}"));
+        let settings_path = root.join("settings.json");
+        let project_folder = root.join("project");
+        let project = ProjectSettings {
+            id: "qa-listing-test".into(),
+            name: "QA Listing Test".into(),
+            folder: project_folder.to_string_lossy().into_owned(),
+        };
+        settings::save(
+            &settings_path,
+            &AppSettings {
+                window: WindowSettings {
+                    width: 1000,
+                    height: 700,
+                    x: None,
+                    y: None,
+                },
+                projects: vec![project.clone()],
+                last_active_project_id: Some(project.id.clone()),
+                rule_templates: vec![],
+                architecture_projection: Default::default(),
+            },
+        )
+        .unwrap();
+        let db = crate::open_project_database(&project).unwrap();
+        let project_row_id = project_row_id(&db).unwrap();
+        let job = qa::create_job(
+            &db,
+            project_row_id,
+            NewQaJob {
+                name: "Verbose suite".into(),
+                description: Some("prints a lot".into()),
+                command: "run-tests".into(),
+                working_directory: None,
+                shell: None,
+                timeout_seconds: None,
+                enabled: Some(true),
+                created_by: None,
+                design_specification_links: None,
+                task_ids: None,
+                tags: Some(vec!["suite".into()]),
+            },
+        )
+        .unwrap();
+        // Stored evidence far larger than any bounded listing may return.
+        let console_output = "console line\n".repeat(20_000);
+        db.execute(
+            "INSERT INTO qa_runs(
+                project_id, trigger_source, query_snapshot, status, finished_at, summary
+             ) VALUES(?1, 'mcp', '{}', 'failed', '2999-01-01 00:00:00', '0 passed, 1 failed')",
+            rusqlite::params![project_row_id],
+        )
+        .unwrap();
+        let qa_run_id = db.last_insert_rowid();
+        db.execute(
+            "INSERT INTO qa_job_runs(
+                qa_run_id, qa_job_id, command_snapshot, status, exit_code,
+                finished_at, duration_ms, output
+             ) VALUES(?1, ?2, '{\"command\":\"run-tests\"}', 'failed', 1,
+                '2999-01-01 00:00:00', 42, ?3)",
+            rusqlite::params![qa_run_id, job.id, console_output],
+        )
+        .unwrap();
+        drop(db);
+
+        let server = AdashiMcpServer::new(settings_path);
+
+        let jobs = serde_json::to_value(
+            server
+                .list_qa_jobs(Parameters(ListQaJobsParams {
+                    project_id: project.id.clone(),
+                    query: None,
+                    limit: None,
+                    cursor: None,
+                }))
+                .unwrap()
+                .0,
+        )
+        .unwrap();
+        let jobs_bytes = serde_json::to_string(&jobs).unwrap();
+        assert!(
+            !jobs_bytes.contains("console line"),
+            "job listing leaked console output"
+        );
+        assert_eq!(jobs["filteredTotal"], json!(1));
+        assert_eq!(jobs["contractVersion"], json!(1));
+        assert_eq!(jobs["jobs"].as_array().unwrap().len(), 1);
+        assert_eq!(jobs["jobs"][0]["derivedState"], json!("red"));
+        assert_eq!(jobs["jobs"][0]["latestRun"]["status"], json!("failed"));
+        assert_eq!(jobs["jobs"][0]["latestRun"]["durationMs"], json!(42));
+        assert!(jobs["jobs"][0].get("runHistory").is_none());
+        assert!(jobs["jobs"][0].get("command").is_none());
+        assert!(jobs["jobs"][0].get("latestRun").unwrap().get("output").is_none());
+        assert!(
+            jobs_bytes.len() < 2_000,
+            "bounded job listing must stay small, was {} bytes",
+            jobs_bytes.len()
+        );
+
+        let runs = serde_json::to_value(
+            server
+                .list_qa_runs(Parameters(ListQaRunsParams {
+                    project_id: project.id.clone(),
+                    limit: None,
+                }))
+                .unwrap()
+                .0,
+        )
+        .unwrap();
+        let runs_bytes = serde_json::to_string(&runs).unwrap();
+        assert!(
+            !runs_bytes.contains("console line"),
+            "run listing leaked console output"
+        );
+        assert_eq!(runs["runs"][0]["status"], json!("failed"));
+        assert_eq!(runs["runs"][0]["jobs"][0]["status"], json!("failed"));
+        assert!(runs["runs"][0]["jobs"][0].get("output").is_none());
+        assert!(
+            runs_bytes.len() < 2_000,
+            "bounded run listing must stay small, was {} bytes",
+            runs_bytes.len()
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -2679,6 +2968,18 @@ mod tests {
                 "limit",
             ),
             (
+                serde_json::to_value(rmcp::schemars::schema_for!(DesignParams)).unwrap(),
+                "maxDepth",
+            ),
+            (
+                serde_json::to_value(rmcp::schemars::schema_for!(DesignParams)).unwrap(),
+                "childrenDepth",
+            ),
+            (
+                serde_json::to_value(rmcp::schemars::schema_for!(DesignParams)).unwrap(),
+                "limit",
+            ),
+            (
                 serde_json::to_value(rmcp::schemars::schema_for!(DesignSaveResult)).unwrap(),
                 "changedCount",
             ),
@@ -2691,6 +2992,49 @@ mod tests {
         for (schema, property) in schemas {
             assert_portable_nonnegative_integer(&schema["properties"][property]);
         }
+    }
+
+    /// `schema_with` replaces a field's type with a synthetic wrapper type, which defeats
+    /// schemars' `Option` detection and would otherwise mark the field required. The
+    /// `#[serde(default)]` attribute keeps these optional count fields optional.
+    #[test]
+    fn optional_count_fields_are_not_required() {
+        let design = serde_json::to_value(rmcp::schemars::schema_for!(DesignParams)).unwrap();
+        let required_names = |schema: &serde_json::Value| {
+            schema["required"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|entry| entry.as_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        };
+
+        for (schema, property) in [
+            (
+                serde_json::to_value(rmcp::schemars::schema_for!(DesignOverviewParams)).unwrap(),
+                "maxDepth",
+            ),
+            (
+                serde_json::to_value(rmcp::schemars::schema_for!(DesignScopeParams)).unwrap(),
+                "childrenDepth",
+            ),
+            (
+                serde_json::to_value(rmcp::schemars::schema_for!(DesignSearchParams)).unwrap(),
+                "limit",
+            ),
+        ] {
+            assert!(
+                !required_names(&schema).contains(&property.to_string()),
+                "{property} must not be required"
+            );
+        }
+
+        // The consolidated tool schema is what the model reads, so it must agree.
+        assert_eq!(
+            required_names(&design),
+            vec!["operation".to_string(), "projectId".to_string()]
+        );
     }
 
     #[test]
@@ -2719,6 +3063,7 @@ mod tests {
                 projects: vec![project.clone()],
                 last_active_project_id: Some(project.id.clone()),
                 rule_templates: vec![],
+                architecture_projection: Default::default(),
             },
         )
         .unwrap();
@@ -2780,6 +3125,7 @@ mod tests {
                 projects: vec![project.clone()],
                 last_active_project_id: Some(project.id.clone()),
                 rule_templates: vec![],
+                architecture_projection: Default::default(),
             },
         )
         .unwrap();
