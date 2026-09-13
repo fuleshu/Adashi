@@ -2338,6 +2338,29 @@ fn load_bindings(db: &Connection, workspace_id: i64) -> Result<Vec<DesignBinding
         .map_err(|err| err.to_string())
 }
 
+/// One read of every design artifact in the project's workspace.
+///
+/// Cross-domain retrieval needs the whole design at once; assembling it here keeps the
+/// workspace-scoped queries, and the ordering that makes their output deterministic, in the
+/// module that owns the design store.
+#[derive(Clone, Debug)]
+pub struct DesignContent {
+    pub elements: Vec<DesignElementRecord>,
+    pub relationships: Vec<DesignRelationshipRecord>,
+    pub diagrams: Vec<DesignDiagramRecord>,
+    pub bindings: Vec<DesignBindingRecord>,
+}
+
+pub fn load_content(db: &Connection) -> Result<DesignContent, String> {
+    let workspace = load_workspace(db)?;
+    Ok(DesignContent {
+        elements: load_elements(db, workspace.id)?,
+        relationships: load_relationships(db, workspace.id)?,
+        diagrams: load_diagrams(db, workspace.id)?,
+        bindings: load_bindings(db, workspace.id)?,
+    })
+}
+
 fn filter_elements_by_depth(
     elements: Vec<DesignElementRecord>,
     max_depth: Option<usize>,

@@ -19,7 +19,7 @@ At each hook, call the Adashi MCP tool `adashi_rules` with operation `get_rule_i
 
 ```json
 {
-  "projectId": "<configured project id or name>",
+  "projectName": "<configured project name>",
   "operation": "get_rule_injections",
   "intend": "general | design | implementation",
   "hook": "run.start | task.start | task.end | run.end"
@@ -31,3 +31,25 @@ Treat every nonempty `injectionPrompt` as active instructions for that hook, eve
 For multi-task requests, call `task.start` and `task.end` for each task using the same run-level intend unless the user clearly changes the nature of a specific task. Do not invent new intend or hook names.
 
 If the Adashi MCP server is not present, unavailable, or the tool call fails because the MCP surface is not configured, continue without Adashi rule injection and mention the limitation only when it affects the requested outcome.
+
+<!-- adashi:architecture:begin -->
+<!-- adashi:generated revision=270 -->
+# Architecture (generated)
+Generated from the Adashi design model; do not edit, change the model.
+Top layer: 6 of 47 elements, 2 of 82 relationships. Deeper detail: the adashi_design get_scope and get_bindings operations.
+
+These responsibilities are already owned: extend them, do not duplicate.
+
+- **Adashi** (Software System) — Local multi-project context layer for agentic coding workspaces, covering formal design browsing, MCP rule injection, project memory, implementation t…
+- **Tauri Desktop Runtime** (Container) — Rust/Tauri command surface that opens project databases, assembles dashboard snapshots, exposes revision polling, and hosts shared validation and pers…
+- **Dashboard UI** (Container) — React dashboard for browsing and rendering formal C4, UML, and UI mockup artifacts, plus managing memory, rules, settings, tasks, and QA. It treats th…
+- **Adashi MCP Server** (Container) — Passive stdio MCP server that exposes deterministic rule, memory, task, QA, and formal design tools to coding agents.
+- **Project Data Store** (Container) — Project-local SQLite database under each project's .adashi folder, containing formal design data, project memory, rules, revision state, task records,…
+- **App Settings Store** (Container) — User-level JSON settings outside project databases for window geometry, known projects, and active project selection. Missing or empty settings are a…
+
+Boundaries:
+- Dashboard UI -> Tauri Desktop Runtime: Invokes dashboard, settings, memory, rules, and narrow design edit commands through
+- Tauri Desktop Runtime -> Project Data Store: Creates, migrates, seeds, reads, and mutates project-local state in
+
+[Dropped 0 element line(s) and 4 relationship line(s) to fit the projection budget; retrieve them by id.]
+<!-- adashi:architecture:end -->

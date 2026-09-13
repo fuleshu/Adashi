@@ -521,6 +521,13 @@ fn add_project_to_settings(
         return Err("That project folder is already registered".to_string());
     }
 
+    if let Some(existing) = duplicate_project_name(&settings, &project) {
+        return Err(format!(
+            "A project named '{}' is already registered",
+            existing.name
+        ));
+    }
+
     drop(settings);
 
     let db = open_project_database(&project).map_err(|err| err.to_string())?;
@@ -539,10 +546,29 @@ fn add_project_to_settings(
         return Err("That project folder is already registered".to_string());
     }
 
+    if let Some(existing) = duplicate_project_name(&settings, &project) {
+        return Err(format!(
+            "A project named '{}' is already registered",
+            existing.name
+        ));
+    }
+
     settings.last_active_project_id = Some(project.id.clone());
     settings.projects.push(project);
     settings::save(&state.settings_path, &settings).map_err(|err| err.to_string())?;
     Ok(settings.clone())
+}
+
+/// Project names must stay distinct so a name reference always resolves to one project.
+/// Comparison folds case; the stored name is still displayed exactly as written.
+fn duplicate_project_name<'a>(
+    settings: &'a AppSettings,
+    candidate: &ProjectSettings,
+) -> Option<&'a ProjectSettings> {
+    settings
+        .projects
+        .iter()
+        .find(|existing| existing.name.eq_ignore_ascii_case(candidate.name.trim()))
 }
 
 #[tauri::command]
@@ -1382,7 +1408,7 @@ fn finish_task(
 }
 
 #[tauri::command]
-fn confirm_task(
+fn close_task(
     project_id: Option<String>,
     task_id: i64,
     operation_id: String,
@@ -1397,7 +1423,7 @@ fn confirm_task(
         let tx = db.transaction().map_err(|error| error.to_string())?;
         concurrency::validate_guard(&tx, project_row_id, &guard)?;
         let before = tasks::load_task(&tx, project_row_id, task_id)?;
-        let updated = tasks::confirm_task(&tx, project_row_id, task_id)?;
+        let updated = tasks::close_task(&tx, project_row_id, task_id)?;
         if same_desktop_task(&before, &updated) {
             tx.rollback().map_err(|error| error.to_string())?;
             concurrency::record_no_op(&db, project_row_id, &guard.operation_id, &before)?;
@@ -1603,7 +1629,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             add_project,
             close_app,
-            confirm_task,
+            close_task,
             accept_mockup_proposal,
             create_mockup,
             create_qa_job,
@@ -1666,7 +1692,7 @@ pub(crate) fn resolve_project_from_settings(
         .map(str::trim)
         .filter(|project_ref| !project_ref.is_empty())
         .ok_or_else(|| {
-            "projectId is required and must be a configured project id or project name".to_string()
+            "projectName is required and must be a configured project id or project name".to_string()
         })?;
 
     settings
@@ -2206,7 +2232,7 @@ mod tests {
 
         assert_eq!(
             error,
-            "projectId is required and must be a configured project id or project name"
+            "projectName is required and must be a configured project id or project name"
         );
     }
 
@@ -2227,7 +2253,7 @@ mod tests {
 
         assert_eq!(
             error,
-            "projectId is required and must be a configured project id or project name"
+            "projectName is required and must be a configured project id or project name"
         );
     }
 
@@ -2274,6 +2300,50 @@ mod tests {
 
         assert_eq!(by_id.name, "RaySplatter");
         assert_eq!(by_name.id, "raysplatter-12345");
+    }
+
+    #[test]
+    fn add_project_rejects_duplicate_names_case_insensitively() {
+        let folder = temp_project_folder("adashi-duplicate-name");
+        fs::create_dir_all(&folder).unwrap();
+        let second_folder = temp_project_folder("adashi-duplicate-name-second");
+        fs::create_dir_all(&second_folder).unwrap();
+        let settings_path = folder.join("settings.json");
+        let state = AppState {
+            settings_path,
+            settings: Arc::new(Mutex::new(AppSettings {
+                window: WindowSettings::default(),
+                projects: Vec::new(),
+                last_active_project_id: None,
+                rule_templates: Vec::new(), architecture_projection: Default::default(),
+            })),
+        };
+
+        let settings = add_project_to_settings(
+            "RaySplatter".to_string(),
+            folder.to_string_lossy().to_string(),
+            &state,
+        )
+        .unwrap();
+        assert_eq!(settings.projects[0].name, "RaySplatter");
+
+        let error = add_project_to_settings(
+            "  raysplatter ".to_string(),
+            second_folder.to_string_lossy().to_string(),
+            &state,
+        )
+        .expect_err("a case-insensitive duplicate name must be rejected");
+        assert!(error.contains("already registered"), "{error}");
+
+        let settings = state.settings.lock().unwrap().clone();
+        assert_eq!(settings.projects.len(), 1);
+        assert_eq!(
+            settings.projects[0].name, "RaySplatter",
+            "the stored name keeps its original spelling"
+        );
+
+        let _ = fs::remove_dir_all(folder);
+        let _ = fs::remove_dir_all(second_folder);
     }
 
     #[test]

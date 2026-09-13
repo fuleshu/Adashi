@@ -15,15 +15,28 @@ pub(crate) fn resolve_project_from_settings(
         .map(str::trim)
         .filter(|project_ref| !project_ref.is_empty())
         .ok_or_else(|| {
-            "projectId is required and must be a configured project id or project name".to_string()
+            "projectName is required and must be a configured project id or project name".to_string()
         })?;
 
-    settings
+    let matches = settings
         .projects
         .iter()
-        .find(|project| project.id == project_ref || project.name.eq_ignore_ascii_case(project_ref))
+        .filter(|project| {
+            project.id == project_ref || project.name.eq_ignore_ascii_case(project_ref)
+        })
         .cloned()
-        .ok_or_else(|| format!("Unknown project id or name: {project_ref}"))
+        .collect::<Vec<_>>();
+
+    match matches.len() {
+        0 => Err(format!("Unknown project id or name: {project_ref}")),
+        1 => Ok(matches.into_iter().next().expect("one match")),
+        // Ambiguity must fail loudly: silently choosing the first match would make the same
+        // reference resolve to different projects depending on settings order.
+        _ => Err(format!(
+            "Ambiguous project name '{project_ref}': {} configured projects share it",
+            matches.len()
+        )),
+    }
 }
 
 pub(crate) fn open_project_database(
@@ -71,7 +84,30 @@ mod tests {
             .expect_err("blank references must fail");
         assert_eq!(
             error,
-            "projectId is required and must be a configured project id or project name"
+            "projectName is required and must be a configured project id or project name"
+        );
+    }
+
+    #[test]
+    fn ambiguous_project_names_fail_loudly_instead_of_picking_one() {
+        let mut settings = settings_with_projects();
+        settings.projects.push(ProjectSettings {
+            id: "other-adashi".to_string(),
+            name: "adashi".to_string(),
+            folder: "C:\\src\\Other".to_string(),
+        });
+
+        let error = resolve_project_from_settings(&settings, Some("ADASHI"))
+            .expect_err("a name shared by two projects must not resolve");
+        assert!(error.contains("Ambiguous project name"), "{error}");
+        assert!(error.contains("ADASHI"), "{error}");
+
+        // An exact id stays unambiguous even when the display name is not.
+        assert_eq!(
+            resolve_project_from_settings(&settings, Some("other-adashi"))
+                .unwrap()
+                .name,
+            "adashi"
         );
     }
 

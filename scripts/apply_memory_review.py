@@ -36,7 +36,7 @@ def main():
         try:
             def call(name, **arguments):
                 return body(client.request("tools/call", {"name": name,
-                    "arguments": {"projectId": plan["projectId"], **arguments}}))
+                    "arguments": {"projectName": plan["projectName"], **arguments}}))
             before = call("adashi_memory", operation="get", includeSuperseded=True)
             assert before["memory"]["memoryVersion"] == plan["expectedVersion"], "Summary changed; review again."
             retained = {n["noteId"]: n for n in before["memory"]["notes"]}

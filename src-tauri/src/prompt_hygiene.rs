@@ -11,6 +11,7 @@ use std::collections::BTreeSet;
 /// from the real surface; `mcp::tests::tool_name_registry_matches_the_router` enforces it.
 pub(crate) const MCP_TOOL_NAMES: &[&str] = &[
     "adashi_design",
+    "adashi_grep",
     "adashi_intents",
     "adashi_memory",
     "adashi_qa",
@@ -18,92 +19,63 @@ pub(crate) const MCP_TOOL_NAMES: &[&str] = &[
     "adashi_tasks",
 ];
 
-/// Removed tool identifiers mapped to the capability phrasing that replaced them.
+/// Removed tool identifiers mapped to the capability that replaced them.
 ///
-/// Rewrites are exact identifier substitutions, never content edits. Ordering is resolved by
-/// length at match time, so a name that contains another name cannot be shadowed.
-const REMOVED_TOOL_REFERENCES: &[(&str, &str)] = &[
-    ("adashi_design_save", "the `adashi_design` operation `save`"),
+/// Each entry is `(removed identifier, owning tool, operation)`. Replacements render as plain
+/// `tool operation` text with **no backticks of their own**: a removed name almost always sits
+/// inside an existing code span, and a replacement that carried its own spans nested them and
+/// produced malformed markdown. Leaving the phrasing bare lets the surrounding span, when there
+/// is one, wrap the phrase correctly.
+const REMOVED_TOOL_REFERENCES: &[(&str, &str, &str)] = &[
+    ("adashi_design_save", "adashi_design", "save"),
     (
         "adashi_design_set_element_descriptions",
-        "the `adashi_design` operation `set_element_descriptions`",
+        "adashi_design",
+        "set_element_descriptions",
     ),
-    (
-        "adashi_design_get_overview",
-        "the `adashi_design` operation `get_overview`",
-    ),
-    (
-        "adashi_design_get_scope",
-        "the `adashi_design` operation `get_scope`",
-    ),
-    (
-        "adashi_design_get_by_ids",
-        "the `adashi_design` operation `get_by_ids`",
-    ),
-    (
-        "adashi_design_get_bindings",
-        "the `adashi_design` operation `get_bindings`",
-    ),
-    (
-        "adashi_design_search",
-        "the `adashi_design` operation `search`",
-    ),
+    ("adashi_design_get_overview", "adashi_design", "get_overview"),
+    ("adashi_design_get_scope", "adashi_design", "get_scope"),
+    ("adashi_design_get_by_ids", "adashi_design", "get_by_ids"),
+    ("adashi_design_get_bindings", "adashi_design", "get_bindings"),
+    ("adashi_design_search", "adashi_design", "search"),
     (
         "adashi_mockup_list_pending_revisions",
-        "the `adashi_design` operation `mockup_list_pending_revisions`",
+        "adashi_design",
+        "mockup_list_pending_revisions",
     ),
     (
         "adashi_mockup_get_revision_context",
-        "the `adashi_design` operation `mockup_get_revision_context`",
+        "adashi_design",
+        "mockup_get_revision_context",
     ),
-    ("adashi_list_rules", "the `adashi_rules` operation `list`"),
-    ("adashi_create_rule", "the `adashi_rules` operation `create`"),
-    ("adashi_update_rule", "the `adashi_rules` operation `update`"),
-    ("adashi_delete_rule", "the `adashi_rules` operation `delete`"),
+    ("adashi_list_rules", "adashi_rules", "list"),
+    ("adashi_create_rule", "adashi_rules", "create"),
+    ("adashi_update_rule", "adashi_rules", "update"),
+    ("adashi_delete_rule", "adashi_rules", "delete"),
     (
         "adashi_get_rule_injections",
-        "the `adashi_rules` operation `get_rule_injections`",
+        "adashi_rules",
+        "get_rule_injections",
     ),
-    ("adashi_create_task", "the `adashi_tasks` operation `create`"),
-    ("adashi_list_tasks", "the `adashi_tasks` operation `list`"),
-    ("adashi_update_task", "the `adashi_tasks` operation `update`"),
-    ("adashi_finish_task", "the `adashi_tasks` operation `finish`"),
-    ("adashi_delete_task", "the `adashi_tasks` operation `delete`"),
-    ("adashi_get_task", "the `adashi_tasks` operation `get`"),
-    (
-        "adashi_create_qa_job",
-        "the `adashi_qa` operation `create_job`",
-    ),
-    (
-        "adashi_update_qa_job",
-        "the `adashi_qa` operation `update_job`",
-    ),
-    (
-        "adashi_delete_qa_job",
-        "the `adashi_qa` operation `delete_job`",
-    ),
-    ("adashi_list_qa_jobs", "the `adashi_qa` operation `list_jobs`"),
-    ("adashi_run_qa_jobs", "the `adashi_qa` operation `run_jobs`"),
-    ("adashi_list_qa_runs", "the `adashi_qa` operation `list_runs`"),
-    ("adashi_get_qa_job", "the `adashi_qa` operation `get_job`"),
-    ("adashi_get_memory", "the `adashi_memory` operation `get`"),
-    (
-        "adashi_append_memory_note",
-        "the `adashi_memory` operation `append`",
-    ),
-    ("adashi_update_memory", "the `adashi_memory` operation `update`"),
-    (
-        "adashi_update_memory_rule",
-        "the `adashi_memory` operation `update_rule`",
-    ),
-    (
-        "adashi_publish_resource_intent",
-        "the `adashi_intents` operation `publish`",
-    ),
-    (
-        "adashi_list_resource_intents",
-        "the `adashi_intents` operation `list`",
-    ),
+    ("adashi_create_task", "adashi_tasks", "create"),
+    ("adashi_list_tasks", "adashi_tasks", "list"),
+    ("adashi_update_task", "adashi_tasks", "update"),
+    ("adashi_finish_task", "adashi_tasks", "finish"),
+    ("adashi_delete_task", "adashi_tasks", "delete"),
+    ("adashi_get_task", "adashi_tasks", "get"),
+    ("adashi_create_qa_job", "adashi_qa", "create_job"),
+    ("adashi_update_qa_job", "adashi_qa", "update_job"),
+    ("adashi_delete_qa_job", "adashi_qa", "delete_job"),
+    ("adashi_list_qa_jobs", "adashi_qa", "list_jobs"),
+    ("adashi_run_qa_jobs", "adashi_qa", "run_jobs"),
+    ("adashi_list_qa_runs", "adashi_qa", "list_runs"),
+    ("adashi_get_qa_job", "adashi_qa", "get_job"),
+    ("adashi_get_memory", "adashi_memory", "get"),
+    ("adashi_append_memory_note", "adashi_memory", "append"),
+    ("adashi_update_memory", "adashi_memory", "update"),
+    ("adashi_update_memory_rule", "adashi_memory", "update_rule"),
+    ("adashi_publish_resource_intent", "adashi_intents", "publish"),
+    ("adashi_list_resource_intents", "adashi_intents", "list"),
 ];
 
 /// Identifier prefix that marks a token as an Adashi MCP tool reference.
@@ -113,18 +85,40 @@ const TOOL_REFERENCE_PREFIX: &str = "adashi_";
 ///
 /// Longest removed name wins, so `adashi_update_memory_rule` is rewritten as one unit rather
 /// than being partially matched by `adashi_update_memory`.
+///
+/// Also repairs phrases written by an earlier release whose replacements carried their own code
+/// spans, which nested inside the span the removed name already sat in. Both the malformed and
+/// the clean form are derived from the same table, so they cannot drift apart.
 pub(crate) fn rewrite_removed_tool_references(text: &str) -> Option<String> {
-    let mut removed = REMOVED_TOOL_REFERENCES.to_vec();
-    removed.sort_by_key(|(name, _)| std::cmp::Reverse(name.len()));
+    let mut ordered = REMOVED_TOOL_REFERENCES.to_vec();
+    ordered.sort_by_key(|(name, _, _)| std::cmp::Reverse(name.len()));
 
     let mut rewritten = text.to_string();
     let mut changed = false;
-    for (name, replacement) in removed {
-        if rewritten.contains(name) {
-            rewritten = rewritten.replace(name, replacement);
+
+    // Malformed forms first: the bare form is a substring of the wrapped one, so repairing the
+    // wrapped form first keeps the shorter pattern from consuming it.
+    for (_, tool, operation) in &ordered {
+        let malformed_wrapped = format!("`the `{tool}` operation `{operation}``");
+        let malformed_bare = format!("the `{tool}` operation `{operation}`");
+
+        if rewritten.contains(&malformed_wrapped) {
+            rewritten = rewritten.replace(&malformed_wrapped, &format!("`{tool} {operation}`"));
+            changed = true;
+        }
+        if rewritten.contains(&malformed_bare) {
+            rewritten = rewritten.replace(&malformed_bare, &format!("{tool} {operation}"));
             changed = true;
         }
     }
+
+    for (name, tool, operation) in &ordered {
+        if rewritten.contains(name) {
+            rewritten = rewritten.replace(name, &format!("{tool} {operation}"));
+            changed = true;
+        }
+    }
+
     changed.then_some(rewritten)
 }
 
@@ -172,7 +166,9 @@ pub(crate) fn unknown_tool_references(text: &str) -> Vec<String> {
         }
         let token = &text[start..end];
         if !MCP_TOOL_NAMES.contains(&token)
-            && !REMOVED_TOOL_REFERENCES.iter().any(|(name, _)| *name == token)
+            && !REMOVED_TOOL_REFERENCES
+                .iter()
+                .any(|(name, _, _)| *name == token)
         {
             unknown.insert(token.to_string());
         }
@@ -186,7 +182,7 @@ pub(crate) fn unknown_tool_references(text: &str) -> Vec<String> {
 /// Returns the number of prompts rewritten. Versions are bumped so caches keyed on version
 /// or contentVersion observe the change, and the project revision moves once.
 pub fn repair_stored_prompts(db: &rusqlite::Connection, project_id: i64) -> Result<usize, String> {
-    let mut repairs: Vec<(i64, String, String)> = Vec::new();
+    let mut repairs: Vec<(i64, String)> = Vec::new();
 
     {
         let mut statement = db
@@ -200,7 +196,7 @@ pub fn repair_stored_prompts(db: &rusqlite::Connection, project_id: i64) -> Resu
         for row in rows {
             let (id, prompt) = row.map_err(|error| error.to_string())?;
             if let Some(rewritten) = rewrite_removed_tool_references(&prompt) {
-                repairs.push((id, prompt, rewritten));
+                repairs.push((id, rewritten));
             }
         }
     }
@@ -227,7 +223,7 @@ pub fn repair_stored_prompts(db: &rusqlite::Connection, project_id: i64) -> Resu
         return Ok(0);
     }
 
-    for (id, _, rewritten) in &repairs {
+    for (id, rewritten) in &repairs {
         db.execute(
             "UPDATE rules SET prompt = ?1 WHERE id = ?2",
             rusqlite::params![rewritten, id],
@@ -253,6 +249,19 @@ pub fn repair_stored_prompts(db: &rusqlite::Connection, project_id: i64) -> Resu
 mod tests {
     use super::*;
 
+    /// Backticks stay balanced, and no code span is left empty or nested.
+    fn assert_balanced_code_spans(text: &str) {
+        assert_eq!(
+            text.matches('`').count() % 2,
+            0,
+            "backticks must stay balanced: {text}"
+        );
+        assert!(
+            !text.contains("``"),
+            "code spans must not nest or collapse: {text}"
+        );
+    }
+
     #[test]
     fn longest_removed_name_wins_so_prefixes_cannot_shadow() {
         let rewritten = rewrite_removed_tool_references(
@@ -261,7 +270,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             rewritten,
-            "Call the `adashi_memory` operation `update_rule` then the `adashi_memory` operation `update`."
+            "Call adashi_memory update_rule then adashi_memory update."
         );
     }
 
@@ -271,6 +280,40 @@ mod tests {
             rewrite_removed_tool_references("Use the adashi_design get_scope operation."),
             None
         );
+    }
+
+    /// The defect this guards: a replacement that carried its own code span nested inside the
+    /// span the removed name already sat in.
+    #[test]
+    fn rewritten_text_never_nests_code_spans() {
+        let rewritten = rewrite_removed_tool_references(
+            "Call `adashi_design_search`, `adashi_design_get_bindings(files)` and adashi_design_save.",
+        )
+        .unwrap();
+        assert_balanced_code_spans(&rewritten);
+        assert!(rewritten.contains("`adashi_design search`"));
+        assert!(rewritten.contains("`adashi_design get_bindings(files)`"));
+        assert!(rewritten.contains("adashi_design save"));
+    }
+
+    #[test]
+    fn malformed_spans_from_the_earlier_release_are_repaired() {
+        let stored = "Retrieval such as `the `adashi_design` operation `search`` and transactional \
+                     `the `adashi_design` operation `save`` calls, plus a bare \
+                     the `adashi_memory` operation `update` mention.";
+        let repaired = rewrite_removed_tool_references(stored).unwrap();
+        assert_balanced_code_spans(&repaired);
+        assert!(repaired.contains("`adashi_design search`"));
+        assert!(repaired.contains("`adashi_design save`"));
+        assert!(repaired.contains("adashi_memory update"));
+        assert!(!repaired.contains("operation `"));
+    }
+
+    #[test]
+    fn repairing_malformed_text_is_idempotent() {
+        let stored = "See `the `adashi_design` operation `search``.";
+        let once = rewrite_removed_tool_references(stored).unwrap();
+        assert_eq!(rewrite_removed_tool_references(&once), None);
     }
 
     #[test]
@@ -292,18 +335,32 @@ mod tests {
 
     #[test]
     fn every_removed_name_rewrites_without_leaving_the_old_identifier() {
-        for (name, _) in REMOVED_TOOL_REFERENCES {
+        for (name, _, _) in REMOVED_TOOL_REFERENCES {
             let rewritten = rewrite_removed_tool_references(name).expect("removed name rewrites");
             assert!(
                 !rewritten.contains(name),
                 "{name} survived its own rewrite as {rewritten}"
             );
             assert!(unknown_tool_references(&rewritten).is_empty());
+            assert_balanced_code_spans(&rewritten);
+        }
+    }
+
+    #[test]
+    fn every_removed_name_repairs_the_malformed_spans_it_once_produced() {
+        for (name, tool, operation) in REMOVED_TOOL_REFERENCES {
+            let malformed = format!("see `the `{tool}` operation `{operation}`` here");
+            let repaired = rewrite_removed_tool_references(&malformed).unwrap_or_default();
+            assert!(
+                repaired.contains(&format!("`{tool} {operation}`")),
+                "{name} did not repair its malformed form: {repaired}"
+            );
+            assert_balanced_code_spans(&repaired);
         }
     }
 
     /// Manual verification against this workspace's real project database: the stored prompts
-    /// really do carry removed tool names, and the repair clears all of them.
+    /// really do carry removed tool names and malformed spans, and the repair clears both.
     #[test]
     #[ignore = "manual verification against this workspace's real project database"]
     fn repairs_removed_tool_references_in_the_real_workspace_project() {
@@ -323,16 +380,20 @@ mod tests {
         };
         let db = crate::open_project_database(&project).unwrap();
 
-        let stale_before: i64 = db
+        let needing_repair_before: i64 = db
             .query_row(
-                "SELECT (SELECT COUNT(*) FROM fixed_hook_prompts WHERE prompt LIKE '%adashi_design_%')
-                      + (SELECT COUNT(*) FROM rules WHERE prompt LIKE '%adashi_design_%')",
+                "SELECT (SELECT COUNT(*) FROM fixed_hook_prompts
+                          WHERE prompt LIKE '%adashi_design_%' OR prompt LIKE '%`the `%')
+                      + (SELECT COUNT(*) FROM rules
+                          WHERE prompt LIKE '%adashi_design_%' OR prompt LIKE '%`the `%')",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        println!("prompts naming a removed design tool before repair: {stale_before}");
+        println!("prompts needing repair before: {needing_repair_before}");
 
+        crate::fixed_hooks::ensure_fixed_hook_prompts(&db).unwrap();
+        // A second pass proves the repair is idempotent on real data.
         crate::fixed_hooks::ensure_fixed_hook_prompts(&db).unwrap();
 
         let mut remaining = Vec::new();
@@ -352,17 +413,35 @@ mod tests {
             for row in rows {
                 let (origin, prompt) = row.unwrap();
                 for unknown in unknown_tool_references(&prompt) {
-                    remaining.push(format!("{origin} -> {unknown}"));
+                    remaining.push(format!("{origin} -> unknown {unknown}"));
+                }
+                if prompt.contains("``") || prompt.matches('`').count() % 2 != 0 {
+                    remaining.push(format!("{origin} -> malformed code spans"));
+                }
+                if prompt.contains("`the `") {
+                    remaining.push(format!("{origin} -> un-repaired malformed phrase"));
                 }
             }
         }
 
-        println!("unknown tool references after repair: {remaining:?}");
+        println!("problems after repair: {remaining:?}");
         assert!(remaining.is_empty(), "{remaining:?}");
         assert!(
-            stale_before > 0,
-            "fixture expected stored prompts to reference removed tools"
+            needing_repair_before > 0,
+            "fixture expected stored prompts to need repair"
         );
+
+        let repaired_prompt: String = db
+            .query_row(
+                "SELECT prompt FROM fixed_hook_prompts WHERE key = 'design.run.start.authoring'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        println!("\n--- repaired design hook (excerpt) ---");
+        for line in repaired_prompt.lines().filter(|line| line.contains("adashi_design")) {
+            println!("{line}");
+        }
 
         drop(db);
         let _ = std::fs::remove_dir_all(&root);

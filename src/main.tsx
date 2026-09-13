@@ -203,7 +203,10 @@ type Task = {
   confirmationCommitId?: string | null;
 };
 
-type TaskState = "open" | "finished" | "confirmed";
+type TaskState = "todo" | "active" | "finished" | "closed";
+
+/** The lifecycle in order: unclaimed, being worked on, awaiting review, accepted. */
+const TASK_STATES: TaskState[] = ["todo", "active", "finished", "closed"];
 
 type TaskDesignSpecificationLink = {
   id: number;
@@ -3304,36 +3307,6 @@ function SettingsView({
 
   return (
     <section className="settings-grid">
-      <section className="data-panel settings-panel">
-        <h3>Projects</h3>
-        <div className="project-list">
-          {settings.projects.map((project) => (
-            <article className="project-row" key={project.id}>
-              <Folder size={18} />
-              <div>
-                <strong>{project.name}</strong>
-                <span>{project.id}</span>
-                <code>{project.folder}</code>
-              </div>
-              <button
-                aria-label={`Delete ${project.name}`}
-                disabled={project.id === activeProjectId && settings.projects.length === 1}
-                onClick={() => remove(project.id)}
-                title="Remove from Adashi settings"
-                type="button"
-              >
-                <Trash2 size={17} />
-              </button>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="data-panel settings-panel">
-        <h3>Add Project</h3>
-        <ProjectCreationForm buttonLabel="Add" onCreated={onAdd} onError={onError} />
-      </section>
-
       <section className="data-panel settings-panel settings-architecture-panel">
         <div className="rules-panel-heading">
           <h3>Architecture Projection</h3>
@@ -3421,6 +3394,36 @@ function SettingsView({
         )}
       </section>
 
+      <section className="data-panel settings-panel">
+        <h3>Projects</h3>
+        <div className="project-list">
+          {settings.projects.map((project) => (
+            <article className="project-row" key={project.id}>
+              <Folder size={18} />
+              <div>
+                <strong>{project.name}</strong>
+                <span>{project.id}</span>
+                <code>{project.folder}</code>
+              </div>
+              <button
+                aria-label={`Delete ${project.name}`}
+                disabled={project.id === activeProjectId && settings.projects.length === 1}
+                onClick={() => remove(project.id)}
+                title="Remove from Adashi settings"
+                type="button"
+              >
+                <Trash2 size={17} />
+              </button>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="data-panel settings-panel">
+        <h3>Add Project</h3>
+        <ProjectCreationForm buttonLabel="Add" onCreated={onAdd} onError={onError} />
+      </section>
+
       {promptWarnings.length > 0 ? (
         <section className="data-panel settings-panel settings-prompt-warnings-panel">
           <div className="rules-panel-heading">
@@ -3504,9 +3507,10 @@ function TasksView({
 }) {
   const [selectedTaskId, setSelectedTaskId] = React.useState<number | null>(tasks[0]?.id ?? null);
   const [visibleStates, setVisibleStates] = React.useState<Record<TaskState, boolean>>({
-    open: true,
+    todo: true,
+    active: true,
     finished: true,
-    confirmed: false,
+    closed: false,
   });
   const [linkQuery, setLinkQuery] = React.useState("");
   const [completionMemo, setCompletionMemo] = React.useState("");
@@ -3636,8 +3640,8 @@ function TasksView({
       .catch((reason) => onError(formatMutationError(reason)));
   }
 
-  function confirmSelectedTask(task: Task) {
-    invoke<DashboardPayload>("confirm_task", { projectId, taskId: task.id, operationId: newOperationId("task-confirm"), expectedVersion: task.version })
+  function closeSelectedTask(task: Task) {
+    invoke<DashboardPayload>("close_task", { projectId, taskId: task.id, operationId: newOperationId("task-close"), expectedVersion: task.version })
       .then(onChange)
       .catch((reason) => onError(formatMutationError(reason)));
   }
@@ -3653,7 +3657,7 @@ function TasksView({
         </div>
 
         <div className="task-state-filters" aria-label="Task state filters">
-          {(["open", "finished", "confirmed"] as TaskState[]).map((state) => (
+          {TASK_STATES.map((state) => (
             <label key={state}>
               <input
                 checked={visibleStates[state]}
@@ -3708,7 +3712,7 @@ function TasksView({
               </div>
               <div className="task-detail-actions">
                 {selectedTask.state === "finished" ? (
-                  <button aria-label="Confirm task" onClick={() => confirmSelectedTask(selectedTask)} title="Confirm task" type="button">
+                  <button aria-label="Close task" onClick={() => closeSelectedTask(selectedTask)} title="Close task as reviewed and accepted" type="button">
                     <Check size={17} />
                   </button>
                 ) : null}
@@ -3740,9 +3744,11 @@ function TasksView({
                   value={selectedTask.state}
                   onChange={(event) => updateTask(selectedTask, { state: event.target.value as TaskState })}
                 >
-                  <option value="open">open</option>
-                  <option value="finished">finished</option>
-                  <option value="confirmed">confirmed</option>
+                  {TASK_STATES.map((state) => (
+                    <option key={state} value={state}>
+                      {state}
+                    </option>
+                  ))}
                 </select>
               </label>
 
@@ -3834,7 +3840,7 @@ function TasksView({
             <section className="task-detail-section">
               <div className="task-section-heading">
                 <h4>Completion</h4>
-                {selectedTask.state !== "confirmed" ? (
+                {selectedTask.state === "active" || selectedTask.state === "finished" ? (
                   <button onClick={() => finishSelectedTask(selectedTask)} type="button">
                     <CheckCircle2 size={17} />
                     Finish

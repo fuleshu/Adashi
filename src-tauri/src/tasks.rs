@@ -3,14 +3,81 @@ use serde::{Deserialize, Serialize};
 
 use crate::concurrency;
 
+/// The task lifecycle, in order: `todo` is created and unclaimed, `active` is being worked on,
+/// `finished` is reported complete and awaiting review, `closed` is reviewed and accepted.
+///
+/// `finished` and `closed` are deliberately different: an agent reporting its own work complete
+/// is not a verdict, so the review step is a separate transition. A reviewer who disagrees sends
+/// the task back to `active`, which clears the completion timestamp.
+pub const TASK_STATE_NAMES: [&str; 4] = ["todo", "active", "finished", "closed"];
+
+/// States a default listing shows: everything except closed work.
+pub const VISIBLE_STATE_NAMES: [&str; 3] = ["todo", "active", "finished"];
+
+/// The error every unrecognised-state path returns, so the accepted values are stated from one
+/// place and a caller never has to guess or retry.
+pub fn invalid_task_state_error(value: &str) -> String {
+    format!(
+        "Invalid task state '{value}'. Expected one of: {}. Tasks start in 'todo'; a review that \
+         rejects finished work sets it back to 'active'.",
+        TASK_STATE_NAMES.join(", ")
+    )
+}
+
+/// Whether moving `from` -> `to` drops the completion claim. `finished` and `closed` both mean
+/// "the work is complete", so leaving either of them for real work clears `completed_at`.
+fn clears_completed_at(from: TaskState, to: TaskState) -> bool {
+    matches!(from, TaskState::Finished | TaskState::Closed)
+        && !matches!(to, TaskState::Finished | TaskState::Closed)
+}
+
 #[derive(
-    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, rmcp::schemars::JsonSchema,
+    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord,
+    rmcp::schemars::JsonSchema,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum TaskState {
-    Open,
+    Todo,
+    Active,
     Finished,
-    Confirmed,
+    Closed,
+}
+
+impl TaskState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Todo => "todo",
+            Self::Active => "active",
+            Self::Finished => "finished",
+            Self::Closed => "closed",
+        }
+    }
+
+    /// Parses a caller-supplied state name, rejecting anything unrecognised with the full list.
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "todo" => Ok(Self::Todo),
+            "active" => Ok(Self::Active),
+            "finished" => Ok(Self::Finished),
+            "closed" => Ok(Self::Closed),
+            other => Err(invalid_task_state_error(other)),
+        }
+    }
+}
+
+/// Whether `from` may become `to`. A state may always be re-set to itself, so a no-op update
+/// stays idempotent. `closed` requires `finished`: a reviewer closes work they have seen, and the
+/// only way to un-close it is to send it back to `active`.
+pub fn task_transition_allowed(from: TaskState, to: TaskState) -> bool {
+    if from == to {
+        return true;
+    }
+    match to {
+        TaskState::Todo => false,
+        TaskState::Active => true,
+        TaskState::Finished => from == TaskState::Active,
+        TaskState::Closed => from == TaskState::Finished,
+    }
 }
 
 #[derive(Clone, Debug, Serialize, rmcp::schemars::JsonSchema)]
@@ -24,22 +91,46 @@ pub struct TaskSummary {
     pub version: i64,
 }
 
+/// The state filter to apply for a listing. Omitted means "everything the caller did not have to
+/// ask for": open work only, with closed tasks excluded so accepted history cannot be mistaken
+/// for current work. An explicit filter, including an empty one, is honoured exactly.
+pub fn default_state_filter(states: Option<&[TaskState]>) -> Vec<TaskState> {
+    match states {
+        Some(states) => states.to_vec(),
+        None => VISIBLE_STATE_NAMES
+            .iter()
+            .map(|name| TaskState::parse(name).expect("visible state names are valid"))
+            .collect(),
+    }
+}
+
+/// Counts the tasks a default listing withholds, so the omission can be stated rather than
+/// silently applied.
+pub fn count_closed_tasks(db: &Connection, project_id: i64) -> Result<i64, String> {
+    db.query_row(
+        "SELECT COUNT(*) FROM agent_tasks WHERE project_id=?1 AND state=?2",
+        params![project_id, TaskState::Closed.as_str()],
+        |row| row.get(0),
+    )
+    .map_err(|err| err.to_string())
+}
+
 /// Query only identifying columns. Detail hydration belongs to load_task.
+///
+/// `states` is the already-resolved filter: use `default_state_filter` for a listing where the
+/// caller omitted the filter, so closed work is excluded by default rather than by accident.
 pub fn load_task_summaries(
     db: &Connection,
     project_id: i64,
-    states: Option<&[TaskState]>,
+    states: &[TaskState],
     after_id: i64,
     limit: u32,
 ) -> Result<(Vec<TaskSummary>, i64), String> {
-    let filter = states
-        .map(serde_json::to_string)
-        .transpose()
-        .map_err(|e| e.to_string())?;
+    let filter = serde_json::to_string(states).map_err(|e| e.to_string())?;
     let total = db
         .query_row(
             "SELECT COUNT(*) FROM agent_tasks WHERE project_id=?1
-         AND (?2 IS NULL OR state IN (SELECT value FROM json_each(?2)))",
+         AND state IN (SELECT value FROM json_each(?2))",
             params![project_id, filter],
             |row| row.get(0),
         )
@@ -48,18 +139,15 @@ pub fn load_task_summaries(
         "SELECT t.id, t.number, substr(t.title,1,240), t.state, COALESCE(rv.version, 0), length(t.title)>240
          FROM agent_tasks t LEFT JOIN resource_versions rv
            ON rv.project_id=t.project_id AND rv.resource_kind='task' AND rv.resource_id=CAST(t.id AS TEXT)
-         WHERE t.project_id=?1 AND (?2 IS NULL OR t.state IN (SELECT value FROM json_each(?2)))
+         WHERE t.project_id=?1 AND t.state IN (SELECT value FROM json_each(?2))
            AND t.id>?3 ORDER BY t.id LIMIT ?4"
     ).map_err(|e| e.to_string())?;
     let rows = statement
         .query_map(params![project_id, filter, after_id, limit], |row| {
-            let state: String = row.get(3)?;
-            let state = match state.as_str() {
-                "open" => TaskState::Open,
-                "finished" => TaskState::Finished,
-                "confirmed" => TaskState::Confirmed,
-                _ => return Err(rusqlite::Error::InvalidQuery),
-            };
+            let raw: String = row.get(3)?;
+            // The column has a CHECK constraint over the same vocabulary; a value that reaches
+            // here unrecognised means the stored data and the machine have diverged.
+            let state = TaskState::parse(&raw).map_err(|_| rusqlite::Error::InvalidQuery)?;
             Ok(TaskSummary {
                 id: row.get(0)?,
                 number: row.get(1)?,
@@ -87,23 +175,161 @@ mod summary_tests {
         crate::schema::migrate(&mut db).unwrap();
         db.execute("INSERT INTO projects(name,slug) VALUES('P','p')", [])
             .unwrap();
-        db.execute("INSERT INTO agent_tasks(project_id,number,title,description,state,created_files) VALUES(1,1,?1,?2,'open','invalid json')",
+        db.execute("INSERT INTO agent_tasks(project_id,number,title,description,state,created_files) VALUES(1,1,?1,?2,'active','invalid json')",
             params!["界".repeat(10_000), "large detail ".repeat(10_000)]).unwrap();
-        let (tasks, total) = load_task_summaries(&db, 1, Some(&[TaskState::Open]), 0, 25).unwrap();
+        let (tasks, total) = load_task_summaries(&db, 1, &[TaskState::Active], 0, 25).unwrap();
         assert_eq!(total, 1);
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].title.chars().count(), 240);
         assert!(tasks[0].title_truncated);
         assert!(serde_json::to_vec(&tasks).unwrap().len() < 1024);
-        assert!(load_task_summaries(&db, 1, Some(&[]), 0, 25)
-            .unwrap()
-            .0
-            .is_empty());
+        assert!(load_task_summaries(&db, 1, &[], 0, 25).unwrap().0.is_empty());
         assert_eq!(
-            load_task_summaries(&db, 1, None, tasks[0].id, 25)
+            load_task_summaries(&db, 1, &default_state_filter(None), tasks[0].id, 25)
                 .unwrap()
                 .1,
             1
+        );
+    }
+
+    #[test]
+    fn an_omitted_filter_hides_closed_work_and_an_explicit_filter_does_not() {
+        let mut db = Connection::open_in_memory().unwrap();
+        crate::schema::migrate(&mut db).unwrap();
+        db.execute("INSERT INTO projects(name,slug) VALUES('P','p')", [])
+            .unwrap();
+        for (number, state) in [(1_i64, "todo"), (2, "active"), (3, "finished"), (4, "closed")] {
+            db.execute(
+                "INSERT INTO agent_tasks(project_id,number,title,state) VALUES(1,?1,?2,?3)",
+                params![number, format!("Task {state}"), state],
+            )
+            .unwrap_or_else(|error| panic!("{state} must satisfy the stored constraint: {error}"));
+        }
+
+        let default_filter = default_state_filter(None);
+        let (visible, total) = load_task_summaries(&db, 1, &default_filter, 0, 25).unwrap();
+        assert_eq!(total, 3);
+        assert_eq!(visible.len(), 3);
+        assert!(
+            visible.iter().all(|task| task.state != TaskState::Closed),
+            "closed work must not appear in a default listing"
+        );
+        assert_eq!(count_closed_tasks(&db, 1).unwrap(), 1);
+
+        let (closed, _) = load_task_summaries(&db, 1, &[TaskState::Closed], 0, 25).unwrap();
+        assert_eq!(closed.len(), 1);
+        assert_eq!(closed[0].state, TaskState::Closed);
+
+        let (everything, _) = load_task_summaries(
+            &db,
+            1,
+            &default_state_filter(Some(&[
+                TaskState::Todo,
+                TaskState::Active,
+                TaskState::Finished,
+                TaskState::Closed,
+            ])),
+            0,
+            25,
+        )
+        .unwrap();
+        assert_eq!(everything.len(), 4);
+    }
+
+    #[test]
+    fn the_lifecycle_is_todo_active_finished_closed_with_matching_timestamps() {
+        fn in_memory() -> Connection {
+            let mut db = Connection::open_in_memory().unwrap();
+            crate::schema::migrate(&mut db).unwrap();
+            db.execute("INSERT INTO projects(name,slug) VALUES('P','p')", [])
+                .unwrap();
+            db
+        }
+        fn new_task(db: &Connection, title: &str) -> Task {
+            create_task(
+                db,
+                1,
+                NewTask {
+                    title: title.to_string(),
+                    description: None,
+                    design_specification_links: None,
+                },
+            )
+            .unwrap()
+        }
+        fn set_state(db: &Connection, task: &Task, state: &str) -> Result<Task, String> {
+            update_task(
+                db,
+                1,
+                UpdateTask {
+                    task_id: task.id,
+                    title: None,
+                    description: None,
+                    state: Some(state.to_string()),
+                    design_specification_links: None,
+                },
+            )
+        }
+
+        let db = in_memory();
+        let task = new_task(&db, "Ship the thing");
+        assert_eq!(task.state, "todo", "a new task is unclaimed");
+        assert!(task.completed_at.is_none() && task.confirmed_at.is_none());
+
+        // Work starts, then the agent reports it complete.
+        let active = set_state(&db, &task, "active").unwrap();
+        assert_eq!(active.state, "active");
+        assert!(active.completed_at.is_none());
+
+        finish_task(
+            &db,
+            1,
+            FinishTask {
+                task_id: task.id,
+                completion_memo: "done the first time".to_string(),
+                created_files: vec!["a.rs".to_string()],
+                changed_files: vec![],
+            },
+        )
+        .unwrap();
+        let finished = load_task(&db, 1, task.id).unwrap();
+        assert_eq!(finished.state, "finished");
+        assert!(finished.completed_at.is_some(), "finishing stamps completion");
+
+        // A review that rejects the work sends it back to active and drops the completion claim.
+        let reopened = set_state(&db, &finished, "active").unwrap();
+        assert_eq!(reopened.state, "active");
+        assert!(reopened.completed_at.is_none(), "reopening clears completed_at");
+        assert_eq!(
+            reopened.completion_memo, "done the first time",
+            "the evidence stays for the next attempt"
+        );
+
+        // Closing needs finished, and closed can only be re-opened to active.
+        let err = set_state(&db, &reopened, "closed").unwrap_err();
+        assert!(err.contains("active -> closed"), "{err}");
+        assert_eq!(set_state(&db, &reopened, "finished").unwrap().state, "finished");
+        let closed = close_task(&db, 1, task.id).unwrap();
+        assert_eq!(closed.state, "closed");
+        assert!(closed.confirmed_at.is_some(), "closing stamps acceptance");
+        assert_eq!(
+            close_task(&db, 1, task.id).unwrap().state,
+            "closed",
+            "closing twice is an idempotent retry, not an error"
+        );
+        let err = set_state(&db, &closed, "finished").unwrap_err();
+        assert!(err.contains("closed -> finished"), "{err}");
+        let reopened_from_closed = set_state(&db, &closed, "active").unwrap();
+        assert_eq!(reopened_from_closed.state, "active");
+        assert!(reopened_from_closed.completed_at.is_none());
+
+        // todo cannot be re-entered, and an unknown state names the accepted values.
+        let err = set_state(&db, &reopened_from_closed, "todo").unwrap_err();
+        assert!(err.contains("active -> todo"), "{err}");
+        let err = set_state(&db, &reopened_from_closed, "nonsense").unwrap_err();
+        assert!(
+            err.contains("Expected one of: todo, active, finished, closed"),
+            "{err}"
         );
     }
 }
@@ -182,24 +408,15 @@ pub struct FinishTask {
 pub fn load_tasks(
     db: &Connection,
     project_id: i64,
-    states: Option<&[String]>,
+    states: Option<&[TaskState]>,
 ) -> Result<Vec<Task>, String> {
     let tasks = load_task_rows(db, project_id)?;
-    let allowed_states = states.map(|states| {
-        states
-            .iter()
-            .map(|state| state.trim().to_ascii_lowercase())
-            .collect::<Vec<_>>()
-    });
+    // Omitted means the caller asked for the default view, which excludes closed history.
+    let allowed_states = default_state_filter(states);
 
     tasks
         .into_iter()
-        .filter(|task| {
-            allowed_states
-                .as_ref()
-                .map(|states| states.contains(&task.state))
-                .unwrap_or(true)
-        })
+        .filter(|task| allowed_states.iter().any(|state| state.as_str() == task.state))
         .map(|task| hydrate_task(db, project_id, task))
         .collect()
 }
@@ -218,12 +435,13 @@ pub fn create_task(db: &Connection, project_id: i64, input: NewTask) -> Result<T
     let number = next_task_number(db, project_id)?;
     db.execute(
         "INSERT INTO agent_tasks(project_id, number, title, description, state)
-         VALUES (?1, ?2, ?3, ?4, 'open')",
+         VALUES (?1, ?2, ?3, ?4, ?5)",
         params![
             project_id,
             number,
             title,
-            input.description.unwrap_or_default().trim()
+            input.description.unwrap_or_default().trim(),
+            TaskState::Todo.as_str()
         ],
     )
     .map_err(|err| err.to_string())?;
@@ -249,8 +467,26 @@ pub fn update_task(db: &Connection, project_id: i64, input: UpdateTask) -> Resul
         .unwrap_or(current.description)
         .trim()
         .to_string();
-    let state = input.state.unwrap_or(current.state);
-    validate_state(&state)?;
+    let from = TaskState::parse(&current.state)?;
+    let to = match input.state {
+        Some(state) => TaskState::parse(&state)?,
+        None => from,
+    };
+    if !task_transition_allowed(from, to) {
+        return Err(format!(
+            "Invalid task transition {} -> {}. A task is worked on (active) and only a review \
+             closes it (closed); to take a finished task back to work, set it to active.",
+            from.as_str(),
+            to.as_str()
+        ));
+    }
+
+    // Leaving finished means the work is not complete after all, so the completion timestamp is
+    // cleared rather than kept as a claim the task no longer makes. Closing implies finished, so
+    // re-opening a closed task clears it too. The memo and file lists stay, because they are the
+    // evidence the next attempt needs.
+    let clear_completed_at = clears_completed_at(from, to);
+    let set_completed_at = to == TaskState::Finished;
 
     let affected = db
         .execute(
@@ -258,9 +494,22 @@ pub fn update_task(db: &Connection, project_id: i64, input: UpdateTask) -> Resul
              SET title = ?1,
                  description = ?2,
                  state = ?3,
+                 completed_at = CASE
+                    WHEN ?4 THEN NULL
+                    WHEN ?5 THEN COALESCE(completed_at, CURRENT_TIMESTAMP)
+                    ELSE completed_at
+                 END,
                  updated_at = CURRENT_TIMESTAMP
-             WHERE id = ?4 AND project_id = ?5",
-            params![title, description, state, input.task_id, project_id],
+             WHERE id = ?6 AND project_id = ?7",
+            params![
+                title,
+                description,
+                to.as_str(),
+                clear_completed_at,
+                set_completed_at,
+                input.task_id,
+                project_id
+            ],
         )
         .map_err(|err| err.to_string())?;
 
@@ -285,7 +534,7 @@ pub fn finish_task(db: &Connection, project_id: i64, input: FinishTask) -> Resul
         .execute(
             "UPDATE agent_tasks
              SET state = 'finished',
-                 completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP),
+                 completed_at = CURRENT_TIMESTAMP,
                  completion_memo = ?1,
                  created_files = ?2,
                  changed_files = ?3,
@@ -308,15 +557,21 @@ pub fn finish_task(db: &Connection, project_id: i64, input: FinishTask) -> Resul
     load_task(db, project_id, input.task_id)
 }
 
-pub fn confirm_task(db: &Connection, project_id: i64, task_id: i64) -> Result<Task, String> {
+/// Closes a task: the review accepted the finished work. Only `finished` may be closed, so the
+/// only way out of `closed` is back to `active`, which is a deliberate re-open.
+pub fn close_task(db: &Connection, project_id: i64, task_id: i64) -> Result<Task, String> {
     let task = load_task(db, project_id, task_id)?;
-    if task.state != "finished" && task.state != "confirmed" {
-        return Err("Only finished tasks can be confirmed".to_string());
+    let from = TaskState::parse(&task.state)?;
+    if !task_transition_allowed(from, TaskState::Closed) {
+        return Err(format!(
+            "Invalid task transition {} -> closed. Only finished tasks can be closed.",
+            from.as_str()
+        ));
     }
 
     db.execute(
         "UPDATE agent_tasks
-         SET state = 'confirmed',
+         SET state = 'closed',
              confirmed_at = COALESCE(confirmed_at, CURRENT_TIMESTAMP),
              updated_at = CURRENT_TIMESTAMP
          WHERE id = ?1 AND project_id = ?2",
@@ -373,10 +628,11 @@ fn load_task_rows(db: &Connection, project_id: i64) -> Result<Vec<TaskRow>, Stri
              WHERE project_id = ?1
              ORDER BY
                 CASE state
-                    WHEN 'open' THEN 0
-                    WHEN 'finished' THEN 1
-                    WHEN 'confirmed' THEN 2
-                    ELSE 3
+                    WHEN 'todo' THEN 0
+                    WHEN 'active' THEN 1
+                    WHEN 'finished' THEN 2
+                    WHEN 'closed' THEN 3
+                    ELSE 4
                 END,
                 number",
         )
@@ -562,27 +818,22 @@ fn next_task_number(db: &Connection, project_id: i64) -> Result<i64, String> {
     .map_err(|err| err.to_string())
 }
 
-fn validate_state(state: &str) -> Result<(), String> {
-    const STATES: &[&str] = &["open", "finished", "confirmed"];
-    if STATES.contains(&state) {
-        Ok(())
-    } else {
-        Err(format!(
-            "Invalid task state '{state}'. Expected one of: {}",
-            STATES.join(", ")
-        ))
-    }
+/// Design link target kinds, from one list so the schema, the error text and the storage check
+/// cannot disagree.
+pub const DESIGN_TARGET_TYPES: [&str; 4] = ["element", "relationship", "uml", "mockup"];
+
+pub fn invalid_design_target_type_error(value: &str) -> String {
+    format!(
+        "Invalid design link target type '{value}'. Expected one of: {}",
+        DESIGN_TARGET_TYPES.join(", ")
+    )
 }
 
 fn validate_design_target_type(target_type: &str) -> Result<(), String> {
-    const TARGET_TYPES: &[&str] = &["element", "relationship", "uml", "mockup"];
-    if TARGET_TYPES.contains(&target_type) {
+    if DESIGN_TARGET_TYPES.contains(&target_type) {
         Ok(())
     } else {
-        Err(format!(
-            "Invalid design link target type '{target_type}'. Expected one of: {}",
-            TARGET_TYPES.join(", ")
-        ))
+        Err(invalid_design_target_type_error(target_type))
     }
 }
 

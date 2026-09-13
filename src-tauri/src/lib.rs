@@ -3,6 +3,7 @@
 mod concurrency;
 mod design;
 mod fixed_hooks;
+mod grep;
 mod mcp;
 mod memory;
 mod mockups;

@@ -64,7 +64,7 @@ class Client:
                 return response
 
     def call(self, name, **arguments):
-        return self.request("tools/call", {"name": name, "arguments": {"projectId": "fixture", **arguments}})
+        return self.request("tools/call", {"name": name, "arguments": {"projectName": "Fixture", **arguments}})
 
     def close(self):
         self.process.stdin.close()

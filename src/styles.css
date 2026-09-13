@@ -2399,6 +2399,11 @@ button {
 .project-list {
   display: grid;
   gap: 10px;
+  /* Keep a long project list from pushing the panels below it off-screen. */
+  max-height: min(46vh, 420px);
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
 }
 
 .project-row {
@@ -2959,15 +2964,19 @@ button {
   text-align: center;
 }
 
-.task-state-open {
+.task-state-todo {
+  background: #6b7280;
+}
+
+.task-state-active {
   background: #2f6f6d;
 }
 
 .task-state-finished {
-  background: #6b7280;
+  background: #b07d1f;
 }
 
-.task-state-confirmed {
+.task-state-closed {
   background: #437a45;
 }
 

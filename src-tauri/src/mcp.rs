@@ -3,6 +3,7 @@ use crate::design::{
     self, DesignBindingsResult, DesignByIdsResult, DesignChange, DesignOverviewResult,
     DesignSaveResult, DesignScopeResult, DesignSearchResult, ElementDescriptionUpdate,
 };
+use crate::grep::{self, GrepParams};
 use crate::memory::{self, AppendMemoryNote, MemoryNote, ProjectMemory};
 use crate::mockups::{self, MockupSummary, UiMockup};
 use crate::project::{open_project_database, resolve_project_from_settings};
@@ -57,28 +58,43 @@ impl AdashiMcpServer {
 
     fn open_project(
         &self,
-        project_id: Option<&str>,
+        project_name: Option<&str>,
     ) -> Result<(ProjectSettings, rusqlite::Connection), ErrorData> {
         let settings = self.load_settings()?;
-        let project = resolve_project_from_settings(&settings, project_id)
+        let project = resolve_project_from_settings(&settings, project_name)
             .map_err(|err| ErrorData::invalid_params(err, None))?;
         let db = open_project_database(&project).map_err(internal_error)?;
         Ok((project, db))
+    }
+
+    /// The router method's body, reachable from other modules' tests without widening the
+    /// tool surface itself.
+    #[cfg(test)]
+    pub(crate) fn grep_result_for_tests(&self, params: &GrepParams) -> Result<grep::GrepResult, String> {
+        let (_project, db) = self
+            .open_project(Some(params.project_name.as_str()))
+            .map_err(|error| error.to_string())?;
+        let project_row_id = project_row_id(&db)?;
+        grep::search(&db, project_row_id, params)
     }
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ProjectParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct GetMemoryParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     /// Literal case-insensitive substring in retained note bodies.
     query: Option<String>,
+    /// Exact note id, so a `memory:<noteId>` locator is drillable.
+    note_id: Option<String>,
     run_id: Option<String>,
     task_id: Option<i64>,
     #[serde(default)]
@@ -99,7 +115,8 @@ struct MemoryReadResult {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RuleInjectionParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     intend: String,
     hook: String,
     /// Summary by default; protocolOnly skips the summary for operational work.
@@ -110,7 +127,8 @@ struct RuleInjectionParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CreateRuleParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     operation_id: String,
     name: String,
     enabled: bool,
@@ -122,7 +140,8 @@ struct CreateRuleParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct UpdateRuleParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     operation_id: String,
     expected_version: i64,
     rule_id: i64,
@@ -136,7 +155,8 @@ struct UpdateRuleParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DeleteRuleParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     operation_id: String,
     expected_version: i64,
     rule_id: i64,
@@ -145,7 +165,8 @@ struct DeleteRuleParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CreateTaskParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     operation_id: String,
     title: String,
     description: Option<String>,
@@ -155,7 +176,8 @@ struct CreateTaskParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct UpdateTaskParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     operation_id: String,
     expected_version: i64,
     task_id: i64,
@@ -168,13 +190,27 @@ struct UpdateTaskParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ListTasksParams {
-    project_id: String,
-    /// Omitted/null selects all states; [] selects none. Values are exact.
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
+    /// Omitted returns todo, active and finished so closed history stays out of the way; []
+    /// selects nothing. Values are exact.
     states: Option<Vec<tasks::TaskState>>,
     /// Default 25, range 1..=100.
     limit: Option<u32>,
     /// Opaque continuation; keep the same states.
     cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CloseTaskParams {
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
+    /// Idempotency key.
+    operation_id: String,
+    /// Expected task version.
+    expected_version: i64,
+    task_id: i64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -190,14 +226,21 @@ struct TaskCursor {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TaskIdParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     task_id: i64,
+    /// get: also inline each linked design specification's scope and mockup content. Off by
+    /// default, because a task with many links otherwise returns a very large payload; prefer
+    /// retrieving the one or two scopes the work actually needs.
+    #[serde(default)]
+    include_design_scopes: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DeleteTaskParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     task_id: i64,
     operation_id: String,
     expected_version: i64,
@@ -206,7 +249,8 @@ struct DeleteTaskParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FinishTaskParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     operation_id: String,
     expected_version: i64,
     task_id: i64,
@@ -218,7 +262,8 @@ struct FinishTaskParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ListQaJobsParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     query: Option<QaJobQuery>,
     /// Default 25, range 1..=100.
     limit: Option<i64>,
@@ -229,21 +274,24 @@ struct ListQaJobsParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct QaJobIdParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     qa_job_id: i64,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct QaRunIdParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     qa_run_id: i64,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DeleteQaJobParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     qa_job_id: i64,
     operation_id: String,
     expected_version: i64,
@@ -252,7 +300,8 @@ struct DeleteQaJobParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CreateQaJobParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     operation_id: String,
     name: String,
     description: Option<String>,
@@ -269,7 +318,8 @@ struct CreateQaJobParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct UpdateQaJobParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     operation_id: String,
     expected_version: i64,
     qa_job_id: i64,
@@ -288,7 +338,8 @@ struct UpdateQaJobParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RunQaJobsParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     operation_id: String,
     query: QaJobQuery,
     trigger_source: Option<String>,
@@ -297,7 +348,8 @@ struct RunQaJobsParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ListQaRunsParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     limit: Option<i64>,
 }
 
@@ -314,7 +366,8 @@ struct QaJobCursor {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct UpdateMemoryParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     operation_id: String,
     expected_version: i64,
     memory: String,
@@ -326,7 +379,8 @@ struct UpdateMemoryParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct UpdateMemoryRuleParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     operation_id: String,
     expected_version: i64,
     rule: String,
@@ -335,7 +389,8 @@ struct UpdateMemoryRuleParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AppendMemoryNoteParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     note_id: String,
     operation_id: String,
     run_id: String,
@@ -346,7 +401,8 @@ struct AppendMemoryNoteParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PublishIntentParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     agent_run_id: String,
     resource_kind: String,
     resource_id: String,
@@ -356,7 +412,8 @@ struct PublishIntentParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DesignOverviewParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     #[serde(default)]
     #[schemars(schema_with = "nonnegative_count_schema")]
     max_depth: Option<usize>,
@@ -365,7 +422,8 @@ struct DesignOverviewParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DesignScopeParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     element_id: String,
     include_ancestors: Option<bool>,
     #[serde(default)]
@@ -377,7 +435,8 @@ struct DesignScopeParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DesignSearchParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     query: String,
     kinds: Option<Vec<String>>,
     #[serde(default)]
@@ -388,14 +447,16 @@ struct DesignSearchParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DesignByIdsParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     ids: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DesignBindingsParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     files: Option<Vec<String>>,
     symbols: Option<Vec<String>>,
 }
@@ -403,7 +464,8 @@ struct DesignBindingsParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DesignSaveParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     guard: MutationGuard,
     change_intent: String,
     changes: Vec<DesignChange>,
@@ -412,7 +474,8 @@ struct DesignSaveParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SetElementDescriptionsParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     guard: MutationGuard,
     updates: Vec<ElementDescriptionUpdate>,
 }
@@ -420,7 +483,8 @@ struct SetElementDescriptionsParams {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct MockupContextParams {
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     external_id: String,
 }
 
@@ -450,6 +514,9 @@ struct TaskListResult {
     revision: i64,
     tasks: Vec<tasks::TaskSummary>,
     filtered_total: i64,
+    /// Closed tasks the default filter withheld, so the omission is stated rather than silent.
+    /// Always 0 once `states` is given explicitly.
+    closed_hidden: i64,
     has_more: bool,
     next_cursor: Option<String>,
 }
@@ -461,7 +528,12 @@ struct TaskReadResult {
     project_name: String,
     revision: i64,
     task: Task,
+    /// One entry per linked design specification. `scope` and `mockup` are only filled when the
+    /// caller asked for them with `includeDesignScopes`, so a task read stays small however many
+    /// links the task carries.
     design_specifications: Vec<TaskDesignSpecificationBranch>,
+    /// How to obtain the design detail for the links above.
+    design_scope_hint: String,
 }
 
 #[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
@@ -637,6 +709,7 @@ enum TasksOperation {
     List,
     Update,
     Finish,
+    Close,
     Delete,
     Get,
 }
@@ -687,7 +760,8 @@ enum IntentsOperation {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DesignParams {
     operation: DesignOperation,
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     /// get_overview: how deep to expand the C4/UML tree.
     #[serde(default)]
     #[schemars(schema_with = "nonnegative_count_schema")]
@@ -732,20 +806,26 @@ struct DesignParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TasksParams {
     operation: TasksOperation,
-    project_id: String,
-    /// create/update/finish/delete: idempotency key.
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
+    /// create/update/finish/close/delete: idempotency key.
     operation_id: Option<String>,
     /// create (required) / update: task title.
     title: Option<String>,
     /// create/update: task description.
     description: Option<String>,
-    /// create/update: ordered design specification links.
+    /// create/update: ordered design specification links. A task is a unit of work, so keep the
+    /// list to the specifications this task implements; supporting context belongs in the task
+    /// description or in a linked design scope you retrieve when you need it.
     design_specification_links: Option<Vec<TaskDesignSpecificationLinkInput>>,
-    /// update: new state.
+    /// update: the state to move the task to. Allowed values: todo, active, finished, closed.
+    /// A task is created as todo, worked on as active, reported complete as finished, and only a
+    /// review closes it as closed. Setting a finished task back to active clears its completion
+    /// timestamp; todo cannot be re-entered, and closed can only be re-opened to active.
     state: Option<String>,
-    /// update/finish/delete: expected task version.
+    /// update/finish/close/delete: expected task version.
     expected_version: Option<i64>,
-    /// update/finish/delete/get: task id.
+    /// update/finish/close/delete/get: task id.
     task_id: Option<i64>,
     /// finish: completion memo.
     completion_memo: Option<String>,
@@ -753,8 +833,14 @@ struct TasksParams {
     created_files: Option<Vec<String>>,
     /// finish: files changed.
     changed_files: Option<Vec<String>>,
-    /// list: states filter (omitted=all, empty=none).
+    /// list: states filter. Omitted returns todo, active and finished, so closed history stays
+    /// out of the way; pass ["closed"] or all four values to include it. [] selects nothing.
     states: Option<Vec<tasks::TaskState>>,
+    /// get: also inline each linked design specification's scope and mockup content. Off by
+    /// default, because a task with many links otherwise returns a very large payload; prefer
+    /// retrieving the one or two scopes the work actually needs.
+    #[serde(default)]
+    include_design_scopes: bool,
     /// list: page size (default 25, 1..=100).
     limit: Option<u32>,
     /// list: opaque continuation cursor.
@@ -765,7 +851,8 @@ struct TasksParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct QaParams {
     operation: QaOperation,
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     /// list_jobs / run_jobs: selection filters.
     query: Option<QaJobQuery>,
     /// get_job/update_job/delete_job: job id.
@@ -799,7 +886,8 @@ struct QaParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct MemoryParams {
     operation: MemoryOperation,
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     /// get: literal case-insensitive substring in note bodies.
     query: Option<String>,
     /// get (filter) / append (note run id).
@@ -830,7 +918,8 @@ struct MemoryParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RulesParams {
     operation: RulesOperation,
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     /// get_rule_injections/create/update: rule intend.
     intend: Option<String>,
     /// get_rule_injections/create/update: lifecycle hook.
@@ -856,7 +945,8 @@ struct RulesParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct IntentsParams {
     operation: IntentsOperation,
-    project_id: String,
+    /// Configured project name (case-insensitive) or project id.
+    project_name: String,
     /// publish: agent run id.
     agent_run_id: Option<String>,
     /// publish: resource kind.
@@ -873,7 +963,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<ProjectParams>,
     ) -> Result<Json<RuleListResult>, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
         let rules = rules::load_rules(&db).map_err(tool_error)?;
         Ok(Json(RuleListResult {
             project_id: project.id,
@@ -886,7 +976,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<RuleInjectionParams>,
     ) -> Result<Json<RuleInjectionResult>, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         context::build(
             &db,
@@ -914,9 +1004,19 @@ impl AdashiMcpServer {
             states.sort();
             states.dedup();
         }
-        let (project, mut db) = self.open_project(Some(params.project_id.as_str()))?;
+        // The resolved filter travels in the cursor too, so a paged listing keeps the same view
+        // it started with, default or explicit.
+        let state_filter = tasks::default_state_filter(params.states.as_deref());
+        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
         let tx = db.transaction().map_err(internal_error)?;
         let project_row_id = project_row_id(&tx).map_err(tool_error)?;
+        // A default listing withholds closed work; state how much, so the omission is visible
+        // rather than something the caller has to discover.
+        let closed_hidden = if params.states.is_none() {
+            tasks::count_closed_tasks(&tx, project_row_id).map_err(tool_error)?
+        } else {
+            0
+        };
         let revision = project_state::load_project_revision(&tx, project_row_id)
             .map_err(tool_error)?
             .revision;
@@ -931,7 +1031,7 @@ impl AdashiMcpServer {
                 .ok_or_else(|| tool_error("tasks.invalid_cursor".into()))?;
             if cursor.contract_version != 2
                 || cursor.project_id != project.id
-                || cursor.states != params.states
+                || cursor.states.as_deref() != Some(state_filter.as_slice())
                 || cursor.after_id <= 0
             {
                 return Err(tool_error(
@@ -950,7 +1050,7 @@ impl AdashiMcpServer {
         let (mut tasks, filtered_total) = tasks::load_task_summaries(
             &tx,
             project_row_id,
-            params.states.as_deref(),
+            &state_filter,
             after_id,
             limit + 1,
         )
@@ -962,7 +1062,7 @@ impl AdashiMcpServer {
                 contract_version: 2,
                 project_id: project.id.clone(),
                 revision,
-                states: params.states,
+                states: Some(state_filter.clone()),
                 after_id: tasks.last().unwrap().id,
             };
             Some(
@@ -980,6 +1080,7 @@ impl AdashiMcpServer {
             revision,
             tasks,
             filtered_total,
+            closed_hidden,
             has_more,
             next_cursor,
         }))
@@ -989,14 +1090,18 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<TaskIdParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let revision =
             project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
         let task = tasks::load_task(&db, project_row_id, params.task_id).map_err(tool_error)?;
-        let mut design_specifications =
-            load_task_design_specifications(&db, project_row_id, &task, true)
-                .map_err(tool_error)?;
+        let mut design_specifications = load_task_design_specifications(
+            &db,
+            project_row_id,
+            &task,
+            params.include_design_scopes,
+        )
+        .map_err(tool_error)?;
         let mut previews = Vec::new();
         for specification in &mut design_specifications {
             let Some(mockup) = specification.mockup.as_ref() else {
@@ -1011,12 +1116,24 @@ impl AdashiMcpServer {
             previews.push(ContentBlock::image(png, "image/png"));
         }
 
+        let design_scope_hint = if params.include_design_scopes {
+            "Scopes are inlined for the links above because includeDesignScopes was set.".to_string()
+        } else {
+            format!(
+                "Link metadata only. Retrieve just the scopes this work needs with the adashi_design \
+                 get_scope operation, or repeat this read with includeDesignScopes: true for all {} \
+                 linked scope(s) at once.",
+                design_specifications.len()
+            )
+        };
+
         let payload = TaskReadResult {
             project_id: project.id,
             project_name: project.name,
             revision: revision.revision,
             task,
             design_specifications,
+            design_scope_hint,
         };
         let structured = serde_json::to_value(&payload).map_err(internal_error)?;
         let mut result = CallToolResult::structured(structured);
@@ -1028,16 +1145,18 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<GetMemoryParams>,
     ) -> Result<Json<MemoryReadResult>, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let mut memory = memory::load_memory(&db, project_row_id).map_err(tool_error)?;
         let retained = memory::load_retained_notes(&db, project_row_id).map_err(tool_error)?;
         let retained_notes = retained.len() as u32;
         let query = params.query.as_deref().map(str::to_lowercase);
+        let note_id = params.note_id.as_deref().map(str::trim);
         memory.notes = retained
             .into_iter()
             .filter(|note| {
                 (params.include_superseded || note.superseded_by_version.is_none())
+                    && note_id.is_none_or(|id| note.note_id == id)
                     && query
                         .as_ref()
                         .is_none_or(|q| note.body.to_lowercase().contains(q))
@@ -1063,7 +1182,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<CreateRuleParams>,
     ) -> Result<Json<CreateRuleResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let operation_id = params.operation_id.trim().to_string();
         let rule = if let Some(replayed) =
@@ -1104,7 +1223,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<UpdateRuleParams>,
     ) -> Result<Json<UpdateRuleResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let guard = single_resource_guard(
             params.operation_id,
@@ -1163,7 +1282,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DeleteRuleParams>,
     ) -> Result<Json<DeleteRuleResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let guard = single_resource_guard(
             params.operation_id,
@@ -1203,7 +1322,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<CreateTaskParams>,
     ) -> Result<Json<TaskMutationResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let operation_id = params.operation_id.trim().to_string();
         let task = if let Some(replayed) =
@@ -1251,7 +1370,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<UpdateTaskParams>,
     ) -> Result<Json<TaskMutationResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let guard = single_resource_guard(
             params.operation_id,
@@ -1317,7 +1436,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<FinishTaskParams>,
     ) -> Result<Json<TaskMutationResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let guard = single_resource_guard(
             params.operation_id,
@@ -1378,11 +1497,69 @@ impl AdashiMcpServer {
         }))
     }
 
+    /// Closes a reviewed task. Only finished work can be closed, and the only way back out is a
+    /// deliberate reopen to active, so a review verdict is never guessed at.
+    fn close_task(
+        &self,
+        Parameters(params): Parameters<CloseTaskParams>,
+    ) -> Result<Json<TaskMutationResult>, ErrorData> {
+        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        let guard = single_resource_guard(
+            params.operation_id,
+            "task",
+            params.task_id.to_string(),
+            params.expected_version,
+        );
+        let task = if let Some(replayed) =
+            concurrency::load_operation::<Task>(&db, project_row_id, &guard.operation_id)
+                .map_err(tool_error)?
+        {
+            replayed
+        } else {
+            let tx = db.transaction().map_err(internal_error)?;
+            concurrency::validate_guard(&tx, project_row_id, &guard).map_err(tool_error)?;
+            let before =
+                tasks::load_task(&tx, project_row_id, params.task_id).map_err(tool_error)?;
+            let closed =
+                tasks::close_task(&tx, project_row_id, params.task_id).map_err(tool_error)?;
+            if same_task_content(&before, &closed) {
+                tx.rollback().map_err(internal_error)?;
+                concurrency::record_no_op(&db, project_row_id, &guard.operation_id, &before)
+                    .map_err(tool_error)?;
+                before
+            } else {
+                concurrency::bump_version(&tx, project_row_id, "task", &params.task_id.to_string())
+                    .map_err(tool_error)?;
+                project_state::bump_project_revision(&tx, project_row_id).map_err(tool_error)?;
+                let closed =
+                    tasks::load_task(&tx, project_row_id, params.task_id).map_err(tool_error)?;
+                concurrency::record_no_op(&tx, project_row_id, &guard.operation_id, &closed)
+                    .map_err(tool_error)?;
+                tx.commit().map_err(internal_error)?;
+                closed
+            }
+        };
+        let revision =
+            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
+        let design_specifications =
+            load_task_design_specifications(&db, project_row_id, &task, false)
+                .map_err(tool_error)?;
+
+        Ok(Json(TaskMutationResult {
+            project_id: project.id,
+            project_name: project.name,
+            revision: revision.revision,
+            task,
+            design_specifications,
+        }))
+    }
+
     fn delete_task(
         &self,
         Parameters(params): Parameters<DeleteTaskParams>,
     ) -> Result<Json<DeleteTaskResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let guard = single_resource_guard(
             params.operation_id,
@@ -1443,7 +1620,7 @@ impl AdashiMcpServer {
                 "qa.invalid_limit: limit must be 1..={QA_JOB_LIST_MAX_LIMIT}"
             )));
         }
-        let (project, mut db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
         let tx = db.transaction().map_err(internal_error)?;
         let project_row_id = project_row_id(&tx).map_err(tool_error)?;
         let revision = project_state::load_project_revision(&tx, project_row_id)
@@ -1520,7 +1697,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<QaJobIdParams>,
     ) -> Result<Json<QaJobResult>, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let revision =
             project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
@@ -1538,7 +1715,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<QaRunIdParams>,
     ) -> Result<Json<QaRunResult>, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let revision =
             project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
@@ -1556,7 +1733,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<CreateQaJobParams>,
     ) -> Result<Json<QaJobResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let operation_id = params.operation_id.trim().to_string();
         let job = if let Some(replayed) =
@@ -1607,7 +1784,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<UpdateQaJobParams>,
     ) -> Result<Json<QaJobResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let guard = single_resource_guard(
             params.operation_id,
@@ -1678,7 +1855,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DeleteQaJobParams>,
     ) -> Result<Json<DeleteQaJobResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let guard = single_resource_guard(
             params.operation_id,
@@ -1719,7 +1896,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<RunQaJobsParams>,
     ) -> Result<Json<QaRunResult>, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let run = if let Some(replayed) =
             concurrency::load_operation::<QaRun>(&db, project_row_id, &params.operation_id)
@@ -1754,7 +1931,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<ListQaRunsParams>,
     ) -> Result<Json<QaRunListResult>, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let revision =
             project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
@@ -1772,7 +1949,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<UpdateMemoryParams>,
     ) -> Result<Json<MemoryResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let (memory, revision) = memory::compact_memory_review(
             &mut db,
@@ -1796,7 +1973,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<UpdateMemoryRuleParams>,
     ) -> Result<Json<MemoryResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let (memory, revision) = memory::update_memory_rule(
             &mut db,
@@ -1819,7 +1996,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<AppendMemoryNoteParams>,
     ) -> Result<Json<MemoryNoteResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let (note, revision) = memory::append_note(
             &mut db,
@@ -1845,7 +2022,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<PublishIntentParams>,
     ) -> Result<Json<ResourceIntentResult>, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let intent = concurrency::publish_intent(
             &db,
@@ -1867,7 +2044,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<ProjectParams>,
     ) -> Result<Json<ResourceIntentListResult>, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let intents = concurrency::load_live_intents(&db, project_row_id).map_err(tool_error)?;
         Ok(Json(ResourceIntentListResult {
@@ -1881,7 +2058,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DesignOverviewParams>,
     ) -> Result<Json<DesignOverviewResult>, ErrorData> {
-        let (_project, db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (_project, db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let overview =
             design::load_overview(&db, project_row_id, params.max_depth).map_err(tool_error)?;
@@ -1892,7 +2069,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DesignScopeParams>,
     ) -> Result<Json<DesignScopeResult>, ErrorData> {
-        let (_project, db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (_project, db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let scope = design::load_scope(
             &db,
@@ -1910,7 +2087,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DesignSearchParams>,
     ) -> Result<Json<DesignSearchResult>, ErrorData> {
-        let (_project, db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (_project, db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let result = design::search(
             &db,
@@ -1927,7 +2104,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DesignByIdsParams>,
     ) -> Result<Json<DesignByIdsResult>, ErrorData> {
-        let (_project, db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (_project, db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let result = design::load_by_ids(&db, project_row_id, &params.ids).map_err(tool_error)?;
         Ok(Json(result))
@@ -1937,7 +2114,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DesignBindingsParams>,
     ) -> Result<Json<DesignBindingsResult>, ErrorData> {
-        let (_project, db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (_project, db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let result = design::load_by_bindings(
             &db,
@@ -1953,7 +2130,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DesignSaveParams>,
     ) -> Result<Json<DesignSaveResult>, ErrorData> {
-        let (_project, mut db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (_project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let result = design::save_changes(
             &mut db,
@@ -1970,7 +2147,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<SetElementDescriptionsParams>,
     ) -> Result<Json<DesignSaveResult>, ErrorData> {
-        let (_project, mut db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (_project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let result = design::set_element_descriptions(
             &mut db,
@@ -1986,7 +2163,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<ProjectParams>,
     ) -> Result<Json<MockupPendingResult>, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let revision = project_state::load_project_revision(&db, project_row_id)
             .map_err(tool_error)?
@@ -2004,7 +2181,7 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<MockupContextParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_id.as_str()))?;
+        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let revision = project_state::load_project_revision(&db, project_row_id)
             .map_err(tool_error)?
@@ -2044,7 +2221,7 @@ impl AdashiMcpServer {
                 let change_intent = required(params.change_intent, "changeIntent")?;
                 let changes = required(params.changes, "changes")?;
                 self.design_save(Parameters(DesignSaveParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     guard,
                     change_intent,
                     changes,
@@ -2054,7 +2231,7 @@ impl AdashiMcpServer {
             DesignOperation::GetScope => {
                 let element_id = required(params.element_id, "elementId")?;
                 self.design_get_scope(Parameters(DesignScopeParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     element_id,
                     include_ancestors: params.include_ancestors,
                     children_depth: params.children_depth,
@@ -2065,7 +2242,7 @@ impl AdashiMcpServer {
             DesignOperation::GetByIds => {
                 let ids = required(params.ids, "ids")?;
                 self.design_get_by_ids(Parameters(DesignByIdsParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     ids,
                 }))?
                 .into_call_tool_result()
@@ -2073,7 +2250,7 @@ impl AdashiMcpServer {
             DesignOperation::Search => {
                 let query = required(params.query, "query")?;
                 self.design_search(Parameters(DesignSearchParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     query,
                     kinds: params.kinds,
                     limit: params.limit,
@@ -2082,13 +2259,13 @@ impl AdashiMcpServer {
             }
             DesignOperation::GetOverview => self
                 .design_get_overview(Parameters(DesignOverviewParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     max_depth: params.max_depth,
                 }))?
                 .into_call_tool_result(),
             DesignOperation::GetBindings => self
                 .design_get_bindings(Parameters(DesignBindingsParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     files: params.files,
                     symbols: params.symbols,
                 }))?
@@ -2097,7 +2274,7 @@ impl AdashiMcpServer {
                 let guard = required(params.guard, "guard")?;
                 let updates = required(params.updates, "updates")?;
                 self.design_set_element_descriptions(Parameters(SetElementDescriptionsParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     guard,
                     updates,
                 }))?
@@ -2105,18 +2282,34 @@ impl AdashiMcpServer {
             }
             DesignOperation::MockupListPendingRevisions => self
                 .mockup_list_pending_revisions(Parameters(ProjectParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                 }))?
                 .into_call_tool_result(),
             DesignOperation::MockupGetRevisionContext => {
                 let external_id = required(params.external_id, "externalId")?;
                 self.mockup_get_revision_context(Parameters(MockupContextParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     external_id,
                 }))?
                 .into_call_tool_result()
             }
         }
+    }
+
+    #[tool(
+        name = "adashi_grep",
+        description = "Cross-domain search over project content: design (C4 elements, relationships, diagrams, mockups, bindings), tasks, and project memory. One match per line as grep output, with a drillable locator prefix: design:<externalId> opens the design get_scope operation, task:<id> opens the tasks get operation, memory:<noteId> opens the memory get operation with its noteId filter. The pattern is tolerant (case-insensitive, whitespace-separated terms are AND, quoted phrases are exact substrings, key:value clauses filter on in/file/type/state/limit and an unrecognised key is searched as text). An empty pattern returns the top-layer overview with counts. QA and rules are project tooling and are not searched.",
+        annotations(read_only_hint = true, destructive_hint = false)
+    )]
+    fn grep(
+        &self,
+        Parameters(params): Parameters<GrepParams>,
+    ) -> Result<Json<grep::GrepResult>, ErrorData> {
+        let (_project, db) = self.open_project(Some(params.project_name.as_str()))?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        grep::search(&db, project_row_id, &params)
+            .map(Json)
+            .map_err(tool_error)
     }
 
     #[tool(
@@ -2133,7 +2326,7 @@ impl AdashiMcpServer {
                 let operation_id = required(params.operation_id, "operationId")?;
                 let title = required(params.title, "title")?;
                 self.create_task(Parameters(CreateTaskParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     operation_id,
                     title,
                     description: params.description,
@@ -2143,7 +2336,7 @@ impl AdashiMcpServer {
             }
             TasksOperation::List => self
                 .list_tasks(Parameters(ListTasksParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     states: params.states,
                     limit: params.limit,
                     cursor: params.cursor,
@@ -2154,7 +2347,7 @@ impl AdashiMcpServer {
                 let expected_version = required(params.expected_version, "expectedVersion")?;
                 let task_id = required(params.task_id, "taskId")?;
                 self.update_task(Parameters(UpdateTaskParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     operation_id,
                     expected_version,
                     task_id,
@@ -2171,7 +2364,7 @@ impl AdashiMcpServer {
                 let task_id = required(params.task_id, "taskId")?;
                 let completion_memo = required(params.completion_memo, "completionMemo")?;
                 self.finish_task(Parameters(FinishTaskParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     operation_id,
                     expected_version,
                     task_id,
@@ -2181,12 +2374,24 @@ impl AdashiMcpServer {
                 }))?
                 .into_call_tool_result()
             }
+            TasksOperation::Close => {
+                let operation_id = required(params.operation_id, "operationId")?;
+                let expected_version = required(params.expected_version, "expectedVersion")?;
+                let task_id = required(params.task_id, "taskId")?;
+                self.close_task(Parameters(CloseTaskParams {
+                    project_name: params.project_name,
+                    operation_id,
+                    expected_version,
+                    task_id,
+                }))?
+                .into_call_tool_result()
+            }
             TasksOperation::Delete => {
                 let operation_id = required(params.operation_id, "operationId")?;
                 let expected_version = required(params.expected_version, "expectedVersion")?;
                 let task_id = required(params.task_id, "taskId")?;
                 self.delete_task(Parameters(DeleteTaskParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     task_id,
                     operation_id,
                     expected_version,
@@ -2196,8 +2401,9 @@ impl AdashiMcpServer {
             TasksOperation::Get => {
                 let task_id = required(params.task_id, "taskId")?;
                 self.get_task(Parameters(TaskIdParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     task_id,
+                    include_design_scopes: params.include_design_scopes,
                 }))?
                 .into_call_tool_result()
             }
@@ -2213,7 +2419,7 @@ impl AdashiMcpServer {
         match params.operation {
             QaOperation::ListJobs => self
                 .list_qa_jobs(Parameters(ListQaJobsParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     query: params.query,
                     limit: params.limit,
                     cursor: params.cursor,
@@ -2222,7 +2428,7 @@ impl AdashiMcpServer {
             QaOperation::GetJob => {
                 let qa_job_id = required(params.qa_job_id, "qaJobId")?;
                 self.get_qa_job(Parameters(QaJobIdParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     qa_job_id,
                 }))?
                 .into_call_tool_result()
@@ -2232,7 +2438,7 @@ impl AdashiMcpServer {
                 let name = required(params.name, "name")?;
                 let command = required(params.command, "command")?;
                 self.create_qa_job(Parameters(CreateQaJobParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     operation_id,
                     name,
                     description: params.description,
@@ -2252,7 +2458,7 @@ impl AdashiMcpServer {
                 let expected_version = required(params.expected_version, "expectedVersion")?;
                 let qa_job_id = required(params.qa_job_id, "qaJobId")?;
                 self.update_qa_job(Parameters(UpdateQaJobParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     operation_id,
                     expected_version,
                     qa_job_id,
@@ -2274,7 +2480,7 @@ impl AdashiMcpServer {
                 let expected_version = required(params.expected_version, "expectedVersion")?;
                 let qa_job_id = required(params.qa_job_id, "qaJobId")?;
                 self.delete_qa_job(Parameters(DeleteQaJobParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     qa_job_id,
                     operation_id,
                     expected_version,
@@ -2285,7 +2491,7 @@ impl AdashiMcpServer {
                 let operation_id = required(params.operation_id, "operationId")?;
                 let query = required(params.query, "query")?;
                 self.run_qa_jobs(Parameters(RunQaJobsParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     operation_id,
                     query,
                     trigger_source: params.trigger_source,
@@ -2294,14 +2500,14 @@ impl AdashiMcpServer {
             }
             QaOperation::ListRuns => self
                 .list_qa_runs(Parameters(ListQaRunsParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     limit: params.limit,
                 }))?
                 .into_call_tool_result(),
             QaOperation::GetRun => {
                 let qa_run_id = required(params.qa_run_id, "qaRunId")?;
                 self.get_qa_run(Parameters(QaRunIdParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     qa_run_id,
                 }))?
                 .into_call_tool_result()
@@ -2321,8 +2527,9 @@ impl AdashiMcpServer {
         match params.operation {
             MemoryOperation::Get => self
                 .get_memory(Parameters(GetMemoryParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     query: params.query,
+                    note_id: params.note_id,
                     run_id: params.run_id,
                     task_id: params.task_id,
                     include_superseded: params.include_superseded,
@@ -2334,7 +2541,7 @@ impl AdashiMcpServer {
                 let run_id = required(params.run_id, "runId")?;
                 let body = required(params.body, "body")?;
                 self.append_memory_note(Parameters(AppendMemoryNoteParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     note_id,
                     operation_id,
                     run_id,
@@ -2348,7 +2555,7 @@ impl AdashiMcpServer {
                 let expected_version = required(params.expected_version, "expectedVersion")?;
                 let memory = required(params.memory, "memory")?;
                 self.update_memory(Parameters(UpdateMemoryParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     operation_id,
                     expected_version,
                     memory,
@@ -2361,7 +2568,7 @@ impl AdashiMcpServer {
                 let expected_version = required(params.expected_version, "expectedVersion")?;
                 let rule = required(params.rule, "rule")?;
                 self.update_memory_rule(Parameters(UpdateMemoryRuleParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     operation_id,
                     expected_version,
                     rule,
@@ -2383,7 +2590,7 @@ impl AdashiMcpServer {
         match params.operation {
             RulesOperation::List => self
                 .list_rules(Parameters(ProjectParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                 }))?
                 .into_call_tool_result(),
             RulesOperation::Create => {
@@ -2394,7 +2601,7 @@ impl AdashiMcpServer {
                 let hook = required(params.hook, "hook")?;
                 let prompt = required(params.prompt, "prompt")?;
                 self.create_rule(Parameters(CreateRuleParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     operation_id,
                     name,
                     enabled,
@@ -2414,7 +2621,7 @@ impl AdashiMcpServer {
                 let hook = required(params.hook, "hook")?;
                 let prompt = required(params.prompt, "prompt")?;
                 self.update_rule(Parameters(UpdateRuleParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     operation_id,
                     expected_version,
                     rule_id,
@@ -2431,7 +2638,7 @@ impl AdashiMcpServer {
                 let expected_version = required(params.expected_version, "expectedVersion")?;
                 let rule_id = required(params.rule_id, "ruleId")?;
                 self.delete_rule(Parameters(DeleteRuleParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     operation_id,
                     expected_version,
                     rule_id,
@@ -2442,7 +2649,7 @@ impl AdashiMcpServer {
                 let intend = required(params.intend, "intend")?;
                 let hook = required(params.hook, "hook")?;
                 self.get_rule_injections(Parameters(RuleInjectionParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     intend,
                     hook,
                     memory_context: params.memory_context,
@@ -2468,7 +2675,7 @@ impl AdashiMcpServer {
                 let resource_id = required(params.resource_id, "resourceId")?;
                 let ttl_seconds = required(params.ttl_seconds, "ttlSeconds")?;
                 self.publish_resource_intent(Parameters(PublishIntentParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                     agent_run_id,
                     resource_kind,
                     resource_id,
@@ -2478,7 +2685,7 @@ impl AdashiMcpServer {
             }
             IntentsOperation::List => self
                 .list_resource_intents(Parameters(ProjectParams {
-                    project_id: params.project_id,
+                    project_name: params.project_name,
                 }))?
                 .into_call_tool_result(),
         }
@@ -2576,16 +2783,33 @@ fn project_row_id(db: &rusqlite::Connection) -> Result<i64, String> {
     .map_err(|err| err.to_string())
 }
 
+/// One branch per linked design specification.
+///
+/// `include_scopes` is off by default: a task that carries many links would otherwise inline
+/// every linked branch at once, which is both a large payload and a poor answer, since the work
+/// usually needs one or two of them. With scopes off the branches still name what is linked, and
+/// the caller retrieves the detail it needs with the design get_scope operation or by asking for
+/// the scopes explicitly.
 fn load_task_design_specifications(
     db: &rusqlite::Connection,
     project_row_id: i64,
     task: &Task,
-    include_linked_mockup_content: bool,
+    include_scopes: bool,
 ) -> Result<Vec<TaskDesignSpecificationBranch>, String> {
     task.design_specification_links
         .iter()
         .map(|link| {
-            let mockup = if include_linked_mockup_content && link.target_type == "mockup" {
+            if !include_scopes {
+                return Ok(TaskDesignSpecificationBranch {
+                    link: link.clone(),
+                    scope: None,
+                    mockup: None,
+                    mockup_preview: None,
+                    note: None,
+                });
+            }
+
+            let mockup = if link.target_type == "mockup" {
                 Some(mockups::load_mockup(
                     db,
                     project_row_id,
@@ -2708,7 +2932,7 @@ mod tests {
             ),
             (
                 serde_json::to_value(rmcp::schemars::schema_for!(TasksParams)).unwrap(),
-                vec!["create", "list", "update", "finish", "delete", "get"],
+                vec!["create", "list", "update", "finish", "close", "delete", "get"],
             ),
             (
                 serde_json::to_value(rmcp::schemars::schema_for!(QaParams)).unwrap(),
@@ -2851,7 +3075,7 @@ mod tests {
         let jobs = serde_json::to_value(
             server
                 .list_qa_jobs(Parameters(ListQaJobsParams {
-                    project_id: project.id.clone(),
+                    project_name: project.id.clone(),
                     query: None,
                     limit: None,
                     cursor: None,
@@ -2883,7 +3107,7 @@ mod tests {
         let runs = serde_json::to_value(
             server
                 .list_qa_runs(Parameters(ListQaRunsParams {
-                    project_id: project.id.clone(),
+                    project_name: project.id.clone(),
                     limit: None,
                 }))
                 .unwrap()
@@ -2913,7 +3137,7 @@ mod tests {
             serde_json::to_value(rmcp::schemars::schema_for!(SetElementDescriptionsParams))
                 .unwrap();
         assert_eq!(schema["additionalProperties"], json!(false));
-        for field in ["projectId", "guard", "updates"] {
+        for field in ["projectName", "guard", "updates"] {
             assert!(schema["required"]
                 .as_array()
                 .unwrap()
@@ -3033,8 +3257,250 @@ mod tests {
         // The consolidated tool schema is what the model reads, so it must agree.
         assert_eq!(
             required_names(&design),
-            vec!["operation".to_string(), "projectId".to_string()]
+            vec!["operation".to_string(), "projectName".to_string()]
         );
+    }
+
+    /// The wire field is `projectName` only: no alias, no deprecation window. A caller still
+    /// sending `projectId` must fail loudly rather than silently selecting a project.
+    #[test]
+    fn project_name_is_the_only_project_reference_field() {
+        let schema = serde_json::to_value(rmcp::schemars::schema_for!(DesignParams)).unwrap();
+        assert_eq!(schema["additionalProperties"], json!(false));
+        assert!(schema["properties"].get("projectName").is_some());
+        assert!(schema["properties"].get("projectId").is_none());
+
+        let error = serde_json::from_value::<DesignParams>(json!({
+            "operation": "search",
+            "projectId": "adashi",
+            "query": "revision",
+        }))
+        .expect_err("projectId must no longer be accepted");
+        assert!(error.to_string().contains("projectId"), "{error}");
+    }
+
+    /// A task listing withholds closed work by default and says how much it withheld, and a task
+    /// read returns link metadata rather than every linked design branch.
+    #[test]
+    fn task_listing_hides_closed_work_and_task_read_does_not_inline_scopes() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("adashi-mcp-task-states-{suffix}"));
+        let settings_path = root.join("settings.json");
+        let project_folder = root.join("project");
+        let project = ProjectSettings {
+            id: "task-states-test".into(),
+            name: "Task States Test".into(),
+            folder: project_folder.to_string_lossy().into_owned(),
+        };
+        settings::save(
+            &settings_path,
+            &AppSettings {
+                window: WindowSettings {
+                    width: 1000,
+                    height: 700,
+                    x: None,
+                    y: None,
+                },
+                projects: vec![project.clone()],
+                last_active_project_id: Some(project.id.clone()),
+                rule_templates: vec![],
+                architecture_projection: Default::default(),
+            },
+        )
+        .unwrap();
+        let db = crate::open_project_database(&project).unwrap();
+        let project_row_id = project_row_id(&db).unwrap();
+        let attachment: String = db
+            .query_row(
+                "SELECT external_id FROM c4_elements ORDER BY id LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let task = tasks::create_task(
+            &db,
+            project_row_id,
+            NewTask {
+                title: "Accepted work".into(),
+                description: Some("Nothing to do here.".into()),
+                design_specification_links: Some(vec![TaskDesignSpecificationLinkInput {
+                    target_type: Some("element".into()),
+                    design_external_id: attachment,
+                }]),
+            },
+        )
+        .unwrap();
+        assert_eq!(task.state, "todo", "a new task starts unclaimed");
+        drop(db);
+
+        let server = AdashiMcpServer::new(settings_path);
+        let listed = server
+            .list_tasks(rmcp::handler::server::wrapper::Parameters(ListTasksParams {
+                project_name: project.name.clone(),
+                states: None,
+                limit: None,
+                cursor: None,
+            }))
+            .unwrap()
+            .0;
+        assert_eq!(listed.tasks.len(), 1, "the unclaimed task is visible");
+        assert_eq!(listed.closed_hidden, 0);
+
+        // Close it through the lifecycle, then the default listing hides it and says so.
+        let mut db = crate::open_project_database(&project).unwrap();
+        let tx = db.transaction().unwrap();
+        for state in ["active", "finished"] {
+            tasks::update_task(
+                &tx,
+                project_row_id,
+                UpdateTask {
+                    task_id: task.id,
+                    title: None,
+                    description: None,
+                    state: Some(state.into()),
+                    design_specification_links: None,
+                },
+            )
+            .unwrap();
+        }
+        tasks::close_task(&tx, project_row_id, task.id).unwrap();
+        tx.commit().unwrap();
+        drop(db);
+
+        let hidden = server
+            .list_tasks(rmcp::handler::server::wrapper::Parameters(ListTasksParams {
+                project_name: project.name.clone(),
+                states: None,
+                limit: None,
+                cursor: None,
+            }))
+            .unwrap()
+            .0;
+        assert!(hidden.tasks.is_empty(), "{:?}", hidden.tasks);
+        assert_eq!(hidden.closed_hidden, 1, "the omission must be stated");
+
+        let explicit = server
+            .list_tasks(rmcp::handler::server::wrapper::Parameters(ListTasksParams {
+                project_name: project.name.clone(),
+                states: Some(vec![tasks::TaskState::Closed]),
+                limit: None,
+                cursor: None,
+            }))
+            .unwrap()
+            .0;
+        assert_eq!(explicit.tasks.len(), 1);
+        assert_eq!(explicit.closed_hidden, 0, "an explicit filter hides nothing");
+
+        // A task read stays small: the linked branch is named, not inlined.
+        let lean = server
+            .get_task(rmcp::handler::server::wrapper::Parameters(TaskIdParams {
+                project_name: project.name.clone(),
+                task_id: task.id,
+                include_design_scopes: false,
+            }))
+            .unwrap();
+        let lean_json = serde_json::to_value(lean.structured_content.as_ref().unwrap()).unwrap();
+        assert_eq!(lean_json["designSpecifications"][0]["scope"], json!(null));
+        assert!(
+            lean_json["designScopesIncluded"].is_null() || lean_json.get("designScopeHint").is_some(),
+            "the read must say how to get the scopes"
+        );
+        let lean_bytes = serde_json::to_string(&lean_json).unwrap().len();
+        assert!(lean_bytes < 4_000, "lean read was {lean_bytes} bytes");
+
+        let full = server
+            .get_task(rmcp::handler::server::wrapper::Parameters(TaskIdParams {
+                project_name: project.name.clone(),
+                task_id: task.id,
+                include_design_scopes: true,
+            }))
+            .unwrap();
+        let full_json = serde_json::to_value(full.structured_content.as_ref().unwrap()).unwrap();
+        assert!(
+            !full_json["designSpecifications"][0]["scope"].is_null(),
+            "opting in must inline the scope"
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A `memory:noteId` locator must resolve to exactly the addressed note.
+    #[test]
+    fn memory_get_resolves_an_exact_note_id() {        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("adashi-mcp-note-id-{suffix}"));
+        let settings_path = root.join("settings.json");
+        let project_folder = root.join("project");
+        let project = ProjectSettings {
+            id: "note-id-test".into(),
+            name: "Note Id Test".into(),
+            folder: project_folder.to_string_lossy().into_owned(),
+        };
+        settings::save(
+            &settings_path,
+            &AppSettings {
+                window: WindowSettings {
+                    width: 1000,
+                    height: 700,
+                    x: None,
+                    y: None,
+                },
+                projects: vec![project.clone()],
+                last_active_project_id: Some(project.id.clone()),
+                rule_templates: vec![],
+                architecture_projection: Default::default(),
+            },
+        )
+        .unwrap();
+        let mut db = crate::open_project_database(&project).unwrap();
+        let project_row_id = project_row_id(&db).unwrap();
+        for note_id in ["note-1", "note-2", "note-3"] {
+            memory::append_note(
+                &mut db,
+                project_row_id,
+                AppendMemoryNote {
+                    note_id: note_id.to_string(),
+                    operation_id: format!("op-{note_id}"),
+                    run_id: format!("run-{note_id}"),
+                    task_id: None,
+                    body: format!("body of {note_id} sharing the word revision"),
+                },
+            )
+            .unwrap();
+        }
+        drop(db);
+
+        let server = AdashiMcpServer::new(settings_path);
+        let read = |note_id: Option<&str>| {
+            server
+                .get_memory(Parameters(GetMemoryParams {
+                    project_name: project.name.clone(),
+                    query: None,
+                    note_id: note_id.map(str::to_string),
+                    run_id: None,
+                    task_id: None,
+                    include_superseded: false,
+                }))
+                .unwrap()
+                .0
+        };
+
+        let addressed = read(Some("note-2"));
+        assert_eq!(addressed.matched_notes, 1);
+        assert_eq!(addressed.retained_notes, 3, "retention count is unchanged");
+        assert_eq!(addressed.memory.notes.len(), 1);
+        assert_eq!(addressed.memory.notes[0].note_id, "note-2");
+        assert_eq!(addressed.memory.notes[0].body, "body of note-2 sharing the word revision");
+
+        assert_eq!(read(Some("missing")).matched_notes, 0);
+        assert_eq!(read(None).matched_notes, 3);
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -3089,7 +3555,7 @@ mod tests {
         let server = AdashiMcpServer::new(settings_path);
         let result = server
             .mockup_get_revision_context(Parameters(MockupContextParams {
-                project_id: project.id,
+                project_name: project.id,
                 external_id: "mockup-home".into(),
             }))
             .unwrap();
@@ -3183,8 +3649,9 @@ mod tests {
         let server = AdashiMcpServer::new(settings_path);
         let result = server
             .get_task(Parameters(TaskIdParams {
-                project_id: project.id,
+                project_name: project.id,
                 task_id: task.id,
+                include_design_scopes: true,
             }))
             .unwrap();
         let structured = result.structured_content.as_ref().unwrap();

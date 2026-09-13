@@ -346,22 +346,31 @@ fn seed_adashi_demo_data(db: &mut Connection, project: &ProjectSettings) -> rusq
         )?;
     }
 
-    tx.execute(
-        "INSERT INTO agent_tasks(project_id, number, title, description, state) VALUES (?1, 1, ?2, ?3, 'open')",
-        params![
-            project_id,
+    // Demo tasks start unclaimed: the vocabulary is the task lifecycle's own, read from the
+    // module that owns it so a rename cannot leave the seed writing a state storage rejects.
+    for (number, title, description) in [
+        (
+            1,
             "Expose design workspace over MCP",
             "Add rmcp server resources for C4 workspaces, Mermaid diagrams, task injection, and QA gates.",
-        ],
-    )?;
-    tx.execute(
-        "INSERT INTO agent_tasks(project_id, number, title, description, state) VALUES (?1, 2, ?2, ?3, 'open')",
-        params![
-            project_id,
+        ),
+        (
+            2,
             "Add task injection workflow",
             "Persist coding agent tasks with context, acceptance criteria, and post-task commands.",
-        ],
-    )?;
+        ),
+    ] {
+        tx.execute(
+            "INSERT INTO agent_tasks(project_id, number, title, description, state) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                project_id,
+                number,
+                title,
+                description,
+                crate::tasks::TaskState::Todo.as_str()
+            ],
+        )?;
+    }
 
     tx.execute(
         "INSERT INTO coding_guidelines(project_id, title, body, severity) VALUES (?1, ?2, ?3, 'required')",
@@ -881,3 +890,36 @@ const MERMAID_UML: &str = r#"sequenceDiagram
     Codex->>QA: run required checks
     QA-->>MCP: verification result
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The seeded demo project is the one path that writes tasks outside the task API, so it has
+    /// to satisfy the stored state vocabulary.
+    #[test]
+    fn seeded_demo_tasks_are_created_unclaimed_in_the_current_vocabulary() {
+        let mut db = Connection::open_in_memory().unwrap();
+        crate::schema::migrate(&mut db).unwrap();
+        let project = ProjectSettings {
+            id: "adashi".to_string(),
+            name: "Adashi".to_string(),
+            folder: "C:\\src\\Adashi".to_string(),
+        };
+
+        seed_initial_data(&mut db, &project).unwrap();
+
+        let states: Vec<String> = db
+            .prepare("SELECT state FROM agent_tasks ORDER BY number")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(!states.is_empty(), "the demo project seeds tasks");
+        assert!(
+            states.iter().all(|state| state == crate::tasks::TaskState::Todo.as_str()),
+            "seeded demo tasks must start unclaimed: {states:?}"
+        );
+    }
+}

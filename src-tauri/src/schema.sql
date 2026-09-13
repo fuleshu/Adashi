@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS agent_tasks (
     number INTEGER NOT NULL DEFAULT 0,
     title TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
-    state TEXT NOT NULL DEFAULT 'open' CHECK(state IN ('open', 'finished', 'confirmed')),
+    state TEXT NOT NULL DEFAULT 'todo' CHECK(state IN ('todo', 'active', 'finished', 'closed')),
     completed_at TEXT,
     confirmed_at TEXT,
     completion_memo TEXT NOT NULL DEFAULT '',

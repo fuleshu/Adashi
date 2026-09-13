@@ -307,12 +307,14 @@ fn ensure_task_system_tables(db: &Connection) -> rusqlite::Result<()> {
          WHERE number = 0",
         [],
     )?;
+    ensure_task_state_vocabulary(db)?;
+
     db.execute(
         "UPDATE agent_tasks
          SET state = CASE
-            WHEN state IN ('open', 'finished', 'confirmed') THEN state
+            WHEN state IN ('todo', 'active', 'finished', 'closed') THEN state
             WHEN state = 'done' THEN 'finished'
-            ELSE 'open'
+            ELSE 'todo'
          END",
         [],
     )?;
@@ -364,6 +366,79 @@ fn add_task_column_if_missing(
     db.execute(
         &format!("ALTER TABLE agent_tasks ADD COLUMN {column_name} {column_sql}"),
         [],
+    )?;
+    Ok(())
+}
+
+/// Rewrites the task state vocabulary from `open`/`finished`/`confirmed` to
+/// `todo`/`active`/`finished`/`closed`.
+///
+/// SQLite cannot alter a CHECK constraint in place, so the table is rebuilt. Foreign keys from
+/// the task link tables must be off while the table is renamed and recreated, otherwise the
+/// rename would repoint them at the legacy name that is then dropped.
+///
+/// Mapping: `open` becomes `todo` because every existing task started unclaimed and no stored
+/// task recorded that work had begun; `confirmed` becomes `closed` because both mean "reviewed
+/// and accepted". The timestamps keep their meaning, so `completed_at` and `confirmed_at` are
+/// carried across unchanged.
+fn ensure_task_state_vocabulary(db: &Connection) -> rusqlite::Result<()> {
+    let table_sql: String = db.query_row(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='agent_tasks'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !table_sql.contains("'confirmed'") && !table_sql.contains("'open'") {
+        return Ok(());
+    }
+
+    db.execute_batch(
+        "PRAGMA foreign_keys=OFF;
+         BEGIN IMMEDIATE;
+
+         CREATE TABLE agent_tasks_rebuilt (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            number INTEGER NOT NULL DEFAULT 0,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            state TEXT NOT NULL DEFAULT 'todo' CHECK(state IN ('todo', 'active', 'finished', 'closed')),
+            completed_at TEXT,
+            confirmed_at TEXT,
+            completion_memo TEXT NOT NULL DEFAULT '',
+            created_files TEXT NOT NULL DEFAULT '[]',
+            changed_files TEXT NOT NULL DEFAULT '[]',
+            confirmation_commit_id TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(project_id, number)
+         );
+
+         INSERT INTO agent_tasks_rebuilt(
+            id, project_id, number, title, description, state, completed_at, confirmed_at,
+            completion_memo, created_files, changed_files, confirmation_commit_id,
+            created_at, updated_at
+         )
+         SELECT
+            id, project_id, number, title, description,
+            CASE state
+                WHEN 'open' THEN 'todo'
+                WHEN 'confirmed' THEN 'closed'
+                WHEN 'finished' THEN 'finished'
+                WHEN 'done' THEN 'finished'
+                ELSE 'todo'
+            END,
+            completed_at, confirmed_at, completion_memo, created_files, changed_files,
+            confirmation_commit_id, created_at, updated_at
+         FROM agent_tasks;
+
+         DROP TABLE agent_tasks;
+         ALTER TABLE agent_tasks_rebuilt RENAME TO agent_tasks;
+
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_tasks_project_number
+            ON agent_tasks(project_id, number);
+
+         COMMIT;
+         PRAGMA foreign_keys=ON;",
     )?;
     Ok(())
 }
@@ -481,4 +556,156 @@ fn table_columns(db: &Connection, table: &str) -> rusqlite::Result<Vec<String>> 
     let mut statement = db.prepare(&format!("PRAGMA table_info({table})"))?;
     let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
     columns.collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A database written by the previous release: the old three-state vocabulary, with the
+    /// link table's foreign key pointing at `agent_tasks`.
+    fn legacy_database() -> Connection {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "PRAGMA foreign_keys=ON;
+             CREATE TABLE projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                slug TEXT NOT NULL UNIQUE,
+                repository_path TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+             );
+             INSERT INTO projects(name, slug) VALUES('P', 'p');
+             CREATE TABLE agent_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                number INTEGER NOT NULL DEFAULT 0,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                state TEXT NOT NULL DEFAULT 'open' CHECK(state IN ('open', 'finished', 'confirmed')),
+                completed_at TEXT,
+                confirmed_at TEXT,
+                completion_memo TEXT NOT NULL DEFAULT '',
+                created_files TEXT NOT NULL DEFAULT '[]',
+                changed_files TEXT NOT NULL DEFAULT '[]',
+                confirmation_commit_id TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(project_id, number)
+             );
+             CREATE TABLE task_design_specification_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id INTEGER NOT NULL REFERENCES agent_tasks(id) ON DELETE CASCADE,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                target_type TEXT NOT NULL CHECK(target_type IN ('element', 'relationship', 'uml')),
+                design_external_id TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(task_id, design_external_id)
+             );
+             INSERT INTO agent_tasks(project_id, number, title, state, completed_at, confirmed_at, completion_memo)
+                VALUES(1, 1, 'Never started', 'open', NULL, NULL, ''),
+                      (1, 2, 'Reported done', 'finished', '2026-01-02 03:04:05', NULL, 'first attempt'),
+                      (1, 3, 'Accepted work', 'confirmed', '2026-01-02 03:04:05', '2026-01-03 04:05:06', 'accepted');
+             INSERT INTO task_design_specification_links(task_id, sort_order, target_type, design_external_id)
+                VALUES(2, 0, 'element', 'mcp-server');
+             INSERT INTO task_design_specification_links(task_id, sort_order, target_type, design_external_id)
+                VALUES(3, 0, 'uml', 'ResourceScopedConcurrencyModel');",
+        )
+        .unwrap();
+        db
+    }
+
+    #[test]
+    fn migrating_the_task_vocabulary_preserves_rows_links_and_timestamps() {
+        let mut db = legacy_database();
+        migrate(&mut db).unwrap();
+
+        let rows: Vec<(i64, String, Option<String>, Option<String>, String)> = db
+            .prepare(
+                "SELECT number, state, completed_at, confirmed_at, completion_memo
+                 FROM agent_tasks ORDER BY number",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+
+        // open -> todo because no stored task recorded that work had begun.
+        assert_eq!(rows[0].1, "todo");
+        assert_eq!(rows[1].1, "finished");
+        // confirmed -> closed: both mean reviewed and accepted.
+        assert_eq!(rows[2].1, "closed");
+        assert_eq!(rows[1].2.as_deref(), Some("2026-01-02 03:04:05"));
+        assert_eq!(rows[2].3.as_deref(), Some("2026-01-03 04:05:06"));
+        assert_eq!(rows[1].4, "first attempt");
+
+        // The links still resolve to their tasks: the rebuilt table kept its ids.
+        let links: Vec<(i64, String)> = db
+            .prepare("SELECT task_id, design_external_id FROM task_design_specification_links ORDER BY id")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            links,
+            vec![
+                (2, "mcp-server".to_string()),
+                (3, "ResourceScopedConcurrencyModel".to_string())
+            ]
+        );
+
+        // The new vocabulary is enforced by storage, so the machine and the column cannot drift.
+        let error = db
+            .execute(
+                "INSERT INTO agent_tasks(project_id, number, title, state) VALUES(1, 99, 'x', 'confirmed')",
+                [],
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("CHECK constraint failed"), "{error}");
+
+        // A second migration is a no-op: the table is already rebuilt.
+        let before: String = db
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='agent_tasks'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        migrate(&mut db).unwrap();
+        let after: String = db
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='agent_tasks'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn a_fresh_database_uses_the_new_vocabulary_without_a_rebuild() {
+        let mut db = Connection::open_in_memory().unwrap();
+        migrate(&mut db).unwrap();
+        let sql: String = db
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='agent_tasks'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(sql.contains("'todo'"), "{sql}");
+        assert!(sql.contains("'closed'"), "{sql}");
+        assert!(!sql.contains("'confirmed'"), "{sql}");
+    }
 }

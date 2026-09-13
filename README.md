@@ -97,27 +97,33 @@ Adashi includes a local stdio MCP server. It lets compatible coding agents acces
 
 The MCP surface includes tools for:
 
+- Searching all project content at once with `adashi_grep` (design, tasks, memory) using grep-shaped output whose locators drill into the owning tool
 - Reading and updating project memory
-- Listing, creating, updating, finishing, and deleting tasks
+- Listing, creating, updating, finishing, closing, and deleting tasks
 - Reading lifecycle rule injections
 - Managing optional project rules
 - Reading formal design overview, scopes, search results, IDs, and bindings
 - Saving validated design changes
 - Listing, creating, updating, deleting, and running QA jobs
 
-MCP calls carry an explicit project id or project name, which matters when one Adashi app manages several repositories.
+MCP calls carry an explicit `projectName`, resolved case-insensitively; `projectId` is not accepted, so there is only ever one way to address a project.
 
 ### Task Workspace
 
 Tasks are project-local records with a deliberately small lifecycle:
 
-- `open`
-- `finished`
-- `confirmed`
+- `todo` — created and unclaimed
+- `active` — being worked on
+- `finished` — reported complete, awaiting review
+- `closed` — reviewed and accepted
 
-Tasks can link to one or more design specifications, so an agent does not just know "implement settings"; it can know which components, flows, or diagrams define the intended behavior.
+`finished` and `closed` are separate on purpose: an agent reporting its own work complete is not a verdict. A review that disagrees with the result sets the task back to `active`, which clears the completion timestamp but keeps the completion memo and file lists as evidence for the next attempt. The task state dropdown in the workspace sets any state directly.
 
-Finishing a task can include a lean completion payload with what changed and how it was verified. Confirmation remains a separate human step.
+Closed tasks are treated as accepted history: task listings and searches leave them out unless `closed` is requested explicitly, and a listing reports how many it withheld.
+
+Tasks can link to design specifications, so an agent does not just know "implement settings"; it can know which components, flows, or diagrams define the intended behavior. Reading a task returns those links as metadata rather than inlining every linked design branch, which keeps a task read small however many links it carries; retrieve the one or two branches the work needs with the design `get_scope` operation, or ask for all of them with `includeDesignScopes`.
+
+Finishing a task can include a lean completion payload with what changed and how it was verified. Closing remains a separate review step.
 
 ### QA Workspace
 
@@ -292,7 +298,7 @@ command = "C:\\src\\Adashi\\src-tauri\\target\\release\\adashi-mcp.exe"
 args = []
 ```
 
-When the MCP server is available, agents should call `adashi_rules` (operation `get_rule_injections`) at lifecycle hooks and pass the relevant `projectId` for the project they are working on.
+When the MCP server is available, agents should call `adashi_rules` (operation `get_rule_injections`) at lifecycle hooks and pass the relevant `projectName` for the project they are working on. Project names are unique case-insensitively and are resolved case-insensitively; `projectId` is not accepted.
 
 ## Current Status
 
