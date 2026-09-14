@@ -3,6 +3,7 @@ use rusqlite::Connection;
 pub fn migrate(db: &mut Connection) -> rusqlite::Result<()> {
     db.execute_batch(include_str!("schema.sql"))?;
     db.execute_batch(include_str!("concurrency_schema.sql"))?;
+    db.execute_batch(include_str!("design_health_schema.sql"))?;
     ensure_rules_name_column(db)?;
     ensure_diagram_attachment_columns(db)?;
     ensure_design_bindings_table(db)?;
@@ -11,8 +12,24 @@ pub fn migrate(db: &mut Connection) -> rusqlite::Result<()> {
     ensure_qa_system_tables(db)?;
     ensure_ui_mockup_tables(db)?;
     ensure_mockup_design_link_targets(db)?;
+    ensure_design_health_columns(db)?;
     crate::state::ensure_project_state(db)?;
     ensure_project_memory_rows(db)?;
+    Ok(())
+}
+
+/// Adds columns to the design-to-code check tables for databases created before they existed.
+///
+/// These tables are a derived cache, so a database that predates a column simply has no recorded
+/// check until the next scan: nothing is lost by leaving the column empty.
+fn ensure_design_health_columns(db: &Connection) -> rusqlite::Result<()> {
+    let existing = table_columns(db, "design_element_checks")?;
+    if !existing.is_empty() && !existing.iter().any(|column| column == "files") {
+        db.execute(
+            "ALTER TABLE design_element_checks ADD COLUMN files TEXT NOT NULL DEFAULT '[]'",
+            [],
+        )?;
+    }
     Ok(())
 }
 

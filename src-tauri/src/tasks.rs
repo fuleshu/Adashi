@@ -12,7 +12,6 @@ use crate::concurrency;
 pub const TASK_STATE_NAMES: [&str; 4] = ["todo", "active", "finished", "closed"];
 
 /// States a default listing shows: everything except closed work.
-pub const VISIBLE_STATE_NAMES: [&str; 3] = ["todo", "active", "finished"];
 
 /// The error every unrecognised-state path returns, so the accepted values are stated from one
 /// place and a caller never has to guess or retry.
@@ -80,6 +79,14 @@ pub fn task_transition_allowed(from: TaskState, to: TaskState) -> bool {
     }
 }
 
+/// Every state, for a consumer that applies its own visibility rules.
+pub const ALL_TASK_STATES: [TaskState; 4] = [
+    TaskState::Todo,
+    TaskState::Active,
+    TaskState::Finished,
+    TaskState::Closed,
+];
+
 #[derive(Clone, Debug, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TaskSummary {
@@ -91,16 +98,20 @@ pub struct TaskSummary {
     pub version: i64,
 }
 
-/// The state filter to apply for a listing. Omitted means "everything the caller did not have to
-/// ask for": open work only, with closed tasks excluded so accepted history cannot be mistaken
-/// for current work. An explicit filter, including an empty one, is honoured exactly.
+/// States a default listing shows: everything except closed work.
+pub const DEFAULT_VISIBLE_STATES: [TaskState; 3] =
+    [TaskState::Todo, TaskState::Active, TaskState::Finished];
+
+/// The state filter to apply when a caller omits one: open work only, with closed tasks excluded
+/// so accepted history cannot be mistaken for current work.
+///
+/// This is the *default view*, not "every state". A consumer that owns its own visibility control
+/// — the dashboard, which offers a per-state checkbox — must ask for `ALL_TASK_STATES` instead,
+/// or the control it shows can never reveal anything.
 pub fn default_state_filter(states: Option<&[TaskState]>) -> Vec<TaskState> {
     match states {
         Some(states) => states.to_vec(),
-        None => VISIBLE_STATE_NAMES
-            .iter()
-            .map(|name| TaskState::parse(name).expect("visible state names are valid"))
-            .collect(),
+        None => DEFAULT_VISIBLE_STATES.to_vec(),
     }
 }
 
@@ -405,18 +416,22 @@ pub struct FinishTask {
     pub changed_files: Vec<String>,
 }
 
+/// Loads the tasks in `states`.
+///
+/// `states` is required rather than optional on purpose: the parameter decides whether closed
+/// history is visible, and an omitted value silently meaning "the default view" is how the
+/// dashboard's closed checkbox ended up filtering a list that never contained closed tasks. Use
+/// `default_state_filter` for the default view or `ALL_TASK_STATES` for everything.
 pub fn load_tasks(
     db: &Connection,
     project_id: i64,
-    states: Option<&[TaskState]>,
+    states: &[TaskState],
 ) -> Result<Vec<Task>, String> {
     let tasks = load_task_rows(db, project_id)?;
-    // Omitted means the caller asked for the default view, which excludes closed history.
-    let allowed_states = default_state_filter(states);
 
     tasks
         .into_iter()
-        .filter(|task| allowed_states.iter().any(|state| state.as_str() == task.state))
+        .filter(|task| states.iter().any(|state| state.as_str() == task.state))
         .map(|task| hydrate_task(db, project_id, task))
         .collect()
 }

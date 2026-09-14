@@ -36,6 +36,12 @@ If a call fails because the MCP surface is not configured, continue without Adas
 
 The injected prompt carries the current project summary within its own budget. Treat it as the project's current constraints, not as history: superseded handovers are excluded, and retrieved historical notes are dated evidence rather than current state. When the run needs a prior decision, constraint or blocker that the summary does not cover, retrieve it with the `adashi_memory` get operation using `query`, `runId`, or `taskId`.
 
+Writing a note is optional: keep only important decisions, non-obvious constraints, or unresolved blockers with a concrete next step. The `append` operation requires `projectName`, `noteId`, `operationId` and `body`; pass `runId` as well, because retained notes are found again by that exact value, and an omitted or null `runId` is stored as the `operationId` instead:
+
+```json
+{"projectName": "<project>", "operation": "append", "noteId": "handover-<topic>-<yyyymmdd>", "operationId": "handover-<topic>-<yyyymmdd>-a", "runId": "run.<topic>-<yyyymmdd>", "body": "<what changed, why, and the next step>"}
+```
+
 ## Formal design
 
 The injected prompt carries a bounded design index: ids, names, element types and versions, without descriptions, relationships, artifacts or bindings. It is a list of retrieval entry points, not implementation guidance.

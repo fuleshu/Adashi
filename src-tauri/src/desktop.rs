@@ -11,6 +11,7 @@ use tauri::{
 use tauri_plugin_dialog::DialogExt;
 
 use crate::design::{DesignArtifactTypeRecord, DesignChange};
+use crate::design_health;
 use crate::fixed_hooks::FixedHookPrompt;
 use crate::memory::ProjectMemory;
 use crate::mockups::{
@@ -64,6 +65,9 @@ struct DashboardPayload {
     memory: ProjectMemory,
     architecture_projection: ProjectionStatus,
     prompt_warnings: Vec<PromptWarning>,
+    /// The last recorded design-to-code check, so the design view can show state per element
+    /// without reading the source tree on every dashboard refresh.
+    design_health: design_health::DesignHealthResult,
 }
 
 #[derive(Serialize)]
@@ -244,7 +248,9 @@ fn load_dashboard_payload(
         uml_artifact_types: design::supported_uml_artifact_types(),
         diagrams: load_diagrams(&db)?,
         mockups: mockups::load_summaries(db, project_row_id)?,
-        tasks: tasks::load_tasks(db, project_row_id, None)?,
+        // The dashboard owns task visibility: it offers a per-state checkbox, so it needs every
+        // state in the payload. What the user is shown is decided by those checkboxes, not here.
+        tasks: tasks::load_tasks(db, project_row_id, &tasks::ALL_TASK_STATES)?,
         guidelines: load_guidelines(&db)?,
         post_task_commands: load_post_task_commands(&db)?,
         qa_checks: load_qa_checks(&db)?,
@@ -256,7 +262,114 @@ fn load_dashboard_payload(
         memory,
         architecture_projection,
         prompt_warnings,
+        design_health: recorded_design_health(db, project_row_id)?,
     })
+}
+
+/// The recorded design-to-code check, assembled without touching the filesystem.
+///
+/// The scan itself reads source files, so it runs on request rather than on every dashboard
+/// refresh; this rebuilds the same shape from the recorded rows so the design view always has
+/// something to show, including the honest "never scanned" state.
+fn recorded_design_health(
+    db: &rusqlite::Connection,
+    project_row_id: i64,
+) -> Result<design_health::DesignHealthResult, String> {
+    let counts = design_health::recorded_counts(db, project_row_id)?;
+    let states = design_health::recorded_states(db, project_row_id)?;
+    let details: std::collections::HashMap<String, String> = db
+        .prepare("SELECT design_external_id, detail FROM design_element_checks WHERE project_id=?1")
+        .map_err(|error| error.to_string())?
+        .query_map([project_row_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<rusqlite::Result<std::collections::HashMap<_, _>>>()
+        .map_err(|error| error.to_string())?;
+    let broken: std::collections::HashMap<String, Vec<design_health::BrokenBinding>> = {
+        let mut map: std::collections::HashMap<String, Vec<design_health::BrokenBinding>> =
+            std::collections::HashMap::new();
+        let mut statement = db
+            .prepare(
+                "SELECT design_external_id, target_type, target, detail
+                 FROM design_binding_checks WHERE project_id=?1 ORDER BY target",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map([project_row_id], |row| {
+                let design_external_id: String = row.get(0)?;
+                Ok((
+                    design_external_id,
+                    design_health::BrokenBinding {
+                        design_external_id: row.get(0)?,
+                        target_type: row.get(1)?,
+                        target: row.get(2)?,
+                        detail: row.get(3)?,
+                    },
+                ))
+            })
+            .map_err(|error| error.to_string())?;
+        for row in rows {
+            let (design_external_id, binding) = row.map_err(|error| error.to_string())?;
+            map.entry(design_external_id).or_default().push(binding);
+        }
+        map
+    };
+    let mut elements = db
+        .prepare(
+            "SELECT e.external_id, e.name, e.element_type
+             FROM c4_elements e JOIN design_workspaces w ON w.id = e.workspace_id
+             ORDER BY e.id",
+        )
+        .map_err(|error| error.to_string())?
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|error| error.to_string())?
+        .filter_map(|row| row.ok())
+        .filter_map(|(external_id, name, element_type)| {
+            let (state, files) = states.get(&external_id).cloned()?;
+            Some(design_health::ElementFinding {
+                design_external_id: external_id.clone(),
+                name,
+                element_type,
+                state,
+                next_action: state.next_action().to_string(),
+                files,
+                broken: broken.get(&external_id).cloned().unwrap_or_default(),
+                detail: details.get(&external_id).cloned().unwrap_or_default(),
+                waivers: Vec::new(),
+            })
+        })
+        .collect::<Vec<_>>();
+    elements.sort_by(|left, right| left.design_external_id.cmp(&right.design_external_id));
+
+    Ok(design_health::DesignHealthResult {
+        summary: design_health::recorded_summary(&counts),
+        counts,
+        elements,
+        not_checked: "These checks prove that an element is attached and that what it binds to \
+                      exists. They do not check whether a bound file is a correct implementation \
+                      of the element's responsibility."
+            .to_string(),
+    })
+}
+
+/// Runs the design-to-code check for a project and returns the refreshed dashboard.
+#[tauri::command]
+fn rescan_design_health(
+    project_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<DashboardPayload, String> {
+    let project = resolve_project(&state, project_id.as_deref())?;
+    let db = open_project_database(&project).map_err(|error| error.to_string())?;
+    let project_row_id = load_project_row_id(&db)?;
+    design_health::scan_and_record(&db, project_row_id, std::path::Path::new(&project.folder))?;
+    load_dashboard_payload(project, &db, &state)
 }
 
 /// Stored prompts that name tools which no longer exist. Detecting these turns a silent rot
@@ -1630,6 +1743,7 @@ pub fn run() {
             add_project,
             close_app,
             close_task,
+            rescan_design_health,
             accept_mockup_proposal,
             create_mockup,
             create_qa_job,
@@ -2377,6 +2491,60 @@ mod tests {
 
         let db = open_project_database(&settings.projects[0]).unwrap();
         verify_project_database(&db).unwrap();
+        drop(db);
+        let _ = fs::remove_dir_all(folder);
+    }
+
+    /// The dashboard shows a checkbox per task state, so its payload has to carry every state.
+    /// When the payload filtered states instead, the closed checkbox could be ticked but nothing
+    /// could ever appear under it.
+    #[test]
+    fn dashboard_payload_carries_closed_tasks_for_the_state_checkboxes() {
+        let folder = temp_project_folder("adashi-dashboard-task-states");
+        fs::create_dir_all(&folder).unwrap();
+        let state = AppState {
+            settings_path: folder.join("settings.json"),
+            settings: Arc::new(Mutex::new(AppSettings {
+                window: WindowSettings::default(),
+                projects: Vec::new(),
+                last_active_project_id: None,
+                rule_templates: Vec::new(),
+                architecture_projection: Default::default(),
+            })),
+        };
+        let settings = add_project_to_settings(
+            "RaySplatter".to_string(),
+            folder.to_string_lossy().to_string(),
+            &state,
+        )
+        .unwrap();
+        let project = settings.projects[0].clone();
+        let db = open_project_database(&project).unwrap();
+        let project_row_id: i64 = db
+            .query_row("SELECT id FROM projects LIMIT 1", [], |row| row.get(0))
+            .unwrap();
+        for (number, name) in [(1_i64, "todo"), (2, "active"), (3, "finished"), (4, "closed")] {
+            db.execute(
+                "INSERT INTO agent_tasks(project_id, number, title, state) VALUES(?1, ?2, ?3, ?4)",
+                rusqlite::params![project_row_id, number, format!("Task {name}"), name],
+            )
+            .unwrap();
+        }
+
+        let payload = load_dashboard_payload(project, &db, &state).unwrap();
+        let states = payload
+            .tasks
+            .iter()
+            .map(|task| task.state.as_str())
+            .collect::<Vec<_>>();
+        for expected in tasks::ALL_TASK_STATES {
+            assert!(
+                states.contains(&expected.as_str()),
+                "the dashboard payload must carry {} tasks, found {states:?}",
+                expected.as_str()
+            );
+        }
+
         drop(db);
         let _ = fs::remove_dir_all(folder);
     }

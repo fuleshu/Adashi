@@ -2,6 +2,7 @@
 
 mod concurrency;
 mod design;
+mod design_health;
 mod fixed_hooks;
 mod grep;
 mod mcp;

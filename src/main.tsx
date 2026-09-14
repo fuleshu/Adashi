@@ -20,6 +20,7 @@ import {
   Network,
   PlayCircle,
   Plus,
+  RefreshCw,
   Search,
   ScrollText,
   Settings,
@@ -473,6 +474,67 @@ type DashboardPayload = {
   memory: ProjectMemory;
   architectureProjection: ProjectionStatus;
   promptWarnings: PromptWarning[];
+  designHealth: DesignHealthResult;
+};
+
+/**
+ * Design-to-code correspondence. Each state has a different next action, which is the point of
+ * having them at all:
+ *   orphaned — not attached: no parent, no relationship, no children
+ *   unmapped — attached, but nothing is claimed about where its code lives
+ *   broken   — attached, with a binding that does not resolve
+ *   resolved — attached, and everything it binds to exists
+ */
+type DesignHealthState = "orphaned" | "unmapped" | "broken" | "resolved";
+
+const DESIGN_HEALTH_STATES: DesignHealthState[] = ["broken", "orphaned", "unmapped", "resolved"];
+
+/** What each state means, and therefore what to do about it. */
+const DESIGN_HEALTH_MEANING: Record<DesignHealthState, string> = {
+  broken: "Attached, but a binding names something that is not there. Fix the path.",
+  orphaned: "No parent, no relationship, no children: the model cannot place it. Attach it.",
+  unmapped: "Attached, but nothing is claimed about where its code lives. Bind it to a file.",
+  resolved: "Attached, and everything it binds to exists.",
+};
+
+function healthCountKey(state: DesignHealthState): keyof DesignHealthCounts {
+  return state;
+}
+
+type BrokenBinding = {
+  designExternalId: string;
+  targetType: string;
+  target: string;
+  detail: string;
+};
+
+type DesignHealthElement = {
+  designExternalId: string;
+  name: string;
+  elementType: string;
+  state: DesignHealthState;
+  nextAction: string;
+  files: string[];
+  broken: BrokenBinding[];
+  detail: string;
+  waivers: { id: number; state: string; reason: string; createdAt: string }[];
+};
+
+type DesignHealthCounts = {
+  orphaned: number;
+  unmapped: number;
+  broken: number;
+  resolved: number;
+  brokenBindings: number;
+  waivers: number;
+  elements: number;
+};
+
+type DesignHealthResult = {
+  counts: DesignHealthCounts;
+  elements: DesignHealthElement[];
+  summary: string;
+  notChecked: string;
 };
 
 type ProjectRevision = {
@@ -1102,7 +1164,37 @@ function DesignBrowser({
   const [structurizrFontSize, setStructurizrFontSize] = React.useState(DEFAULT_STRUCTURIZR_FONT_SIZE);
   const [mermaidZoom, setMermaidZoom] = React.useState(0);
   const [mermaidFontSize, setMermaidFontSize] = React.useState(DEFAULT_MERMAID_FONT_SIZE);
+  const [healthFilter, setHealthFilter] = React.useState<DesignHealthState | null>(null);
+  const [healthElementQuery, setHealthElementQuery] = React.useState("");
+  const [rescanningHealth, setRescanningHealth] = React.useState(false);
   const designMainRef = React.useRef<HTMLElement | null>(null);
+  const healthByElement = React.useMemo(() => {
+    const map = new Map<string, DesignHealthElement>();
+    for (const element of payload.designHealth.elements) {
+      map.set(element.designExternalId, element);
+    }
+    return map;
+  }, [payload.designHealth.elements]);
+  const healthElements = React.useMemo(() => {
+    const query = healthElementQuery.trim().toLowerCase();
+    return payload.designHealth.elements.filter((element) => {
+      if (healthFilter && element.state !== healthFilter) {
+        return false;
+      }
+      if (!query) {
+        return true;
+      }
+      return `${element.name} ${element.designExternalId} ${element.elementType}`.toLowerCase().includes(query);
+    });
+  }, [payload.designHealth.elements, healthFilter, healthElementQuery]);
+
+  function rescanDesignHealth() {
+    setRescanningHealth(true);
+    invoke<DashboardPayload>("rescan_design_health", { projectId: payload.projectId })
+      .then(onChange)
+      .catch((reason) => onError(formatMutationError(reason)))
+      .finally(() => setRescanningHealth(false));
+  }
   const designTree = React.useMemo(() => buildDesignTree(payload.designElements), [payload.designElements]);
   const rootElement =
     payload.designElements.find(
@@ -1192,6 +1284,8 @@ function DesignBrowser({
   }, [activeArtifactKey, mockupArtifacts, umlArtifacts]);
 
   function selectLevel(level: DesignLevel) {
+    // A level is a statement about the tree, so choosing one leaves the state listing.
+    setHealthFilter(null);
     onLevelChange(level);
 
     if (level === "context" && rootElement) {
@@ -1260,22 +1354,116 @@ function DesignBrowser({
           <input
             aria-label="Filter design entities"
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Filter design"
-            value={query}
+            placeholder={healthFilter ? "Filter these elements" : "Filter design"}
+            value={healthFilter ? healthElementQuery : query}
           />
+          <button
+            aria-label="Rescan design state"
+            className="design-search-action"
+            disabled={rescanningHealth}
+            onClick={rescanDesignHealth}
+            title="Re-check attachments and file bindings against the source tree"
+            type="button"
+          >
+            <RefreshCw size={15} />
+          </button>
         </div>
 
-        <DesignTree
-          activeLevel={activeLevel}
-          branchElement={activeBranchElement}
-          elements={payload.designElements}
-          query={query}
-          relationships={payload.designRelationships}
-          roots={designTree}
-          selectedEntity={selectedEntity}
-          onSelectElement={selectTreeElement}
-          onSelectRelationship={(relationship) => onSelect({ type: "relationship", externalId: relationship.externalId })}
-        />
+        <div className="design-state-filters" role="group" aria-label="Design to code state">
+          {DESIGN_HEALTH_STATES.map((state) => {
+            const selected = healthFilter === state;
+            return (
+              <button
+                aria-pressed={selected}
+                className={selected ? "active" : ""}
+                key={state}
+                onClick={() => {
+                  // Clicking the selected state again clears it and brings the tree back, so the
+                  // listing is never somewhere you can get stuck. Choosing a C4 level also clears
+                  // it, because a level is a statement about the tree.
+                  setHealthFilter(selected ? null : state);
+                  setHealthElementQuery("");
+                }}
+                title={
+                  selected
+                    ? `${DESIGN_HEALTH_MEANING[state]} Click again to go back to the tree.`
+                    : DESIGN_HEALTH_MEANING[state]
+                }
+                type="button"
+              >
+                <span className={`design-state-dot design-state-${state}`} />
+                {state}
+                <b>{payload.designHealth.counts[healthCountKey(state)]}</b>
+              </button>
+            );
+          })}
+        </div>
+
+        {healthFilter ? (
+          <div className="design-list">
+            <div className="design-tree-heading">
+              <span>{DESIGN_HEALTH_MEANING[healthFilter]}</span>
+              <button onClick={() => setHealthFilter(null)} type="button">
+                Back to tree
+              </button>
+            </div>
+            {healthElements.length === 0 ? (
+              <div className="empty-state compact">Nothing in this state</div>
+            ) : (
+              healthElements.map((element) => (
+                <button
+                  className={[
+                    "design-list-item",
+                    selectedEntity?.type === "element" && selectedEntity.externalId === element.designExternalId
+                      ? "active"
+                      : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  key={element.designExternalId}
+                  onClick={() => onSelect({ type: "element", externalId: element.designExternalId })}
+                  type="button"
+                >
+                  <strong>{element.name}</strong>
+                  <span>
+                    {element.elementType}
+                    {element.detail ? ` · ${element.detail}` : ""}
+                  </span>
+                  {element.files.length > 0 ? (
+                    <ul className="design-state-files">
+                      {element.files.map((file) => (
+                        <li key={file}>{file}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {element.broken.length > 0 ? (
+                    <ul className="design-state-files broken">
+                      {element.broken.map((binding) => (
+                        <li key={`${binding.targetType}:${binding.target}`}>
+                          {binding.targetType} {binding.target} — {binding.detail}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <span>{element.nextAction}</span>
+                </button>
+              ))
+            )}
+          </div>
+        ) : (
+          <DesignTree
+            activeLevel={activeLevel}
+            branchElement={activeBranchElement}
+            elements={payload.designElements}
+            healthByElement={healthByElement}
+            query={query}
+            relationships={payload.designRelationships}
+            roots={designTree}
+            selectedEntity={selectedEntity}
+            onSelectElement={selectTreeElement}
+            onSelectRelationship={(relationship) => onSelect({ type: "relationship", externalId: relationship.externalId })}
+          />
+        )}
       </aside>
 
       <section
@@ -1549,6 +1737,7 @@ function DesignTree({
   activeLevel,
   branchElement,
   elements,
+  healthByElement,
   query,
   relationships,
   roots,
@@ -1559,6 +1748,7 @@ function DesignTree({
   activeLevel: DesignLevel;
   branchElement: DesignElement | null;
   elements: DesignElement[];
+  healthByElement: Map<string, DesignHealthElement>;
   query: string;
   relationships: DesignRelationship[];
   roots: DesignTreeNode[];
@@ -1664,6 +1854,7 @@ function DesignTree({
           selectedEntity={selectedEntity}
           activeBranchExternalId={branchElement?.externalId ?? null}
           expandedIds={expandedIds}
+          healthByElement={healthByElement}
           onToggleBranch={toggleBranch}
           onSelectElement={onSelectElement}
         />
@@ -1719,6 +1910,7 @@ function DesignTreeItem({
   selectedEntity,
   activeBranchExternalId,
   expandedIds,
+  healthByElement,
   onToggleBranch,
   onSelectElement,
 }: {
@@ -1727,9 +1919,11 @@ function DesignTreeItem({
   selectedEntity: { type: DesignEntityType; externalId: string } | null;
   activeBranchExternalId: string | null;
   expandedIds: Set<string>;
+  healthByElement: Map<string, DesignHealthElement>;
   onToggleBranch: (externalId: string) => void;
   onSelectElement: (element: DesignElement) => void;
 }) {
+  const health = healthByElement.get(node.element.externalId);
   const matches =
     !normalizedQuery ||
     `${node.element.name} ${node.element.description} ${node.element.elementType} ${node.element.tags}`
@@ -1774,7 +1968,10 @@ function DesignTreeItem({
           type="button"
         >
           <strong>{node.element.name}</strong>
-          <span>{node.element.elementType}</span>
+          <span>
+            {node.element.elementType}
+            {health && health.state !== "resolved" ? ` · ${health.state}` : ""}
+          </span>
         </button>
       </div>
       {hasChildren && isExpanded ? (
@@ -1787,6 +1984,7 @@ function DesignTreeItem({
               node={child}
               normalizedQuery={normalizedQuery}
               selectedEntity={selectedEntity}
+              healthByElement={healthByElement}
               onToggleBranch={onToggleBranch}
               onSelectElement={onSelectElement}
             />

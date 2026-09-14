@@ -639,7 +639,7 @@ fn load_content(
             Some(state) => vec![state.to_task_state()],
             None => tasks::default_state_filter(None),
         };
-        content.tasks = tasks::load_tasks(db, project_id, Some(&filter))?;
+        content.tasks = tasks::load_tasks(db, project_id, &filter)?;
     }
 
     if domains.contains(&GrepDomain::Memory) {

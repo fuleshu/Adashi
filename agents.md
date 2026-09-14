@@ -33,7 +33,7 @@ For multi-task requests, call `task.start` and `task.end` for each task using th
 If the Adashi MCP server is not present, unavailable, or the tool call fails because the MCP surface is not configured, continue without Adashi rule injection and mention the limitation only when it affects the requested outcome.
 
 <!-- adashi:architecture:begin -->
-<!-- adashi:generated revision=270 -->
+<!-- adashi:generated revision=274 -->
 # Architecture (generated)
 Generated from the Adashi design model; do not edit, change the model.
 Top layer: 6 of 47 elements, 2 of 82 relationships. Deeper detail: the adashi_design get_scope and get_bindings operations.

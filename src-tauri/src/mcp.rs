@@ -3,6 +3,7 @@ use crate::design::{
     self, DesignBindingsResult, DesignByIdsResult, DesignChange, DesignOverviewResult,
     DesignSaveResult, DesignScopeResult, DesignSearchResult, ElementDescriptionUpdate,
 };
+use crate::design_health;
 use crate::grep::{self, GrepParams};
 use crate::memory::{self, AppendMemoryNote, MemoryNote, ProjectMemory};
 use crate::mockups::{self, MockupSummary, UiMockup};
@@ -698,6 +699,11 @@ enum DesignOperation {
     GetOverview,
     GetBindings,
     SetElementDescriptions,
+    // Design-to-code correspondence: which bindings resolve, which elements claim nothing, and
+    // where bound code references what the model does not declare. A line comment rather than a
+    // doc comment on purpose: a documented variant makes schemars emit `oneOf` with titles
+    // instead of the flat string enum clients already read.
+    Health,
     MockupListPendingRevisions,
     MockupGetRevisionContext,
 }
@@ -2159,6 +2165,19 @@ impl AdashiMcpServer {
         Ok(Json(result))
     }
 
+    /// Design-to-code correspondence. Reads the project's source files, so it reports what the
+    /// model currently claims and whether the code still supports it.
+    fn design_health_check(
+        &self,
+        Parameters(params): Parameters<ProjectParams>,
+    ) -> Result<Json<design_health::DesignHealthResult>, ErrorData> {
+        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
+        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        design_health::scan_and_record(&db, project_row_id, std::path::Path::new(&project.folder))
+            .map(Json)
+            .map_err(tool_error)
+    }
+
     fn mockup_list_pending_revisions(
         &self,
         Parameters(params): Parameters<ProjectParams>,
@@ -2280,6 +2299,11 @@ impl AdashiMcpServer {
                 }))?
                 .into_call_tool_result()
             }
+            DesignOperation::Health => self
+                .design_health_check(Parameters(ProjectParams {
+                    project_name: params.project_name,
+                }))?
+                .into_call_tool_result(),
             DesignOperation::MockupListPendingRevisions => self
                 .mockup_list_pending_revisions(Parameters(ProjectParams {
                     project_name: params.project_name,
@@ -2517,7 +2541,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_memory",
-        description = "Project memory API. Select an `operation`: get (summary, protocol and notes), append (add a handover note), update (coordinator summary replacement), update_rule (memory protocol rule). Required fields are listed per operation in the schema.",
+        description = "Project memory API. Select an `operation`: get (summary, protocol and notes), append (add a handover note), update (coordinator summary replacement), update_rule (memory protocol rule). Required fields per operation, all required unless marked optional: get = projectName (query, noteId, runId, taskId, includeSuperseded optional); append = projectName, noteId, operationId, body (runId, taskId optional), where runId is the run id that produced the note, e.g. run.<topic>-<yyyymmdd>, and defaults to operationId because retained notes are retrieved by this exact value; update = projectName, operationId, expectedVersion, memory (supersededNoteIds optional); update_rule = projectName, operationId, expectedVersion, rule.",
         annotations(read_only_hint = true, destructive_hint = false)
     )]
     fn memory(
@@ -2536,10 +2560,32 @@ impl AdashiMcpServer {
                 }))?
                 .into_call_tool_result(),
             MemoryOperation::Append => {
-                let note_id = required(params.note_id, "noteId")?;
-                let operation_id = required(params.operation_id, "operationId")?;
-                let run_id = required(params.run_id, "runId")?;
-                let body = required(params.body, "body")?;
+                let note_id = required_with_help(
+                    params.note_id,
+                    "noteId",
+                    "append",
+                    "pass a stable note id such as handover-<topic>-<yyyymmdd>",
+                )?;
+                let operation_id = required_with_help(
+                    params.operation_id,
+                    "operationId",
+                    "append",
+                    "pass a unique idempotency key for this append, e.g. <noteId>-a",
+                )?;
+                let body = required_with_help(
+                    params.body,
+                    "body",
+                    "append",
+                    "pass the handover text (at most 1000 characters)",
+                )?;
+                // The published schema cannot require runId for one operation of many, and a
+                // client that treats optional fields as nullable sends an explicit null. The note
+                // is still a complete, idempotent handover, so provenance falls back to the
+                // operationId — which is unique per append — instead of rejecting the note.
+                let run_id = match params.run_id.map(|value| value.trim().to_string()) {
+                    Some(value) if !value.is_empty() => value,
+                    _ => operation_id.clone(),
+                };
                 self.append_memory_note(Parameters(AppendMemoryNoteParams {
                     project_name: params.project_name,
                     note_id,
@@ -2580,7 +2626,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_rules",
-        description = "Lifecycle rule prompts and injection API. Select an `operation`: list, create, update, delete, get_rule_injections. Required fields are listed per operation in the schema.",
+        description = "Lifecycle rule prompts and injection API. Select an `operation`: list, create, update, delete, get_rule_injections. Required fields per operation, all required unless marked optional: list = projectName; get_rule_injections = projectName, intend, hook (memoryContext optional); create = projectName, operationId, name, enabled, intend, hook, prompt; update = projectName, operationId, expectedVersion, ruleId, name, enabled, intend, hook, prompt; delete = projectName, operationId, expectedVersion, ruleId.",
         annotations(read_only_hint = true, destructive_hint = false)
     )]
     fn rules(
@@ -2880,14 +2926,33 @@ fn missing_field(field: &str) -> ErrorData {
     )
 }
 
+/// An omitted argument must not be a dead end. A caller that cannot see the published schema
+/// (or whose client dropped an argument) only learns which value to supply from the error
+/// itself, so the field is named together with the operation that needs it and what it means.
+fn missing_field_help(field: &str, operation: &str, help: &str) -> ErrorData {
+    ErrorData::invalid_params(
+        format!("missing required field '{field}' for operation '{operation}': {help}"),
+        None,
+    )
+}
+
 fn required<T>(value: Option<T>, field: &str) -> Result<T, ErrorData> {
     value.ok_or_else(|| missing_field(field))
 }
 
+fn required_with_help<T>(value: Option<T>, field: &str, operation: &str, help: &str) -> Result<T, ErrorData> {
+    value.ok_or_else(|| missing_field_help(field, operation, help))
+}
+
+/// A domain failure. The specific reason travels in the top-level `message` because an MCP
+/// client relays only that to the model — a reason that exists solely in `data` reads to the
+/// caller as an opaque failure it cannot act on. Typed payloads such as resource conflicts keep
+/// their exact JSON shape in `data` and keep the generic top-level text.
 fn tool_error(message: String) -> ErrorData {
-    let value = serde_json::from_str::<serde_json::Value>(&message)
-        .unwrap_or_else(|_| json!({ "message": message }));
-    ErrorData::invalid_params("Adashi MCP request failed", Some(value))
+    match serde_json::from_str::<serde_json::Value>(&message) {
+        Ok(value) => ErrorData::invalid_params("Adashi MCP request failed", Some(value)),
+        Err(_) => ErrorData::invalid_params(message, None),
+    }
 }
 
 fn internal_error(err: impl std::fmt::Display) -> ErrorData {
@@ -2926,6 +2991,7 @@ mod tests {
                     "get_overview",
                     "get_bindings",
                     "set_element_descriptions",
+                    "health",
                     "mockup_list_pending_revisions",
                     "mockup_get_revision_context",
                 ],
@@ -2997,6 +3063,164 @@ mod tests {
         registered.sort();
 
         assert_eq!(advertised, registered);
+    }
+
+    /// A capability tool publishes one flat argument schema, so a caller can only discover an
+    /// operation's required fields from the tool description. Those requirements are asserted
+    /// per operation, because a silently dropped field name turns every append into a failed
+    /// call that the caller cannot self-correct.
+    #[test]
+    fn capability_descriptions_declare_each_operation_s_required_fields() {
+        let tools = AdashiMcpServer::tool_router().list_all();
+        let cases: [(&str, &[(&str, &[&str])]); 2] = [
+            (
+                "adashi_memory",
+                &[
+                    ("get", &[]),
+                    ("append", &["projectName", "noteId", "operationId", "body"]),
+                    ("update", &["projectName", "operationId", "expectedVersion", "memory"]),
+                    ("update_rule", &["projectName", "operationId", "expectedVersion", "rule"]),
+                ],
+            ),
+            (
+                "adashi_rules",
+                &[
+                    ("list", &[]),
+                    ("create", &["projectName", "operationId", "name", "enabled", "intend", "hook", "prompt"]),
+                    ("update", &["projectName", "operationId", "expectedVersion", "ruleId", "name", "enabled", "intend", "hook", "prompt"]),
+                    ("delete", &["projectName", "operationId", "expectedVersion", "ruleId"]),
+                    ("get_rule_injections", &["projectName", "intend", "hook"]),
+                ],
+            ),
+        ];
+
+        for (tool, operations) in cases {
+            let description = &tools
+                .iter()
+                .find(|tool_definition| tool_definition.name == tool)
+                .unwrap_or_else(|| panic!("{tool} must be advertised"))
+                .description;
+            let description = description
+                .as_deref()
+                .unwrap_or_else(|| panic!("{tool} must have a description"));
+            assert!(
+                !description.contains("Required fields are listed per operation in the schema"),
+                "{tool} must write out its per-operation requirements instead of pointing at the schema"
+            );
+            for (operation, fields) in operations {
+                let prefix = format!("{operation} = ");
+                let start = description
+                    .find(&prefix)
+                    .unwrap_or_else(|| panic!("{tool} description must name its `{operation}` operation's required fields"));
+                let tail = &description[start + prefix.len()..];
+                let listed = tail.split(';').next().unwrap_or(tail);
+                for field in *fields {
+                    assert!(
+                        listed.contains(field),
+                        "{tool} `{operation}` must list required field `{field}`; listed: {listed}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// An omitted argument has to be self-correcting: the caller learns the value it must
+    /// supply from the error, not from a schema it never received.
+    #[test]
+    fn missing_append_field_names_the_value_to_supply() {
+        let server = AdashiMcpServer::new(std::path::PathBuf::from("unused-settings.json"));
+        let params = |project_name: &str, run_id: Option<String>, body: Option<String>| {
+            Parameters(MemoryParams {
+                operation: MemoryOperation::Append,
+                project_name: project_name.into(),
+                note_id: Some("note".into()),
+                operation_id: Some("operation".into()),
+                body,
+                run_id,
+                task_id: None,
+                query: None,
+                include_superseded: false,
+                expected_version: None,
+                memory: None,
+                superseded_note_ids: Vec::new(),
+                rule: None,
+            })
+        };
+        let error = server
+            .memory(params("missing-project-fields", Some("run.example".into()), None))
+            .expect_err("append without a body must fail");
+        let message = error.message.to_string();
+        assert!(message.contains("'body'"), "error must name the field: {message}");
+        assert!(message.contains("'append'"), "error must name the operation: {message}");
+        assert!(message.contains("1000 characters"), "error must state the real limit: {message}");
+
+        // A client that treats an optional field as nullable sends an explicit null. The append
+        // must stay usable, so runId falls back to the operationId rather than failing the call.
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("adashi-mcp-append-run-id-{suffix}"));
+        let settings_path = root.join("settings.json");
+        let project_folder = root.join("project");
+        let project = ProjectSettings {
+            id: "append-run-id-test".into(),
+            name: "Append Run Id Test".into(),
+            folder: project_folder.to_string_lossy().into_owned(),
+        };
+        settings::save(
+            &settings_path,
+            &AppSettings {
+                window: WindowSettings {
+                    width: 1000,
+                    height: 700,
+                    x: None,
+                    y: None,
+                },
+                projects: vec![project.clone()],
+                last_active_project_id: Some(project.id.clone()),
+                rule_templates: vec![],
+                architecture_projection: Default::default(),
+            },
+        )
+        .unwrap();
+        let server = AdashiMcpServer::new(settings_path);
+        for run_id in [None, Some("   ".to_string())] {
+            server
+                .memory(params("append-run-id-test", run_id, Some("handover body".into())))
+                .unwrap_or_else(|error| panic!("append must survive a null runId: {}", error.message));
+        }
+        let (_project, db) = server.open_project(Some("append-run-id-test")).unwrap();
+        let notes = memory::load_retained_notes(&db, project_row_id(&db).unwrap()).unwrap();
+        let note = notes
+            .iter()
+            .find(|note| note.note_id == "note")
+            .expect("the appended note must be retained");
+        assert_eq!(note.run_id, "operation");
+        drop(db);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A client relays only the top-level error text, so a plain domain reason must travel there
+    /// instead of hiding in `data`, while a typed conflict payload keeps its exact JSON shape.
+    #[test]
+    fn domain_failures_state_the_reason_in_the_relayed_message() {
+        let plain = tool_error("tasks.invalid_cursor: keep the original project and states".into());
+        assert_eq!(
+            plain.message.to_string(),
+            "tasks.invalid_cursor: keep the original project and states"
+        );
+        assert!(plain.data.is_none());
+
+        let conflict = tool_error(
+            json!({
+                "code": "resource.conflict",
+                "conflicts": [{"resourceKind": "design.element", "resourceId": "a", "expectedVersion": 1, "currentVersion": 2}]
+            })
+            .to_string(),
+        );
+        assert_eq!(conflict.message.to_string(), "Adashi MCP request failed");
+        assert_eq!(conflict.data.as_ref().unwrap()["code"], json!("resource.conflict"));
     }
 
     #[test]
