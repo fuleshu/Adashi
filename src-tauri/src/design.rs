@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
+pub mod documents;
+
 /// Publishes non-negative counts using portable JSON Schema validation keywords.
 ///
 /// Schemars otherwise emits a custom `uint` format for `usize`, which MCP
@@ -284,6 +286,8 @@ pub struct DesignSaveResult {
     #[schemars(schema_with = "nonnegative_count_schema")]
     pub changed_count: usize,
     pub errors: Vec<DesignCorrection>,
+    #[serde(default)]
+    pub read_tokens: Vec<documents::DocumentReadToken>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -607,7 +611,10 @@ pub fn load_by_bindings(
     })
 }
 
-pub trait DesignGuardInput {
+pub trait DesignGuardInput: Serialize {
+    fn operation_id(&self) -> Option<&str> {
+        None
+    }
     fn resolve_for_changes(
         self,
         db: &Connection,
@@ -623,6 +630,9 @@ pub trait DesignGuardInput {
 }
 
 impl DesignGuardInput for &concurrency::MutationGuard {
+    fn operation_id(&self) -> Option<&str> {
+        Some(&self.operation_id)
+    }
     fn resolve_for_changes(
         self,
         _db: &Connection,
@@ -654,7 +664,7 @@ impl DesignGuardInput for i64 {
         let mut reads = std::collections::BTreeSet::new();
         for change in changes {
             let (required_writes, required_reads) =
-                required_resources(db, project_id, workspace.id, change)?;
+                required_resources(db, project_id, workspace.id, change, None)?;
             for target in required_writes {
                 writes.insert((target.kind, target.id));
             }
@@ -725,12 +735,15 @@ pub fn save_changes(
     change_intent: &str,
     changes: &[DesignChange],
 ) -> Result<DesignSaveResult, String> {
-    let guard = guard.resolve_for_changes(db, project_id, changes)?;
-    let current_revision = state::load_project_revision(db, project_id)?.revision;
-    if let Some(replayed) =
-        concurrency::load_operation::<DesignSaveResult>(db, project_id, &guard.operation_id)?
-    {
-        return Ok(replayed);
+    let request_hash = documents::hash(&json!(["save", &guard, change_intent, changes]))?;
+    let tx = db
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let current_revision = state::load_project_revision(&tx, project_id)?.revision;
+    if let Some(id) = guard.operation_id() {
+        if let Some(replayed) = documents::replay(&tx, project_id, id, &request_hash)? {
+            return Ok(replayed);
+        }
     }
     if change_intent.trim().is_empty() {
         return Ok(failed_save(
@@ -749,7 +762,7 @@ pub fn save_changes(
         ));
     }
 
-    let tx = db.transaction().map_err(|error| error.to_string())?;
+    let guard = guard.resolve_for_changes(&tx, project_id, changes)?;
     concurrency::validate_guard(&tx, project_id, &guard)?;
     let workspace = load_workspace(&tx)?;
     let mut changed_count = 0;
@@ -757,7 +770,7 @@ pub fn save_changes(
     let mut declared_resources = HashSet::new();
 
     for change in changes {
-        let (writes, reads) = required_resources(&tx, project_id, workspace.id, change)?;
+        let (writes, reads) = required_resources(&tx, project_id, workspace.id, change, None)?;
         validate_declared_resources(&guard, &writes, &reads)?;
         for target in &writes {
             if !declared_resources.insert((target.kind.clone(), target.id.clone())) {
@@ -790,13 +803,23 @@ pub fn save_changes(
     }
 
     if changed_count == 0 {
-        let result = no_changes_save(
+        let mut result = no_changes_save(
             current_revision,
             "The submitted changeset is already reflected in the stored design.",
             "Do not resubmit the same payload. Continue with the next distinct change.",
         );
-        tx.rollback().map_err(|error| error.to_string())?;
-        concurrency::record_no_op(db, project_id, &guard.operation_id, &result)?;
+        let targets = guard
+            .write_set
+            .iter()
+            .map(|target| ResourceChangeTarget {
+                kind: target.resource_kind.clone(),
+                id: target.resource_id.clone(),
+                delete: false,
+            })
+            .collect::<Vec<_>>();
+        result.read_tokens = documents::result_tokens(&tx, project_id, &targets)?;
+        documents::record(&tx, project_id, &guard.operation_id, &request_hash, &result)?;
+        tx.commit().map_err(|error| error.to_string())?;
         return Ok(result);
     }
 
@@ -808,6 +831,7 @@ pub fn save_changes(
         changed_count,
         &guard.operation_id,
         &changed_resources,
+        &request_hash,
     )
 }
 
@@ -817,12 +841,15 @@ pub fn set_element_descriptions(
     guard: impl DesignGuardInput,
     updates: &[ElementDescriptionUpdate],
 ) -> Result<DesignSaveResult, String> {
-    let guard = guard.resolve_for_descriptions(db, project_id, updates)?;
-    let current_revision = state::load_project_revision(db, project_id)?.revision;
-    if let Some(replayed) =
-        concurrency::load_operation::<DesignSaveResult>(db, project_id, &guard.operation_id)?
-    {
-        return Ok(replayed);
+    let request_hash = documents::hash(&json!(["set_element_descriptions", &guard, updates]))?;
+    let tx = db
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let current_revision = state::load_project_revision(&tx, project_id)?.revision;
+    if let Some(id) = guard.operation_id() {
+        if let Some(replayed) = documents::replay(&tx, project_id, id, &request_hash)? {
+            return Ok(replayed);
+        }
     }
     if updates.is_empty() {
         return Ok(failed_save(
@@ -862,7 +889,7 @@ pub fn set_element_descriptions(
         }
     }
 
-    let tx = db.transaction().map_err(|error| error.to_string())?;
+    let guard = guard.resolve_for_descriptions(&tx, project_id, updates)?;
     concurrency::validate_guard(&tx, project_id, &guard)?;
     let workspace = load_workspace(&tx)?;
     let targets = updates
@@ -910,13 +937,14 @@ pub fn set_element_descriptions(
     }
 
     if changed_count == 0 {
-        let result = no_changes_save(
+        let mut result = no_changes_save(
             current_revision,
             "Every submitted element already has the requested description.",
             "Do not resubmit the same descriptions.",
         );
-        tx.rollback().map_err(|error| error.to_string())?;
-        concurrency::record_no_op(db, project_id, &guard.operation_id, &result)?;
+        result.read_tokens = documents::result_tokens(&tx, project_id, &targets)?;
+        documents::record(&tx, project_id, &guard.operation_id, &request_hash, &result)?;
+        tx.commit().map_err(|error| error.to_string())?;
         return Ok(result);
     }
 
@@ -928,6 +956,7 @@ pub fn set_element_descriptions(
         changed_count,
         &guard.operation_id,
         &targets,
+        &request_hash,
     )
 }
 
@@ -939,6 +968,7 @@ fn finish_design_transaction(
     changed_count: usize,
     operation_id: &str,
     changed_resources: &[ResourceChangeTarget],
+    request_hash: &str,
 ) -> Result<DesignSaveResult, String> {
     let mut errors = validate_workspace(&tx, workspace_id)?;
     if !errors.is_empty() {
@@ -950,6 +980,7 @@ fn finish_design_transaction(
             revision: current_revision,
             changed_count: 0,
             errors,
+            read_tokens: Vec::new(),
         });
     }
 
@@ -988,8 +1019,9 @@ fn finish_design_transaction(
         revision,
         changed_count,
         errors,
+        read_tokens: documents::result_tokens(&tx, project_id, changed_resources)?,
     };
-    concurrency::record_no_op(&tx, project_id, operation_id, &result)?;
+    documents::record(&tx, project_id, operation_id, request_hash, &result)?;
     tx.commit().map_err(|error| error.to_string())?;
     Ok(result)
 }
@@ -1024,11 +1056,67 @@ fn validate_declared_resources(
     Ok(())
 }
 
+/// Derive internal dependency bookkeeping inside the caller's mutation transaction.
+/// Document tokens are checked before this generated guard is allowed to authorize writes.
+pub(crate) fn required_guard(
+    db: &Connection,
+    project_id: i64,
+    operation_id: &str,
+    changes: &[DesignChange],
+) -> Result<concurrency::MutationGuard, String> {
+    let workspace = load_workspace(db)?;
+    let pending = changes
+        .iter()
+        .filter_map(|change| match change {
+            DesignChange::UpsertElement { external_id, .. } => {
+                Some((external_id.trim().to_string(), "design.element"))
+            }
+            DesignChange::UpsertRelationship { external_id, .. } => {
+                Some((external_id.trim().to_string(), "design.relationship"))
+            }
+            DesignChange::UpsertUml { key, .. } => Some((key.trim().to_string(), "design.uml")),
+            _ => None,
+        })
+        .collect::<HashMap<_, _>>();
+    let mut writes = std::collections::BTreeSet::new();
+    let mut reads = std::collections::BTreeSet::new();
+    for change in changes {
+        let (required_writes, required_reads) =
+            required_resources(db, project_id, workspace.id, change, Some(&pending))?;
+        writes.extend(
+            required_writes
+                .into_iter()
+                .map(|target| (target.kind, target.id)),
+        );
+        reads.extend(required_reads);
+    }
+    reads.retain(|resource| !writes.contains(resource));
+    let expectation = |(resource_kind, resource_id): (String, String)| -> Result<concurrency::ResourceExpectation, String> {
+        Ok(concurrency::ResourceExpectation {
+            expected_version: concurrency::load_version(db, project_id, &resource_kind, &resource_id)?,
+            resource_kind,
+            resource_id,
+        })
+    };
+    Ok(concurrency::MutationGuard {
+        operation_id: operation_id.to_string(),
+        read_set: reads
+            .into_iter()
+            .map(expectation)
+            .collect::<Result<_, _>>()?,
+        write_set: writes
+            .into_iter()
+            .map(expectation)
+            .collect::<Result<_, _>>()?,
+    })
+}
+
 fn required_resources(
     db: &Connection,
     project_id: i64,
     workspace_id: i64,
     change: &DesignChange,
+    pending: Option<&HashMap<String, &str>>,
 ) -> Result<(Vec<ResourceChangeTarget>, Vec<(String, String)>), String> {
     let target = |kind: &str, id: &str, delete| ResourceChangeTarget {
         kind: kind.to_string(),
@@ -1037,6 +1125,18 @@ fn required_resources(
     };
     let mut writes = Vec::new();
     let mut reads = Vec::new();
+    let attachment = |id: &str| {
+        if let Some(kind) = pending.and_then(|identities| identities.get(id.trim())) {
+            return Ok((kind.to_string(), id.trim().to_string()));
+        }
+        match resolve_design_identity(db, workspace_id, id)? {
+            Some(identity) => Ok(identity),
+            // Planning must reach token validation even if an old attachment was deleted.
+            // The application pass below validates references against actual stored state.
+            None if pending.is_some() => Ok(("design.element".into(), id.trim().into())),
+            None => Err(format!("Unknown attached design resource '{}'", id.trim())),
+        }
+    };
     match change {
         DesignChange::UpsertElement {
             external_id,
@@ -1073,11 +1173,7 @@ fn required_resources(
             ..
         } => {
             writes.push(target("design.uml", key, false));
-            reads.push(resolve_design_identity(
-                db,
-                workspace_id,
-                attached_to_external_id,
-            )?);
+            reads.push(attachment(attached_to_external_id)?);
         }
         DesignChange::UpsertBinding {
             design_external_id,
@@ -1094,11 +1190,7 @@ fn required_resources(
                 ),
                 false,
             ));
-            reads.push(resolve_design_identity(
-                db,
-                workspace_id,
-                design_external_id,
-            )?);
+            reads.push(attachment(design_external_id)?);
         }
         DesignChange::UpsertMockup {
             external_id,
@@ -1206,6 +1298,51 @@ fn required_resources(
             writes.push(target("mockup.working", external_id, true));
         }
     }
+    // Cascading relationship/UML deletes must protect their attachments and bindings too.
+    let mut deleted_ids = writes
+        .iter()
+        .filter(|target| {
+            target.delete
+                && matches!(
+                    target.kind.as_str(),
+                    "design.element" | "design.relationship" | "design.uml"
+                )
+        })
+        .map(|target| target.id.clone())
+        .collect::<HashSet<_>>();
+    if !deleted_ids.is_empty() {
+        for diagram in load_diagrams(db, workspace_id)? {
+            if diagram.language == "mermaid"
+                && diagram
+                    .attached_to_external_id
+                    .as_ref()
+                    .is_some_and(|id| deleted_ids.contains(id))
+            {
+                writes.push(target("design.uml", &diagram.key, true));
+                deleted_ids.insert(diagram.key);
+            }
+        }
+        for binding in load_bindings(db, workspace_id)? {
+            if deleted_ids.contains(&binding.design_external_id) {
+                writes.push(target(
+                    "design.binding",
+                    &format!(
+                        "{}|{}|{}",
+                        binding.design_external_id, binding.target_type, binding.target
+                    ),
+                    true,
+                ));
+            }
+        }
+        for mockup in mockups::load_summaries(db, project_id)? {
+            if deleted_ids.contains(&mockup.attached_to_external_id) {
+                writes.push(target("mockup.accepted", &mockup.external_id, true));
+                writes.push(target("mockup.working", &mockup.external_id, true));
+            }
+        }
+        writes.sort_by(|a, b| (&a.kind, &a.id).cmp(&(&b.kind, &b.id)));
+        writes.dedup_by(|a, b| a.kind == b.kind && a.id == b.id);
+    }
     Ok((writes, reads))
 }
 
@@ -1213,7 +1350,7 @@ fn resolve_design_identity(
     db: &Connection,
     workspace_id: i64,
     external_id: &str,
-) -> Result<(String, String), String> {
+) -> Result<Option<(String, String)>, String> {
     let id = external_id.trim();
     if db
         .query_row(
@@ -1225,7 +1362,7 @@ fn resolve_design_identity(
         .map_err(|error| error.to_string())?
         .is_some()
     {
-        return Ok(("design.element".to_string(), id.to_string()));
+        return Ok(Some(("design.element".to_string(), id.to_string())));
     }
     if db
         .query_row(
@@ -1237,9 +1374,21 @@ fn resolve_design_identity(
         .map_err(|error| error.to_string())?
         .is_some()
     {
-        return Ok(("design.relationship".to_string(), id.to_string()));
+        return Ok(Some(("design.relationship".to_string(), id.to_string())));
     }
-    Err(format!("Unknown attached design resource '{id}'"))
+    if db
+        .query_row(
+            "SELECT 1 FROM diagrams WHERE workspace_id=?1 AND key=?2 AND kind='mermaid'",
+            params![workspace_id, id],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?
+        .is_some()
+    {
+        return Ok(Some(("design.uml".to_string(), id.to_string())));
+    }
+    Ok(None)
 }
 
 fn apply_change(
@@ -2784,6 +2933,7 @@ fn failed_save(
         revision,
         changed_count: 0,
         errors: vec![correction(code, message, request)],
+        read_tokens: Vec::new(),
     }
 }
 

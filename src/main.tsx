@@ -1357,19 +1357,22 @@ function DesignBrowser({
             placeholder={healthFilter ? "Filter these elements" : "Filter design"}
             value={healthFilter ? healthElementQuery : query}
           />
-          <button
-            aria-label="Rescan design state"
-            className="design-search-action"
-            disabled={rescanningHealth}
-            onClick={rescanDesignHealth}
-            title="Re-check attachments and file bindings against the source tree"
-            type="button"
-          >
-            <RefreshCw size={15} />
-          </button>
         </div>
 
-        <div className="design-state-filters" role="group" aria-label="Design to code state">
+        <section className="design-state-panel" aria-label="Design to code state">
+          <div className="design-state-heading">
+            <span>{payload.designHealth.summary}</span>
+            <button
+              disabled={rescanningHealth}
+              onClick={rescanDesignHealth}
+              title="Re-check attachments and file bindings against the source tree"
+              type="button"
+            >
+              <RefreshCw size={14} />
+              {rescanningHealth ? "Scanning…" : "Rescan"}
+            </button>
+          </div>
+          <div className="design-state-filters" role="group" aria-label="Browse elements by state">
           {DESIGN_HEALTH_STATES.map((state) => {
             const selected = healthFilter === state;
             return (
@@ -1397,7 +1400,8 @@ function DesignBrowser({
               </button>
             );
           })}
-        </div>
+          </div>
+        </section>
 
         {healthFilter ? (
           <div className="design-list">
@@ -1429,22 +1433,6 @@ function DesignBrowser({
                     {element.elementType}
                     {element.detail ? ` · ${element.detail}` : ""}
                   </span>
-                  {element.files.length > 0 ? (
-                    <ul className="design-state-files">
-                      {element.files.map((file) => (
-                        <li key={file}>{file}</li>
-                      ))}
-                    </ul>
-                  ) : null}
-                  {element.broken.length > 0 ? (
-                    <ul className="design-state-files broken">
-                      {element.broken.map((binding) => (
-                        <li key={`${binding.targetType}:${binding.target}`}>
-                          {binding.targetType} {binding.target} — {binding.detail}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
                   <span>{element.nextAction}</span>
                 </button>
               ))
@@ -1701,6 +1689,7 @@ function DesignBrowser({
       </section>
 
       <DesignInspector
+        designHealthByElement={healthByElement}
         elements={payload.designElements}
         projectId={payload.projectId}
         relationships={payload.designRelationships}
@@ -2712,6 +2701,7 @@ function sanitizeViewKey(value: string): string {
 }
 
 function DesignInspector({
+  designHealthByElement,
   elements,
   projectId,
   relationships,
@@ -2723,6 +2713,7 @@ function DesignInspector({
   onError,
   onJumpToFeatures,
 }: {
+  designHealthByElement: Map<string, DesignHealthElement>;
   elements: DesignElement[];
   projectId: string;
   relationships: DesignRelationship[];
@@ -2738,6 +2729,7 @@ function DesignInspector({
     <aside className="design-inspector-panel">
       {selectedElement ? (
         <ElementInspector
+          designHealth={designHealthByElement.get(selectedElement.externalId) ?? null}
           element={selectedElement}
           elements={elements}
           projectId={projectId}
@@ -2815,6 +2807,7 @@ function BranchInspector({
 }
 
 function ElementInspector({
+  designHealth,
   element,
   elements,
   projectId,
@@ -2823,6 +2816,7 @@ function ElementInspector({
   onError,
   onJumpToFeatures,
 }: {
+  designHealth: DesignHealthElement | null;
   element: DesignElement;
   elements: DesignElement[];
   projectId: string;
@@ -2833,6 +2827,12 @@ function ElementInspector({
 }) {
   const outgoing = relationships.filter((relationship) => relationship.sourceExternalId === element.externalId);
   const incoming = relationships.filter((relationship) => relationship.destinationExternalId === element.externalId);
+
+  function openBoundFile(relativePath: string) {
+    invoke("open_bound_file", { projectId, relativePath }).catch((reason) =>
+      onError(formatMutationError(reason)),
+    );
+  }
 
   function save(changes: Partial<DesignElement>) {
     const updatedElement = { ...element, ...changes };
@@ -2897,6 +2897,44 @@ function ElementInspector({
           />
         </label>
       </div>
+
+      <InspectorSection title="Source Files">
+        {!designHealth ? (
+          <p className="inspector-note">
+            Not checked yet. Run Rescan in the design index to check this element against the source tree.
+          </p>
+        ) : (
+          <>
+            <p className={`inspector-health design-health-text-${designHealth.state}`}>
+              <span className={`design-state-dot design-state-${designHealth.state}`} />
+              {designHealth.state} — {designHealth.nextAction}
+            </p>
+            {designHealth.files.length > 0 ? (
+              <ul className="inspector-file-list">
+                {designHealth.files.map((file) => (
+                  <li key={file}>
+                    <button onClick={() => openBoundFile(file)} title={`Open ${file}`} type="button">
+                      {file}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {designHealth.broken.length > 0 ? (
+              <ul className="inspector-file-list broken">
+                {designHealth.broken.map((binding) => (
+                  <li key={`${binding.targetType}:${binding.target}`}>
+                    {binding.targetType} {binding.target} — {binding.detail}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {designHealth.files.length === 0 && designHealth.broken.length === 0 ? (
+              <p className="inspector-note">{designHealth.detail}</p>
+            ) : null}
+          </>
+        )}
+      </InspectorSection>
 
       <InspectorSection title="Connected Facts">
         <RelationshipSummary direction="Outgoing" elements={elements} relationships={outgoing} />

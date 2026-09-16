@@ -535,6 +535,44 @@ fn close_app(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Opens a design-bound file in whatever the system has associated with it, so a file listed in
+/// the inspector is one click from the editor.
+///
+/// The path is resolved against the project folder and refused if it escapes it. The renderer
+/// sends a project-relative path, and this is the boundary where that claim is checked rather
+/// than trusted.
+#[tauri::command]
+fn open_bound_file(
+    project_id: Option<String>,
+    relative_path: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+
+    let project = resolve_project(&state, project_id.as_deref())?;
+    let root = PathBuf::from(&project.folder)
+        .canonicalize()
+        .map_err(|error| format!("Project folder is not reachable: {error}"))?;
+    let candidate = root.join(relative_path.trim().replace('\\', "/"));
+    let resolved = candidate
+        .canonicalize()
+        .map_err(|_| format!("No such file in this project: {}", relative_path.trim()))?;
+    if !resolved.starts_with(&root) {
+        return Err(format!(
+            "Refusing to open a path outside the project folder: {}",
+            relative_path.trim()
+        ));
+    }
+    if !resolved.is_file() {
+        return Err(format!("Not a file: {}", relative_path.trim()));
+    }
+
+    app.opener()
+        .open_path(resolved.to_string_lossy().to_string(), None::<&str>)
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 async fn pick_project_folder(
     current_folder: Option<String>,
@@ -1744,6 +1782,7 @@ pub fn run() {
             close_app,
             close_task,
             rescan_design_health,
+            open_bound_file,
             accept_mockup_proposal,
             create_mockup,
             create_qa_job,

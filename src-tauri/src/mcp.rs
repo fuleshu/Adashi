@@ -1,7 +1,7 @@
 use crate::concurrency::{self, MutationGuard, ResourceExpectation, ResourceIntent};
 use crate::design::{
-    self, DesignBindingsResult, DesignByIdsResult, DesignChange, DesignOverviewResult,
-    DesignSaveResult, DesignScopeResult, DesignSearchResult, ElementDescriptionUpdate,
+    self, DesignChange, DesignOverviewResult, DesignSaveResult, DesignScopeResult,
+    DesignSearchResult, ElementDescriptionUpdate,
 };
 use crate::design_health;
 use crate::grep::{self, GrepParams};
@@ -26,8 +26,9 @@ use rmcp::transport::stdio;
 use rmcp::{serve_server, tool, tool_router};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 mod context;
+mod errors;
 use base64::Engine as _;
 use context::{MemoryContext, RuleInjectionResult};
 use std::path::PathBuf;
@@ -71,7 +72,10 @@ impl AdashiMcpServer {
     /// The router method's body, reachable from other modules' tests without widening the
     /// tool surface itself.
     #[cfg(test)]
-    pub(crate) fn grep_result_for_tests(&self, params: &GrepParams) -> Result<grep::GrepResult, String> {
+    pub(crate) fn grep_result_for_tests(
+        &self,
+        params: &GrepParams,
+    ) -> Result<grep::GrepResult, String> {
         let (_project, db) = self
             .open_project(Some(params.project_name.as_str()))
             .map_err(|error| error.to_string())?;
@@ -467,7 +471,12 @@ struct DesignBindingsParams {
 struct DesignSaveParams {
     /// Configured project name (case-insensitive) or project id.
     project_name: String,
-    guard: MutationGuard,
+    /// Unique mutation id; reuse only for an identical retry.
+    operation_id: String,
+    /// Copy documentId/readToken pairs from complete design reads for existing targets.
+    /// New documents need no token.
+    #[serde(default)]
+    read_tokens: Vec<design::documents::DocumentReadToken>,
     change_intent: String,
     changes: Vec<DesignChange>,
 }
@@ -477,7 +486,8 @@ struct DesignSaveParams {
 struct SetElementDescriptionsParams {
     /// Configured project name (case-insensitive) or project id.
     project_name: String,
-    guard: MutationGuard,
+    operation_id: String,
+    read_tokens: Vec<design::documents::DocumentReadToken>,
     updates: Vec<ElementDescriptionUpdate>,
 }
 
@@ -695,6 +705,7 @@ enum DesignOperation {
     Save,
     GetScope,
     GetByIds,
+    GetDocuments,
     Search,
     GetOverview,
     GetBindings,
@@ -790,14 +801,18 @@ struct DesignParams {
     #[serde(default)]
     #[schemars(schema_with = "nonnegative_count_schema")]
     limit: Option<usize>,
-    /// get_by_ids: stored design ids.
+    /// get_by_ids: stored design ids. get_documents: opaque documentId values from retrieval.
     ids: Option<Vec<String>>,
     /// get_bindings: files to resolve bindings for.
     files: Option<Vec<String>>,
     /// get_bindings: symbols to resolve bindings for.
     symbols: Option<Vec<String>>,
-    /// save: mutation guard.
-    guard: Option<MutationGuard>,
+    /// save/set_element_descriptions: unique mutation id; reuse only for an identical retry.
+    operation_id: Option<String>,
+    /// save/set_element_descriptions: copy documentId/readToken pairs from documents in
+    /// get_by_ids/get_scope/get_bindings/get_documents. Required for existing targets,
+    /// including documents removed by cascading deletes. Creates need no token.
+    read_tokens: Option<Vec<design::documents::DocumentReadToken>>,
     /// save: human intent for the change.
     change_intent: Option<String>,
     /// save: heterogeneous changeset.
@@ -963,7 +978,7 @@ struct IntentsParams {
     ttl_seconds: Option<i64>,
 }
 
-#[tool_router(server_handler)]
+#[tool_router]
 impl AdashiMcpServer {
     fn list_rules(
         &self,
@@ -1053,14 +1068,9 @@ impl AdashiMcpServer {
         } else {
             0
         };
-        let (mut tasks, filtered_total) = tasks::load_task_summaries(
-            &tx,
-            project_row_id,
-            &state_filter,
-            after_id,
-            limit + 1,
-        )
-        .map_err(tool_error)?;
+        let (mut tasks, filtered_total) =
+            tasks::load_task_summaries(&tx, project_row_id, &state_filter, after_id, limit + 1)
+                .map_err(tool_error)?;
         let has_more = tasks.len() > limit as usize;
         tasks.truncate(limit as usize);
         let next_cursor = if has_more {
@@ -1659,14 +1669,9 @@ impl AdashiMcpServer {
         } else {
             None
         };
-        let (mut jobs, filtered_total) = qa::load_job_summaries(
-            &tx,
-            project_row_id,
-            params.query.as_ref(),
-            after,
-            limit + 1,
-        )
-        .map_err(tool_error)?;
+        let (mut jobs, filtered_total) =
+            qa::load_job_summaries(&tx, project_row_id, params.query.as_ref(), after, limit + 1)
+                .map_err(tool_error)?;
         let has_more = jobs.len() > limit as usize;
         jobs.truncate(limit as usize);
         let next_cursor = if has_more {
@@ -2074,8 +2079,11 @@ impl AdashiMcpServer {
     fn design_get_scope(
         &self,
         Parameters(params): Parameters<DesignScopeParams>,
-    ) -> Result<Json<DesignScopeResult>, ErrorData> {
+    ) -> Result<Json<Value>, ErrorData> {
         let (_project, db) = self.open_project(Some(params.project_name.as_str()))?;
+        let db = db
+            .unchecked_transaction()
+            .map_err(|error| tool_error(error.to_string()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let scope = design::load_scope(
             &db,
@@ -2086,7 +2094,9 @@ impl AdashiMcpServer {
             params.include_source.unwrap_or(false),
         )
         .map_err(tool_error)?;
-        Ok(Json(scope))
+        Ok(Json(
+            design::documents::with_documents(&db, project_row_id, scope).map_err(tool_error)?,
+        ))
     }
 
     fn design_search(
@@ -2109,18 +2119,26 @@ impl AdashiMcpServer {
     fn design_get_by_ids(
         &self,
         Parameters(params): Parameters<DesignByIdsParams>,
-    ) -> Result<Json<DesignByIdsResult>, ErrorData> {
+    ) -> Result<Json<Value>, ErrorData> {
         let (_project, db) = self.open_project(Some(params.project_name.as_str()))?;
+        let db = db
+            .unchecked_transaction()
+            .map_err(|error| tool_error(error.to_string()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let result = design::load_by_ids(&db, project_row_id, &params.ids).map_err(tool_error)?;
-        Ok(Json(result))
+        Ok(Json(
+            design::documents::with_documents(&db, project_row_id, result).map_err(tool_error)?,
+        ))
     }
 
     fn design_get_bindings(
         &self,
         Parameters(params): Parameters<DesignBindingsParams>,
-    ) -> Result<Json<DesignBindingsResult>, ErrorData> {
+    ) -> Result<Json<Value>, ErrorData> {
         let (_project, db) = self.open_project(Some(params.project_name.as_str()))?;
+        let db = db
+            .unchecked_transaction()
+            .map_err(|error| tool_error(error.to_string()))?;
         let project_row_id = project_row_id(&db).map_err(tool_error)?;
         let result = design::load_by_bindings(
             &db,
@@ -2129,7 +2147,9 @@ impl AdashiMcpServer {
             &params.symbols.unwrap_or_default(),
         )
         .map_err(tool_error)?;
-        Ok(Json(result))
+        Ok(Json(
+            design::documents::with_documents(&db, project_row_id, result).map_err(tool_error)?,
+        ))
     }
 
     fn design_save(
@@ -2141,7 +2161,10 @@ impl AdashiMcpServer {
         let result = design::save_changes(
             &mut db,
             project_row_id,
-            &params.guard,
+            &design::documents::DocumentGuard {
+                operation_id: params.operation_id,
+                read_tokens: params.read_tokens,
+            },
             &params.change_intent,
             &params.changes,
         )
@@ -2158,7 +2181,10 @@ impl AdashiMcpServer {
         let result = design::set_element_descriptions(
             &mut db,
             project_row_id,
-            &params.guard,
+            &design::documents::DocumentGuard {
+                operation_id: params.operation_id,
+                read_tokens: params.read_tokens,
+            },
             &params.updates,
         )
         .map_err(tool_error)?;
@@ -2227,7 +2253,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_design",
-        description = "Formal C4/UML design, binding, and UI-mockup API. Select an `operation`: save (transactional changeset), get_scope (read a C4 branch), get_by_ids (read explicit ids), search (text search), get_overview (top-down overview), get_bindings (file/symbol bindings), set_element_descriptions (set C4 element descriptions), mockup_list_pending_revisions, mockup_get_revision_context. Required fields are listed per operation in the schema.",
+        description = "Formal C4/UML design, binding, and UI-mockup API. Required fields per operation: save = projectName, operationId, changeIntent, changes; set_element_descriptions = projectName, operationId, readTokens, updates; get_scope = projectName, elementId; get_by_ids/get_documents = projectName, ids; search = projectName, query; get_overview/get_bindings/health/mockup_list_pending_revisions = projectName; mockup_get_revision_context = projectName, externalId. Every changes item needs op, e.g. upsert_element. Before editing existing content, use get_by_ids/get_scope/get_bindings: documents contains the complete editable document, documentId and opaque readToken. Pass copied {documentId,readToken} pairs as readTokens for every changed or deleted existing document, including cascading deletions. Creates need no token. Adashi handles dependency checks internally; no guard/readSet/writeSet. On out_of_date nothing is saved: merge your intended edits into the returned currentDocument and retry with its readToken and a new operationId. Never only replace the token on an old payload. get_documents accepts documentId values for exact full reads. Overview/search are navigation, not writable snapshots. Errors include the complete operation schema.",
         annotations(read_only_hint = true, destructive_hint = false)
     )]
     fn design(
@@ -2236,12 +2262,13 @@ impl AdashiMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         match params.operation {
             DesignOperation::Save => {
-                let guard = required(params.guard, "guard")?;
+                let operation_id = required(params.operation_id, "operationId")?;
                 let change_intent = required(params.change_intent, "changeIntent")?;
                 let changes = required(params.changes, "changes")?;
                 self.design_save(Parameters(DesignSaveParams {
                     project_name: params.project_name,
-                    guard,
+                    operation_id,
+                    read_tokens: params.read_tokens.unwrap_or_default(),
                     change_intent,
                     changes,
                 }))?
@@ -2265,6 +2292,17 @@ impl AdashiMcpServer {
                     ids,
                 }))?
                 .into_call_tool_result()
+            }
+            DesignOperation::GetDocuments => {
+                let ids = required(params.ids, "ids")?;
+                let (_project, db) = self.open_project(Some(params.project_name.as_str()))?;
+                let tx = db
+                    .unchecked_transaction()
+                    .map_err(|error| tool_error(error.to_string()))?;
+                let project_row_id = project_row_id(&tx).map_err(tool_error)?;
+                let documents = design::documents::load_documents(&tx, project_row_id, &ids)
+                    .map_err(tool_error)?;
+                Ok(CallToolResult::structured(json!({"documents":documents})))
             }
             DesignOperation::Search => {
                 let query = required(params.query, "query")?;
@@ -2290,11 +2328,12 @@ impl AdashiMcpServer {
                 }))?
                 .into_call_tool_result(),
             DesignOperation::SetElementDescriptions => {
-                let guard = required(params.guard, "guard")?;
+                let operation_id = required(params.operation_id, "operationId")?;
                 let updates = required(params.updates, "updates")?;
                 self.design_set_element_descriptions(Parameters(SetElementDescriptionsParams {
                     project_name: params.project_name,
-                    guard,
+                    operation_id,
+                    read_tokens: required(params.read_tokens, "readTokens")?,
                     updates,
                 }))?
                 .into_call_tool_result()
@@ -2338,7 +2377,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_tasks",
-        description = "Project task API. Select an `operation`: create, list, update, finish, delete, get. Required fields are listed per operation in the schema.",
+        description = "Project task API. Required fields per operation: create = projectName, operationId, title; list = projectName; update = projectName, operationId, expectedVersion, taskId; finish = projectName, operationId, expectedVersion, taskId, completionMemo; close = projectName, operationId, expectedVersion, taskId; delete = projectName, operationId, expectedVersion, taskId; get = projectName, taskId. expectedVersion is the task version from get/list, never the project revision. Use a unique operationId per mutation and reuse it only for an identical retry. Errors return the full selected operation schema.",
         annotations(read_only_hint = true, destructive_hint = false)
     )]
     fn tasks(
@@ -2436,7 +2475,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_qa",
-        description = "QA job definitions and execution API. Select an `operation`: create_job, update_job, delete_job, list_jobs (bounded job metadata with limit/cursor, never console output), run_jobs, list_runs (bounded run summary, never console output), get_job, get_run (full console output for one job or one run). Required fields are listed per operation in the schema.",
+        description = "QA job definitions and execution API. Required fields per operation: create_job = projectName, operationId, name, command; update_job = projectName, operationId, expectedVersion, qaJobId; delete_job = projectName, operationId, expectedVersion, qaJobId; list_jobs = projectName (query, limit, cursor optional); run_jobs = projectName, operationId, query (e.g. {jobIds:[1]}; {} selects all enabled jobs); list_runs = projectName (limit optional); get_job = projectName, qaJobId; get_run = projectName, qaRunId. Lists return bounded metadata without console output; get_job/get_run return full evidence. expectedVersion is the job version. Use a unique operationId per mutation and reuse it only for an identical retry. Errors return the full selected operation schema.",
         annotations(read_only_hint = false, destructive_hint = true)
     )]
     fn qa(&self, Parameters(params): Parameters<QaParams>) -> Result<CallToolResult, ErrorData> {
@@ -2707,7 +2746,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_intents",
-        description = "Advisory resource-intent coordination API. Select an `operation`: publish (create/renew an expiring intent) or list (live intents after pruning). Required fields are listed per operation in the schema.",
+        description = "Advisory resource-intent coordination API. Required fields per operation: publish = projectName, agentRunId, resourceKind, resourceId, ttlSeconds; list = projectName. Publishing creates or renews an expiring advisory intent; it does not grant write authority.",
         annotations(read_only_hint = true, destructive_hint = false)
     )]
     fn intents(
@@ -2735,6 +2774,33 @@ impl AdashiMcpServer {
                 }))?
                 .into_call_tool_result(),
         }
+    }
+}
+
+#[rmcp::tool_handler]
+impl rmcp::ServerHandler for AdashiMcpServer {
+    async fn call_tool(
+        &self,
+        request: rmcp::model::CallToolRequestParams,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let router = Self::tool_router();
+        // Unknown tools remain protocol errors. Errors from a known tool, including rmcp's
+        // parameter decoder, must reach the caller as terminal tool results with repair help.
+        let Some(tool) = router.get(&request.name).cloned() else {
+            return Err(ErrorData::invalid_params(
+                format!("Unknown Adashi tool '{}'", request.name),
+                None,
+            ));
+        };
+        let arguments = request.arguments.clone().unwrap_or_default();
+        let call = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+        Ok(errors::complete(
+            self,
+            &tool,
+            &arguments,
+            router.call(call).await,
+        ))
     }
 }
 
@@ -2940,7 +3006,12 @@ fn required<T>(value: Option<T>, field: &str) -> Result<T, ErrorData> {
     value.ok_or_else(|| missing_field(field))
 }
 
-fn required_with_help<T>(value: Option<T>, field: &str, operation: &str, help: &str) -> Result<T, ErrorData> {
+fn required_with_help<T>(
+    value: Option<T>,
+    field: &str,
+    operation: &str,
+    help: &str,
+) -> Result<T, ErrorData> {
     value.ok_or_else(|| missing_field_help(field, operation, help))
 }
 
@@ -2987,6 +3058,7 @@ mod tests {
                     "save",
                     "get_scope",
                     "get_by_ids",
+                    "get_documents",
                     "search",
                     "get_overview",
                     "get_bindings",
@@ -2998,7 +3070,9 @@ mod tests {
             ),
             (
                 serde_json::to_value(rmcp::schemars::schema_for!(TasksParams)).unwrap(),
-                vec!["create", "list", "update", "finish", "close", "delete", "get"],
+                vec![
+                    "create", "list", "update", "finish", "close", "delete", "get",
+                ],
             ),
             (
                 serde_json::to_value(rmcp::schemars::schema_for!(QaParams)).unwrap(),
@@ -3078,17 +3152,50 @@ mod tests {
                 &[
                     ("get", &[]),
                     ("append", &["projectName", "noteId", "operationId", "body"]),
-                    ("update", &["projectName", "operationId", "expectedVersion", "memory"]),
-                    ("update_rule", &["projectName", "operationId", "expectedVersion", "rule"]),
+                    (
+                        "update",
+                        &["projectName", "operationId", "expectedVersion", "memory"],
+                    ),
+                    (
+                        "update_rule",
+                        &["projectName", "operationId", "expectedVersion", "rule"],
+                    ),
                 ],
             ),
             (
                 "adashi_rules",
                 &[
                     ("list", &[]),
-                    ("create", &["projectName", "operationId", "name", "enabled", "intend", "hook", "prompt"]),
-                    ("update", &["projectName", "operationId", "expectedVersion", "ruleId", "name", "enabled", "intend", "hook", "prompt"]),
-                    ("delete", &["projectName", "operationId", "expectedVersion", "ruleId"]),
+                    (
+                        "create",
+                        &[
+                            "projectName",
+                            "operationId",
+                            "name",
+                            "enabled",
+                            "intend",
+                            "hook",
+                            "prompt",
+                        ],
+                    ),
+                    (
+                        "update",
+                        &[
+                            "projectName",
+                            "operationId",
+                            "expectedVersion",
+                            "ruleId",
+                            "name",
+                            "enabled",
+                            "intend",
+                            "hook",
+                            "prompt",
+                        ],
+                    ),
+                    (
+                        "delete",
+                        &["projectName", "operationId", "expectedVersion", "ruleId"],
+                    ),
                     ("get_rule_injections", &["projectName", "intend", "hook"]),
                 ],
             ),
@@ -3147,7 +3254,11 @@ mod tests {
             })
         };
         let error = server
-            .memory(params("missing-project-fields", Some("run.example".into()), None))
+            .memory(params(
+                "missing-project-fields",
+                Some("run.example".into()),
+                None,
+            ))
             .expect_err("append without a body must fail");
         let message = error.message.to_string();
         assert!(message.contains("'body'"), "error must name the field: {message}");
@@ -3187,8 +3298,14 @@ mod tests {
         let server = AdashiMcpServer::new(settings_path);
         for run_id in [None, Some("   ".to_string())] {
             server
-                .memory(params("append-run-id-test", run_id, Some("handover body".into())))
-                .unwrap_or_else(|error| panic!("append must survive a null runId: {}", error.message));
+                .memory(params(
+                    "append-run-id-test",
+                    run_id,
+                    Some("handover body".into()),
+                ))
+                .unwrap_or_else(|error| {
+                    panic!("append must survive a null runId: {}", error.message)
+                });
         }
         let (_project, db) = server.open_project(Some("append-run-id-test")).unwrap();
         let notes = memory::load_retained_notes(&db, project_row_id(&db).unwrap()).unwrap();
@@ -3361,7 +3478,7 @@ mod tests {
             serde_json::to_value(rmcp::schemars::schema_for!(SetElementDescriptionsParams))
                 .unwrap();
         assert_eq!(schema["additionalProperties"], json!(false));
-        for field in ["projectName", "guard", "updates"] {
+        for field in ["projectName", "operationId", "readTokens", "updates"] {
             assert!(schema["required"]
                 .as_array()
                 .unwrap()
@@ -3562,12 +3679,14 @@ mod tests {
 
         let server = AdashiMcpServer::new(settings_path);
         let listed = server
-            .list_tasks(rmcp::handler::server::wrapper::Parameters(ListTasksParams {
-                project_name: project.name.clone(),
-                states: None,
-                limit: None,
-                cursor: None,
-            }))
+            .list_tasks(rmcp::handler::server::wrapper::Parameters(
+                ListTasksParams {
+                    project_name: project.name.clone(),
+                    states: None,
+                    limit: None,
+                    cursor: None,
+                },
+            ))
             .unwrap()
             .0;
         assert_eq!(listed.tasks.len(), 1, "the unclaimed task is visible");
@@ -3595,24 +3714,28 @@ mod tests {
         drop(db);
 
         let hidden = server
-            .list_tasks(rmcp::handler::server::wrapper::Parameters(ListTasksParams {
-                project_name: project.name.clone(),
-                states: None,
-                limit: None,
-                cursor: None,
-            }))
+            .list_tasks(rmcp::handler::server::wrapper::Parameters(
+                ListTasksParams {
+                    project_name: project.name.clone(),
+                    states: None,
+                    limit: None,
+                    cursor: None,
+                },
+            ))
             .unwrap()
             .0;
         assert!(hidden.tasks.is_empty(), "{:?}", hidden.tasks);
         assert_eq!(hidden.closed_hidden, 1, "the omission must be stated");
 
         let explicit = server
-            .list_tasks(rmcp::handler::server::wrapper::Parameters(ListTasksParams {
-                project_name: project.name.clone(),
-                states: Some(vec![tasks::TaskState::Closed]),
-                limit: None,
-                cursor: None,
-            }))
+            .list_tasks(rmcp::handler::server::wrapper::Parameters(
+                ListTasksParams {
+                    project_name: project.name.clone(),
+                    states: Some(vec![tasks::TaskState::Closed]),
+                    limit: None,
+                    cursor: None,
+                },
+            ))
             .unwrap()
             .0;
         assert_eq!(explicit.tasks.len(), 1);

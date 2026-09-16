@@ -1206,6 +1206,44 @@ mod tests {
         assert_eq!(recorded_counts(&db, 1).unwrap().waivers, 1);
     }
 
+    /// Refreshes this workspace's real database in place, so the design view shows the file lists
+    /// without waiting for a manual rescan.
+    ///
+    /// Run explicitly:
+    /// `cargo test --lib --no-default-features design_health::tests::refresh_live -- --ignored --nocapture`
+    #[test]
+    #[ignore = "writes the recorded check for this workspace's real project database"]
+    fn refresh_live_project_health() {
+        // Read the settings text rather than going through load_or_init, which normalises and
+        // writes the user's settings file back. This uses the folder out of it and writes only
+        // inside the workspace.
+        let settings_path = crate::settings::settings_path();
+        let settings: crate::settings::AppSettings =
+            serde_json::from_str(&fs::read_to_string(&settings_path).expect("settings readable"))
+                .expect("settings parse");
+        let project = crate::project::resolve_project_from_settings(&settings, Some("adashi"))
+            .expect("the workspace project must be configured");
+        let mut db = crate::project::open_project_database(&project).unwrap();
+        // Run the real migrations, which is also what adds the files column to a database that
+        // predates it.
+        crate::schema::migrate(&mut db).unwrap();
+        let project_id: i64 = db
+            .query_row("SELECT id FROM projects LIMIT 1", [], |row| row.get(0))
+            .unwrap();
+
+        let result =
+            scan_and_record(&db, project_id, std::path::Path::new(&project.folder)).unwrap();
+        println!("{}", result.summary);
+        let recorded = recorded_states(&db, project_id).unwrap();
+        println!(
+            "recorded elements with files: {}",
+            recorded.values().filter(|(_, files)| !files.is_empty()).count()
+        );
+        for (external_id, (_, files)) in recorded.iter().filter(|(_, (_, files))| !files.is_empty()).take(5) {
+            println!("  {external_id} owns {files:?}");
+        }
+    }
+
     /// Runs the scan against this workspace's real design and real source tree, on a copy of the
     /// live database, and prints what it finds.
     ///
@@ -1233,6 +1271,41 @@ mod tests {
         println!("{}", result.summary);
         println!("not checked: {}", result.not_checked);
         println!();
+
+        let resolved: Vec<&ElementFinding> = result
+            .elements
+            .iter()
+            .filter(|element| element.state == ElementHealth::Resolved)
+            .collect();
+        let resolved_with_files = resolved
+            .iter()
+            .filter(|element| !element.files.is_empty())
+            .count();
+        println!("resolved elements: {} ({resolved_with_files} with files)", resolved.len());
+        for element in resolved.iter().take(5) {
+            println!("  {} owns {:?}", element.design_external_id, element.files);
+        }
+        // The recorded files are what the design view shows, so an empty file list means an
+        // element appears to own nothing even though its bindings resolved.
+        let recorded = recorded_states(&db, project_id).unwrap();
+        let recorded_with_files = recorded.values().filter(|(_, files)| !files.is_empty()).count();
+        // A broken element can still own files: it has some bindings that resolve and some that do
+        // not. So the recorded count is compared against every element that owns something, not
+        // against the resolved ones alone.
+        let scanned_with_files = result
+            .elements
+            .iter()
+            .filter(|element| !element.files.is_empty())
+            .count();
+        println!("recorded elements with files: {recorded_with_files}");
+        assert!(
+            resolved_with_files > 0,
+            "a resolved element must own at least one file, or the view has nothing to show"
+        );
+        assert_eq!(
+            recorded_with_files, scanned_with_files,
+            "every scanned file list must survive into the recorded rows the view reads"
+        );
         for element in result
             .elements
             .iter()

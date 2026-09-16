@@ -63,7 +63,7 @@ class Client:
             if response.get("id") == self.sequence:
                 return response
 
-    def call(self, name, **arguments):
+    def call(self, name, /, **arguments):
         return self.request("tools/call", {"name": name, "arguments": {"projectName": "Fixture", **arguments}})
 
     def close(self):

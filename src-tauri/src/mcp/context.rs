@@ -151,6 +151,12 @@ pub fn build(
             result.push(key, "fixedPrompt", Some(prompt.version), &prompt.prompt);
         }
         result.push(
+            "design.write-protocol",
+            "protocol",
+            Some(1),
+            crate::design::documents::WRITE_PROTOCOL,
+        );
+        result.push(
             "design.index",
             "designIndex",
             None,

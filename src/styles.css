@@ -461,10 +461,10 @@ button {
 .design-index-panel {
   display: grid;
   gap: 12px;
-  /* Four rows: C4 level tabs, search, design-state tabs, then the tree or the state listing.
-     Only the last row flexes; giving the state row a flexible track is what stretched it into
-     the tree's space and clipped its labels. */
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  /* Five rows: C4 level tabs, search, the design-state control, then the tree or the state
+     listing. Only the last row flexes; giving a control row a flexible track is what stretched
+     it into the tree's space and clipped its labels. */
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
   padding: 14px;
@@ -550,25 +550,72 @@ button {
   overflow-wrap: anywhere;
 }
 
-/* The files an element owns, and the bindings that do not resolve. Shown in the state listing so
-   a resolved element has something to point at: the point of the check is the link to the code. */
-.design-state-files {
-  display: grid;
-  gap: 1px;
-  list-style: none;
+/* Source files and bindings belong in the inspector, where an element is being looked at, not in
+   the index panel. These styles live with the inspector sections. */
+.inspector-health {
+  align-items: center;
+  display: flex;
+  gap: 6px;
   margin: 0;
+  font-size: 12px;
+}
+
+.design-health-text-broken {
+  color: #a33a3a;
+}
+
+.design-health-text-orphaned {
+  color: #b06a1f;
+}
+
+.design-health-text-unmapped {
+  color: #617170;
+}
+
+.design-health-text-resolved {
+  color: #437a45;
+}
+
+.inspector-file-list {
+  display: grid;
+  gap: 2px;
+  list-style: none;
+  margin: 6px 0 0;
   padding: 0;
 }
 
-.design-state-files li {
+.inspector-file-list li {
   color: #47535f;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   overflow-wrap: anywhere;
 }
 
-.design-state-files.broken li {
+.inspector-file-list button {
+  background: transparent;
+  border: 0;
+  color: #2f6f6d;
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  padding: 0;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.inspector-file-list button:hover {
+  color: #163434;
+}
+
+.inspector-file-list.broken li {
   color: #a33a3a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.inspector-note {
+  color: #617170;
+  font-size: 12px;
+  margin: 0;
 }
 
 /* The way out of the state listing, next to the heading that says which state it is. */
@@ -3079,9 +3126,53 @@ code {
   white-space: nowrap;
 }
 
-/* Design-to-code state. A wrapping chip row under the search field, matching the C4 level tabs.
-   It wraps rather than dividing the width into equal columns, because a narrow panel cannot fit
-   four labels and clipping the state name would hide the only thing the chip says. */
+/* Design-to-code state: a labelled control with the summary, then a wrapping chip row for
+   browsing by state. Rescan is a real button with a label, because an icon alone inside the
+   search field read as decoration and got lost among the panels. */
+.design-state-panel {
+  display: grid;
+  gap: 6px;
+}
+
+.design-state-heading {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.design-state-heading span {
+  color: #617170;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.design-state-heading button {
+  align-items: center;
+  background: #fbfaf6;
+  border: 1px solid #d4cebf;
+  border-radius: 6px;
+  color: #163434;
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  gap: 5px;
+  padding: 5px 9px;
+  white-space: nowrap;
+}
+
+.design-state-heading button:hover:not(:disabled) {
+  background: #f1eee7;
+  border-color: #b9b2a4;
+}
+
+.design-state-heading button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .design-state-filters {
   align-content: start;
   display: flex;
@@ -3138,22 +3229,6 @@ code {
   background: #437a45;
 }
 
-.design-search-action {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-left: 1px solid #d4cebf;
-  color: #43514f;
-  cursor: pointer;
-  display: flex;
-  flex: none;
-  padding: 0 0 0 8px;
-}
-
-.design-search-action:disabled {
-  cursor: default;
-  opacity: 0.5;
-}
 
 @media (max-width: 1180px) {
   .workspace-grid,
