@@ -1,6 +1,6 @@
 # Adashi Rule Injection
 
-This workspace is configured as an Adashi project. Adashi holds the project's formal design, its memory, its tasks and its rules, and exposes them to you over MCP. Follow this file as the project's standing workflow. Do not spend time weighing whether Adashi is present or worth consulting: calling `adashi_rules` settles that faster than reasoning about it does.
+This workspace is configured as an Adashi project. Adashi holds its formal design, memory, tasks, QA and rules over MCP. This file contains the shared Adashi workflow. Lifecycle injections supply project-specific instructions and current project context; they are not the API manual.
 
 Before starting work on a user request, classify the request intend as exactly one of:
 
@@ -32,15 +32,31 @@ For multi-task requests, call `task.start` and `task.end` for each task using th
 
 If a call fails because the MCP surface is not configured, continue without Adashi rule injection and mention the limitation only when it affects the requested outcome. Any other failure is a real failure: report it rather than working around it.
 
+## Operation help
+
+The grouped tools keep their descriptions short. Their combined input schema cannot express every operation's required fields. Before using an unfamiliar operation, retrieve its contract with `adashi_help`; do not deliberately submit an incomplete write to discover its parameters.
+
+```json
+{"tool":"adashi_qa","operation":"create_job"}
+```
+
+For design saves, request only the change types you need:
+
+```json
+{"tool":"adashi_design","operation":"save","changeTypes":["upsert_uml"]}
+```
+
+Help returns the exact selected schema, required fields, nested definitions, examples and workflow. Omit `operation` to list a tool's operations; `adashi_grep` needs no operation. Help requires no project and performs no writes. Use its current contract instead of remembered syntax or old examples. Replace example identities and content with the intended values; copy versions and tokens from actual reads. Keep the selected help while it remains in active context; retrieve it again after context loss or a server upgrade, rather than loading every operation into each chat.
+
+For mutations, use a unique `operationId` and reuse it only for an identical retry. Task, QA, rule and memory updates use the resource's `expectedVersion` from retrieval, never the project revision. On a stale version, reread and reconcile the resource before retrying. Design writes use document tokens as described below. A rejected write is not persisted; correct the reported parameters or source, and use the returned operation schema instead of guessing. Never report completion for a rejected write.
+
 ## Project memory
 
 The injected prompt carries the current project summary within its own budget. Treat it as the project's current constraints, not as history: superseded handovers are excluded, and retrieved historical notes are dated evidence rather than current state. When the run needs a prior decision, constraint or blocker that the summary does not cover, retrieve it with the `adashi_memory` get operation using `query`, `runId`, or `taskId`.
 
-Writing a note is optional: keep only important decisions, non-obvious constraints, or unresolved blockers with a concrete next step. The `append` operation requires `projectName`, `noteId`, `operationId` and `body`; pass `runId` as well, because retained notes are found again by that exact value, and an omitted or null `runId` is stored as the `operationId` instead:
+If the summary was omitted for size and the work needs project constraints, retrieve it before proceeding. Operational requests can select `memoryContext: "protocolOnly"` to omit summary context. Historical notes are not injected; use `includeSuperseded` only when their provenance matters.
 
-```json
-{"projectName": "<project>", "operation": "append", "noteId": "handover-<topic>-<yyyymmdd>", "operationId": "handover-<topic>-<yyyymmdd>-a", "runId": "run.<topic>-<yyyymmdd>", "body": "<what changed, why, and the next step>"}
-```
+Writing a note is optional: keep only important decisions, non-obvious constraints, or unresolved blockers with a concrete next step. Skip routine reports, successful checks and facts already in design, tasks or QA. Keep each handover within 1,000 characters and identify its run and optional task. Only an authorized coordinator may replace the shared summary or supersede reviewed notes. Retrieve operation help for write fields and retention limits.
 
 ## Formal design
 
@@ -49,6 +65,12 @@ The injected prompt carries a bounded design index: ids, names, element types an
 - Retrieve the design bound to the files and symbols you are about to change with the `adashi_design` get_bindings operation, then the relevant scope with get_scope or explicit ids with get_by_ids.
 - Align the change with the responsibilities and relationships you retrieve. If the implementation needs a different structure, report the mismatch or raise it with the user instead of drifting away from the model.
 - If the design itself must change, persist the coherent change through the `adashi_design` save operation. Design conclusions do not belong in chat notes or memory.
+
+Choose UML artifacts using the retrieved inventory and the question being modeled: class for static structure/contracts, sequence for interactions, flow for workflows, and state for lifecycles. Attach each typed Mermaid artifact to a C4 element or relationship. UI mockups are separate SVG artifacts. Adashi validates containment, relationships, attachments and formal source before storing a coherent transaction.
+
+Before changing or deleting existing design content, read its complete document through get_by_ids, get_scope, get_bindings or get_documents. Each `documents` entry contains the full editable `document`, an opaque `documentId`, and its `readToken`. Preserve fields you intend to keep and copy the documentId/readToken pairs into the write's `readTokens`. Include tokens for dependent documents that a cascading delete removes. New identities need no token; Adashi handles dependency checks. Do not construct a `guard`, read/write sets or `expectedRevision`.
+
+On `out_of_date`, nothing was saved. Merge your intended edits into the returned full `currentDocument`, preserving the other changes, then retry with its new `readToken` and a new operationId. Never just replace the token on an old payload. Overview, index and search snippets are navigation aids, not editable snapshots.
 
 Generated architecture blocks may also appear in instruction files such as this one, between the raw marker `adashi:architecture:begin` and its matching `adashi:architecture:end`. Adashi renders them from the design model, so a hand edit there is transient and will be overwritten:
 

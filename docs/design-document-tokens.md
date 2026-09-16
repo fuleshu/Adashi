@@ -110,8 +110,11 @@ Use a new operation id for a merged request. Every new request checks tokens aga
 Old receipts without a request fingerprint cannot safely prove an identical retry;
 the error asks the caller to use a new operation id.
 
-The current write protocol is injected separately from saved custom prompts, so
-older `expectedRevision` or guard examples do not describe the active API.
+The shared write workflow is in `agents_template.md`; exact operation parameters
+and examples are available through `adashi_help`. Startup carries project-specific
+instructions and context, not a generic write manual. Known obsolete built-in
+prompts (including `expectedRevision` guidance) migrate to empty defaults; custom
+project instructions remain intact.
 Reconnect MCP clients after installing the rebuilt binary; frozen tool catalogs
 must be refreshed. For Aworkit, start a new chat after refreshing MCP discovery.
 

@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 mod context;
 mod errors;
+mod help;
 use base64::Engine as _;
 use context::{MemoryContext, RuleInjectionResult};
 use std::path::PathBuf;
@@ -2252,8 +2253,20 @@ impl AdashiMcpServer {
     }
 
     #[tool(
+        name = "adashi_help",
+        description = "Read exact requirements, schema, examples and workflow for one tool operation before using it. Omit operation to list operations; changeTypes narrows design-save help. No project or writes required.",
+        annotations(read_only_hint = true, destructive_hint = false)
+    )]
+    fn help(
+        &self,
+        Parameters(params): Parameters<help::HelpParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        help::get(params)
+    }
+
+    #[tool(
         name = "adashi_design",
-        description = "Formal C4/UML design, binding, and UI-mockup API. Required fields per operation: save = projectName, operationId, changeIntent, changes; set_element_descriptions = projectName, operationId, readTokens, updates; get_scope = projectName, elementId; get_by_ids/get_documents = projectName, ids; search = projectName, query; get_overview/get_bindings/health/mockup_list_pending_revisions = projectName; mockup_get_revision_context = projectName, externalId. Every changes item needs op, e.g. upsert_element. Before editing existing content, use get_by_ids/get_scope/get_bindings: documents contains the complete editable document, documentId and opaque readToken. Pass copied {documentId,readToken} pairs as readTokens for every changed or deleted existing document, including cascading deletions. Creates need no token. Adashi handles dependency checks internally; no guard/readSet/writeSet. On out_of_date nothing is saved: merge your intended edits into the returned currentDocument and retry with its readToken and a new operationId. Never only replace the token on an old payload. get_documents accepts documentId values for exact full reads. Overview/search are navigation, not writable snapshots. Errors include the complete operation schema.",
+        description = "Read and edit formal C4/UML design, bindings and UI mockups. Use adashi_help with tool and operation for exact requirements and examples before an unfamiliar call.",
         annotations(read_only_hint = true, destructive_hint = false)
     )]
     fn design(
@@ -2361,7 +2374,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_grep",
-        description = "Cross-domain search over project content: design (C4 elements, relationships, diagrams, mockups, bindings), tasks, and project memory. One match per line as grep output, with a drillable locator prefix: design:<externalId> opens the design get_scope operation, task:<id> opens the tasks get operation, memory:<noteId> opens the memory get operation with its noteId filter. The pattern is tolerant (case-insensitive, whitespace-separated terms are AND, quoted phrases are exact substrings, key:value clauses filter on in/file/type/state/limit and an unrecognised key is searched as text). An empty pattern returns the top-layer overview with counts. QA and rules are project tooling and are not searched.",
+        description = "Search design, tasks and memory using bounded grep-style results with drillable locators. Use adashi_help with tool=adashi_grep for pattern syntax.",
         annotations(read_only_hint = true, destructive_hint = false)
     )]
     fn grep(
@@ -2377,7 +2390,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_tasks",
-        description = "Project task API. Required fields per operation: create = projectName, operationId, title; list = projectName; update = projectName, operationId, expectedVersion, taskId; finish = projectName, operationId, expectedVersion, taskId, completionMemo; close = projectName, operationId, expectedVersion, taskId; delete = projectName, operationId, expectedVersion, taskId; get = projectName, taskId. expectedVersion is the task version from get/list, never the project revision. Use a unique operationId per mutation and reuse it only for an identical retry. Errors return the full selected operation schema.",
+        description = "Create, track, finish and close project tasks. Use adashi_help with tool and operation for exact requirements, transitions and examples before an unfamiliar call.",
         annotations(read_only_hint = true, destructive_hint = false)
     )]
     fn tasks(
@@ -2475,7 +2488,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_qa",
-        description = "QA job definitions and execution API. Required fields per operation: create_job = projectName, operationId, name, command; update_job = projectName, operationId, expectedVersion, qaJobId; delete_job = projectName, operationId, expectedVersion, qaJobId; list_jobs = projectName (query, limit, cursor optional); run_jobs = projectName, operationId, query (e.g. {jobIds:[1]}; {} selects all enabled jobs); list_runs = projectName (limit optional); get_job = projectName, qaJobId; get_run = projectName, qaRunId. Lists return bounded metadata without console output; get_job/get_run return full evidence. expectedVersion is the job version. Use a unique operationId per mutation and reuse it only for an identical retry. Errors return the full selected operation schema.",
+        description = "Define QA jobs and execute selected jobs. Use adashi_help with tool and operation for exact requirements and examples before an unfamiliar call.",
         annotations(read_only_hint = false, destructive_hint = true)
     )]
     fn qa(&self, Parameters(params): Parameters<QaParams>) -> Result<CallToolResult, ErrorData> {
@@ -2580,7 +2593,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_memory",
-        description = "Project memory API. Select an `operation`: get (summary, protocol and notes), append (add a handover note), update (coordinator summary replacement), update_rule (memory protocol rule). Required fields per operation, all required unless marked optional: get = projectName (query, noteId, runId, taskId, includeSuperseded optional); append = projectName, noteId, operationId, body (runId, taskId optional), where runId is the run id that produced the note, e.g. run.<topic>-<yyyymmdd>, and defaults to operationId because retained notes are retrieved by this exact value; update = projectName, operationId, expectedVersion, memory (supersededNoteIds optional); update_rule = projectName, operationId, expectedVersion, rule.",
+        description = "Read project memory and record durable handovers. Use adashi_help with tool and operation for exact requirements, retention and examples before an unfamiliar call.",
         annotations(read_only_hint = true, destructive_hint = false)
     )]
     fn memory(
@@ -2665,7 +2678,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_rules",
-        description = "Lifecycle rule prompts and injection API. Select an `operation`: list, create, update, delete, get_rule_injections. Required fields per operation, all required unless marked optional: list = projectName; get_rule_injections = projectName, intend, hook (memoryContext optional); create = projectName, operationId, name, enabled, intend, hook, prompt; update = projectName, operationId, expectedVersion, ruleId, name, enabled, intend, hook, prompt; delete = projectName, operationId, expectedVersion, ruleId.",
+        description = "Retrieve lifecycle injections and manage project-specific rules. Use adashi_help with tool and operation for exact requirements and examples before an unfamiliar call.",
         annotations(read_only_hint = true, destructive_hint = false)
     )]
     fn rules(
@@ -2746,7 +2759,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_intents",
-        description = "Advisory resource-intent coordination API. Required fields per operation: publish = projectName, agentRunId, resourceKind, resourceId, ttlSeconds; list = projectName. Publishing creates or renews an expiring advisory intent; it does not grant write authority.",
+        description = "Publish or list expiring advisory resource intents. These are not locks. Use adashi_help with tool and operation for exact requirements and examples.",
         annotations(read_only_hint = true, destructive_hint = false)
     )]
     fn intents(
@@ -3139,94 +3152,13 @@ mod tests {
         assert_eq!(advertised, registered);
     }
 
-    /// A capability tool publishes one flat argument schema, so a caller can only discover an
-    /// operation's required fields from the tool description. Those requirements are asserted
-    /// per operation, because a silently dropped field name turns every append into a failed
-    /// call that the caller cannot self-correct.
     #[test]
-    fn capability_descriptions_declare_each_operation_s_required_fields() {
-        let tools = AdashiMcpServer::tool_router().list_all();
-        let cases: [(&str, &[(&str, &[&str])]); 2] = [
-            (
-                "adashi_memory",
-                &[
-                    ("get", &[]),
-                    ("append", &["projectName", "noteId", "operationId", "body"]),
-                    (
-                        "update",
-                        &["projectName", "operationId", "expectedVersion", "memory"],
-                    ),
-                    (
-                        "update_rule",
-                        &["projectName", "operationId", "expectedVersion", "rule"],
-                    ),
-                ],
-            ),
-            (
-                "adashi_rules",
-                &[
-                    ("list", &[]),
-                    (
-                        "create",
-                        &[
-                            "projectName",
-                            "operationId",
-                            "name",
-                            "enabled",
-                            "intend",
-                            "hook",
-                            "prompt",
-                        ],
-                    ),
-                    (
-                        "update",
-                        &[
-                            "projectName",
-                            "operationId",
-                            "expectedVersion",
-                            "ruleId",
-                            "name",
-                            "enabled",
-                            "intend",
-                            "hook",
-                            "prompt",
-                        ],
-                    ),
-                    (
-                        "delete",
-                        &["projectName", "operationId", "expectedVersion", "ruleId"],
-                    ),
-                    ("get_rule_injections", &["projectName", "intend", "hook"]),
-                ],
-            ),
-        ];
-
-        for (tool, operations) in cases {
-            let description = &tools
-                .iter()
-                .find(|tool_definition| tool_definition.name == tool)
-                .unwrap_or_else(|| panic!("{tool} must be advertised"))
-                .description;
-            let description = description
-                .as_deref()
-                .unwrap_or_else(|| panic!("{tool} must have a description"));
-            assert!(
-                !description.contains("Required fields are listed per operation in the schema"),
-                "{tool} must write out its per-operation requirements instead of pointing at the schema"
-            );
-            for (operation, fields) in operations {
-                let prefix = format!("{operation} = ");
-                let start = description
-                    .find(&prefix)
-                    .unwrap_or_else(|| panic!("{tool} description must name its `{operation}` operation's required fields"));
-                let tail = &description[start + prefix.len()..];
-                let listed = tail.split(';').next().unwrap_or(tail);
-                for field in *fields {
-                    assert!(
-                        listed.contains(field),
-                        "{tool} `{operation}` must list required field `{field}`; listed: {listed}"
-                    );
-                }
+    fn compact_descriptions_make_operation_help_discoverable() {
+        for tool in AdashiMcpServer::tool_router().list_all() {
+            let description = tool.description.as_deref().unwrap();
+            assert!(description.len() <= 240, "{}", tool.name);
+            if tool.name != "adashi_help" {
+                assert!(description.contains("adashi_help"));
             }
         }
     }

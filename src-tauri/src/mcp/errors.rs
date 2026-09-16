@@ -58,7 +58,7 @@ fn operation_schema(tool: &str, operation: &str) -> Option<Value> {
     })
 }
 
-fn contract(tool: &Tool, arguments: &JsonObject) -> Value {
+pub(super) fn contract(tool: &Tool, arguments: &JsonObject) -> Value {
     let operation = arguments.get("operation").and_then(Value::as_str);
     let mut schema = operation
         .and_then(|operation| operation_schema(&tool.name, operation))
@@ -212,7 +212,7 @@ pub(super) fn complete(
     CallToolResult::structured_error(report)
 }
 
-fn example(tool: &str, operation: &str) -> Option<Value> {
+pub(super) fn example(tool: &str, operation: &str) -> Option<Value> {
     Some(match (tool, operation) {
         ("adashi_design", "save") => {
             json!({"projectName":"Your project","operation":"save","operationId":"design-add-container-001","changeIntent":"Add a container under an existing system","changes":[{"op":"upsert_element","externalId":"new-container","parentExternalId":"system-id","elementType":"Container","name":"New container"}]})
@@ -246,7 +246,7 @@ mod tests {
     #[test]
     fn every_advertised_operation_has_a_complete_parameter_contract() {
         for tool in AdashiMcpServer::tool_router().list_all() {
-            if tool.name == "adashi_grep" {
+            if matches!(tool.name.as_ref(), "adashi_grep" | "adashi_help") {
                 continue;
             }
             let published = json!(tool.input_schema);

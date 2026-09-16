@@ -11,6 +11,7 @@ import sqlite3
 
 from check_context_efficiency import Client, ROOT, body, scratch_directory
 from check_design_hash_guard import verify_hash_guard
+from check_operation_help import metrics, verify_help, verify_projectless_help
 
 
 def failure(response, fragment=None):
@@ -95,6 +96,7 @@ def main():
     parser.add_argument("--chat", default="chat.23796a15a4174a9dd2bb23a4729044e6e0b7b15a")
     parser.add_argument("--output", default=str(ROOT / "target/mcp-error-contract.json"))
     options = parser.parse_args()
+    verify_projectless_help(options.binary)
     with scratch_directory() as root:
         settings_dir = root / "Adashi"
         settings_dir.mkdir()
@@ -106,7 +108,8 @@ def main():
         try:
             body(client.call("adashi_tasks", operation="list"))  # Initialize isolated project.
             replayed = replay_history(client, options.history, options.chat) if options.history else []
-            result = {"replayedFailures": replayed, "verification": verify(client),
+            result = {"replayedFailures": replayed, "metrics": metrics(client),
+                      "operationHelp": verify_help(client), "verification": verify(client),
                       "hashGuard": verify_hash_guard(client, options.binary, root)}
         finally:
             client.close()

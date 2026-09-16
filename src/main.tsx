@@ -3705,7 +3705,7 @@ function SettingsView({
                 key={`${hookPrompt.key}-${hookPrompt.updatedAt}`}
                 value={hookPrompt.prompt}
                 onBlur={(prompt) => saveFixedHookPrompt(hookPrompt, prompt)}
-                placeholder="Write the fixed run-start hook prompt..."
+                placeholder="Optional project-specific startup instructions. Leave empty to disable."
                 minHeight="260px"
                 maxHeight="420px"
                 height="320px"
@@ -5102,7 +5102,7 @@ function MemoryView({
           key={`memory-rule-${memory.protocolVersion}`}
           value={memory.rule}
           onBlur={saveRule}
-          placeholder="Write the long-term memory protocol in Markdown..."
+          placeholder="Optional project-specific memory instructions. Leave empty to disable."
           minHeight="180px"
           maxHeight="260px"
           height="260px"

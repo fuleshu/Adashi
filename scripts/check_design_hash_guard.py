@@ -53,8 +53,10 @@ def verify_hash_guard(client, binary, root):
     assert "readTokens" in schema["properties"]
     for intent in ("design", "implementation"):
         injection = body(client.call("adashi_rules", operation="get_rule_injections", intend=intent, hook="run.start"))
-        assert any(section["id"] == "design.write-protocol" for section in injection["sections"])
-        assert "Merge" in injection["injectionPrompt"] or "merge" in injection["injectionPrompt"]
+        assert all(section["id"] != "design.write-protocol" for section in injection["sections"])
+    help_result = body(client.request("tools/call", {"name": "adashi_help", "arguments": {
+        "tool": "adashi_design", "operation": "save", "changeTypes": ["upsert_element"]}}))
+    assert "merge" in json.dumps(help_result).lower()
 
     initial = [{"op": "upsert_element", "externalId": name, "name": name,
                 "elementType": "Container", "parentExternalId": "1"} for name in ("hash-a", "hash-b")]

@@ -28,12 +28,15 @@ const LEGACY_V2_MEMORY_RULE: &str = r#"PROJECT MEMORY PROTOCOL:
 - Keep complete handovers within 1,000 characters. Normal agents must not replace the shared summary. Only an authorized coordinator may update the summary and resolve explicitly reviewed note ids under expectedVersion.
 - Retention is separate: summary <=4,000 characters, <=20 handovers, <=12,000 total characters, oldest removed first. Oversized new writes fail; legacy omissions are explicit."#;
 
-pub const DEFAULT_MEMORY_RULE: &str = r#"PROJECT MEMORY PROTOCOL:
+const LEGACY_V3_MEMORY_RULE: &str = r#"PROJECT MEMORY PROTOCOL:
 - run.start supplies the current summary within a separate 2,000-character budget, never the handover log. For relevant prior decisions, constraints or blockers, call adashi_memory with operation get and query, runId or taskId. General requests may need memory too; operational requests can select memoryContext=protocolOnly.
 - Historical handovers are dated evidence, not authoritative current state. Resolved notes are hidden by default; includeSuperseded=true retrieves their provenance. If summary is omitted, retrieve it before work requiring project constraints.
 - Writing is optional: append only important durable decisions, non-obvious constraints, or unresolved blockers with a concrete next step. Skip routine reports, checks, tool confirmations and facts already in tasks, design or QA.
 - Keep complete handovers within 1,000 characters. Normal agents must not replace the shared summary. Only an authorized coordinator may update the summary and resolve explicitly reviewed note ids under expectedVersion.
 - Retention is separate: summary <=4,000 characters, <=20 handovers, <=12,000 total characters, oldest removed first. Oversized new writes fail; legacy omissions are explicit."#;
+
+// Optional project-specific memory instructions. Shared workflow lives in agents_template.md.
+pub const DEFAULT_MEMORY_RULE: &str = "";
 
 pub const MAX_MEMORY_CHARS: usize = 12_000;
 pub const MAX_SUMMARY_CHARS: usize = 4_000;
@@ -117,8 +120,16 @@ fn maintain_memory(db: &Connection, project_id: i64) -> Result<(), String> {
         LEGACY_UPDATE_MEMORY_RULE,
         LEGACY_BOUNDED_MEMORY_RULE,
         LEGACY_V2_MEMORY_RULE,
+        LEGACY_V3_MEMORY_RULE,
     ]
-    .contains(&legacy_rule.trim());
+    .iter()
+    .any(|legacy| {
+        let normalize = |text: &str| {
+            crate::prompt_hygiene::rewrite_removed_tool_references(text)
+                .unwrap_or_else(|| text.to_string())
+        };
+        normalize(legacy) == normalize(legacy_rule.trim())
+    });
     if migrated {
         db.execute(
             "UPDATE project_memory SET protocol_rule=?1 WHERE project_id=?2",
@@ -458,9 +469,6 @@ pub fn update_memory_rule(
     rule: String,
 ) -> Result<(ProjectMemory, i64), String> {
     let rule = rule.trim();
-    if rule.is_empty() {
-        return Err("Memory rule is required".to_string());
-    }
     if operation_id.trim().is_empty() {
         return Err("operationId is required".to_string());
     }
@@ -654,6 +662,41 @@ mod tests {
             task_id: None,
             body: body.to_string(),
         }
+    }
+
+    #[test]
+    fn custom_memory_instructions_can_be_cleared_without_changing_the_summary() {
+        let mut db = database();
+        db.execute(
+            "UPDATE project_memory SET memory_body='Current project constraints.'",
+            [],
+        )
+        .unwrap();
+        let version = load_memory(&db, 1).unwrap().protocol_version;
+        let (custom, _) = update_memory_rule(
+            &mut db,
+            1,
+            version,
+            "set-custom",
+            "Record audit migration constraints.".into(),
+        )
+        .unwrap();
+        let (cleared, revision) = update_memory_rule(
+            &mut db,
+            1,
+            custom.protocol_version,
+            "clear-custom",
+            "".into(),
+        )
+        .unwrap();
+        assert_eq!(cleared.rule, "");
+        assert_eq!(cleared.memory, "Current project constraints.");
+        assert_eq!(cleared.protocol_version, custom.protocol_version + 1);
+        ensure_project_memory(&db, 1).unwrap();
+        assert_eq!(
+            state::load_project_revision(&db, 1).unwrap().revision,
+            revision
+        );
     }
 
     #[test]

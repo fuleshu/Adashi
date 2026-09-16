@@ -100,7 +100,7 @@ def populate(db_path, fixture):
         for i in range(fixture["tasks"]):
             db.execute("INSERT INTO agent_tasks(project_id,number,title,description,state,completion_memo,created_files,changed_files) VALUES(?,?,?,?,?,?,?,?)",
                        (project_id, i + 1, f"Task {i + 1}", fixture["description"],
-                        "confirmed" if i == 0 else "finished", fixture["description"],
+                        "finished", fixture["description"],
                         json.dumps([f"file-{j}.rs" for j in range(12)]), "[]"))
         for i in range(fixture["notes"]):
             db.execute("INSERT INTO project_memory_notes(project_id,note_id,operation_id,run_id,body) VALUES(?,?,?,?,?)",
@@ -115,7 +115,7 @@ def verify(client, measurements, fixture):
     tools = client.request("tools/list", {})["result"]["tools"]
     by_name = {tool["name"]: tool for tool in tools}
     list_schema = by_name["adashi_tasks"]["inputSchema"]
-    assert '"open"' in json.dumps(list_schema) and '"confirmed"' in json.dumps(list_schema)
+    assert '"todo"' in json.dumps(list_schema) and '"closed"' in json.dumps(list_schema)
     assert body(client.call("adashi_tasks", operation="list", states=[]))["filteredTotal"] == 0
     for args in ({"states": ["invalid"]}, {"states": ["OPEN"]}, {"limit": 0},
                  {"limit": 101}, {"cursor": "invalid"}):
@@ -157,7 +157,7 @@ def verify(client, measurements, fixture):
             again = body(client.call("adashi_rules", operation="get_rule_injections", intend=intend, hook=hook))
             assert result == again
     operational = body(client.call("adashi_rules", operation="get_rule_injections", intend="general", hook="run.start", memoryContext="protocolOnly"))
-    assert [s["kind"] for s in operational["sections"]] == ["protocol"]
+    assert operational["sections"] == [] and operational["status"] == "empty"
     memory = body(client.call("adashi_memory", operation="get", runId="run-3"))
     assert memory["matchedNotes"] == 1 and memory["memory"]["notes"][0]["noteId"] == "note-3"
     summary = "Current fixture constraint: preserve the public API."
@@ -221,7 +221,7 @@ def main():
                 "general_start": ("adashi_rules", {"operation": "get_rule_injections", "intend": "general", "hook": "run.start"}),
                 "design_start": ("adashi_rules", {"operation": "get_rule_injections", "intend": "design", "hook": "run.start"}),
                 "implementation_start": ("adashi_rules", {"operation": "get_rule_injections", "intend": "implementation", "hook": "run.start"}),
-                "open_tasks": ("adashi_tasks", {"operation": "list", "states": ["open"]}),
+                "todo_tasks": ("adashi_tasks", {"operation": "list", "states": ["todo"]}),
                 "all_tasks": ("adashi_tasks", {"operation": "list"}),
             }
             measurements = {}

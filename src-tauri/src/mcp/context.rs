@@ -72,7 +72,7 @@ impl RuleInjectionResult {
 }
 
 /// Stable across processes/platforms; an exact-content cache key, not a security hash.
-fn content_version(body: &str) -> String {
+pub(super) fn content_version(body: &str) -> String {
     let hash = body.bytes().fold(0xcbf29ce484222325_u64, |hash, byte| {
         (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
     });
@@ -115,7 +115,7 @@ pub fn build(
         return Ok(result);
     }
     let memory = memory::load_memory(db, project_row_id)?;
-    // Required instructions never compete with the informational context budget.
+    // Custom project instructions never compete with the informational context budget.
     result.push(
         "memory.protocol",
         "protocol",
@@ -128,9 +128,9 @@ pub fn build(
         } else if memory.memory.chars().count() <= SUMMARY_BUDGET {
             format!("Current summary:\n{}", memory.memory.trim())
         } else {
-            format!("Current summary omitted in full: exceeds the {SUMMARY_BUDGET}-character startup budget. Retrieve it with adashi_memory operation get before work that needs project constraints.")
+            format!("Current summary omitted in full: exceeds the {SUMMARY_BUDGET}-character startup budget.")
         };
-        let body = format!("# Project memory\n{summary}\nHistorical handovers are not current state and are not injected. Use adashi_memory operation get with query, runId or taskId when relevant; superseded notes require includeSuperseded=true.");
+        let body = format!("# Project memory\n{summary}");
         result.push(
             "memory.summary",
             "memory",
@@ -151,12 +151,6 @@ pub fn build(
             result.push(key, "fixedPrompt", Some(prompt.version), &prompt.prompt);
         }
         result.push(
-            "design.write-protocol",
-            "protocol",
-            Some(1),
-            crate::design::documents::WRITE_PROTOCOL,
-        );
-        result.push(
             "design.index",
             "designIndex",
             None,
@@ -172,7 +166,7 @@ fn design_index(db: &Connection, project_id: i64) -> Result<String, String> {
         "SELECT COUNT(*) FROM c4_elements e JOIN design_workspaces w ON w.id=e.workspace_id WHERE w.project_id=?1",
         [project_id], |row| row.get(0),
     ).map_err(|e| e.to_string())?;
-    let mut output = String::from("# Formal design index\nRetrieve relevant guidance with adashi_design operations get_bindings(files/symbols), get_scope(elementId) or get_by_ids(ids). Use the search operation(query) for entries absent here. UML types: class, sequence, flow, state; UI mockups are separate.\n");
+    let mut output = String::from("# Formal design index\n");
     let footer = "\nIndex only: descriptions, relationships, artifacts, bindings and source require explicit retrieval.";
     let mut statement = db.prepare(
         "SELECT e.external_id, e.parent_external_id, e.element_type, e.name, COALESCE(rv.version,0)
@@ -218,6 +212,74 @@ fn design_index(db: &Connection, project_id: i64) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn startup_contains_project_context_and_custom_instructions_without_builtin_manuals() {
+        let mut db = Connection::open_in_memory().unwrap();
+        crate::schema::migrate(&mut db).unwrap();
+        db.execute("INSERT INTO projects(name,slug) VALUES('P','p')", [])
+            .unwrap();
+        crate::state::ensure_project_state(&db).unwrap();
+        let project = || ProjectSettings {
+            id: "p".into(),
+            name: "P".into(),
+            folder: "unused".into(),
+        };
+        for intent in ["general", "design", "implementation"] {
+            let result = build(
+                &db,
+                1,
+                project(),
+                intent,
+                "run.start",
+                MemoryContext::Summary,
+            )
+            .unwrap();
+            assert!(result
+                .sections
+                .iter()
+                .all(|s| !matches!(s.kind.as_str(), "protocol" | "fixedPrompt")));
+            assert!(!result.injection_prompt.contains("expectedRevision"));
+            assert!(!result.injection_prompt.contains("adashi_"));
+        }
+        let empty = build(
+            &db,
+            1,
+            project(),
+            "general",
+            "run.start",
+            MemoryContext::ProtocolOnly,
+        )
+        .unwrap();
+        assert_eq!(empty.status, "empty");
+        db.execute("UPDATE project_memory SET protocol_rule='Project-specific memory rule.',memory_body='Current project constraint.'", []).unwrap();
+        fixed_hooks::update_fixed_hook_prompt(
+            &db,
+            1,
+            fixed_hooks::DESIGN_AUTHORING_HOOK_KEY.into(),
+            "Project-specific design constraint.".into(),
+        )
+        .unwrap();
+        db.execute("INSERT INTO rules(project_id,name,enabled,intend,hook,prompt) VALUES(1,'Custom',1,'design','run.start','Project-specific lifecycle rule.')", []).unwrap();
+        let result = build(
+            &db,
+            1,
+            project(),
+            "design",
+            "run.start",
+            MemoryContext::Summary,
+        )
+        .unwrap();
+        for body in [
+            "Project-specific memory rule.",
+            "Current project constraint.",
+            "Project-specific design constraint.",
+            "Project-specific lifecycle rule.",
+        ] {
+            assert_eq!(result.injection_prompt.matches(body).count(), 1);
+        }
+        assert_eq!(result.sections.len(), 5);
+    }
+
     #[test]
     fn sections_address_one_exact_unicode_body_and_stable_versions() {
         let mut result = RuleInjectionResult {

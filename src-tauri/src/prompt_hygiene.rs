@@ -12,6 +12,7 @@ use std::collections::BTreeSet;
 pub(crate) const MCP_TOOL_NAMES: &[&str] = &[
     "adashi_design",
     "adashi_grep",
+    "adashi_help",
     "adashi_intents",
     "adashi_memory",
     "adashi_qa",
