@@ -6,20 +6,8 @@ use serde_json::json;
 pub fn seed_initial_data(db: &mut Connection, project: &ProjectSettings) -> rusqlite::Result<()> {
     let project_count: i64 = db.query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))?;
     if project_count > 0 {
-        db.execute(
-            "UPDATE projects
-             SET name = ?1,
-                 slug = ?2,
-                 repository_path = ?3,
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE id = (
-                SELECT id
-                FROM projects
-                ORDER BY id
-                LIMIT 1
-            )",
-            params![project.name, project.id, project.folder],
-        )?;
+        // The shared project identity is canonical. Local registrations on another
+        // computer may have a different alias/id and must not rewrite this header.
         if project.id != "adashi" {
             repair_misseeded_adashi_demo(db, project)?;
         }
@@ -38,8 +26,8 @@ fn seed_project_header(
     project: &ProjectSettings,
 ) -> rusqlite::Result<i64> {
     tx.execute(
-        "INSERT INTO projects(name, slug, repository_path) VALUES (?1, ?2, ?3)",
-        params![project.name, project.id, project.folder],
+        "INSERT INTO projects(name, slug) VALUES (?1, ?2)",
+        params![project.name, project.id],
     )?;
     let project_id = tx.last_insert_rowid();
 

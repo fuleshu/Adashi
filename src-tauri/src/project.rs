@@ -1,6 +1,6 @@
 use std::fs;
 
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
 
 use crate::fixed_hooks;
 use crate::schema;
@@ -15,7 +15,8 @@ pub(crate) fn resolve_project_from_settings(
         .map(str::trim)
         .filter(|project_ref| !project_ref.is_empty())
         .ok_or_else(|| {
-            "projectName is required and must be a configured project id or project name".to_string()
+            "projectName is required and must be a configured project id or project name"
+                .to_string()
         })?;
 
     let matches = settings
@@ -42,6 +43,13 @@ pub(crate) fn resolve_project_from_settings(
 pub(crate) fn open_project_database(
     project: &ProjectSettings,
 ) -> Result<Connection, Box<dyn std::error::Error>> {
+    open_project_database_for_computer(project, crate::computer::id()?)
+}
+
+fn open_project_database_for_computer(
+    project: &ProjectSettings,
+    computer_id: &str,
+) -> Result<Connection, Box<dyn std::error::Error>> {
     let data_dir = settings::project_data_dir(project);
     fs::create_dir_all(&data_dir)?;
 
@@ -49,6 +57,17 @@ pub(crate) fn open_project_database(
     schema::migrate(&mut db)?;
     seed::seed_initial_data(&mut db, project)?;
     fixed_hooks::ensure_fixed_hook_prompts(&db).map_err(std::io::Error::other)?;
+    // Seeded or repaired resources need initial versions on their very first open.
+    // This uses non-AUTOINCREMENT keys and does not change existing rows.
+    db.execute_batch(include_str!("concurrency_schema.sql"))?;
+    db.execute(
+        "INSERT INTO project_computers(project_id, computer_id, repository_path)
+         SELECT id, ?1, ?2 FROM projects ORDER BY id LIMIT 1
+         ON CONFLICT(project_id, computer_id) DO UPDATE
+         SET repository_path = excluded.repository_path
+         WHERE project_computers.repository_path != excluded.repository_path",
+        params![computer_id, project.folder],
+    )?;
     Ok(db)
 }
 
@@ -56,6 +75,154 @@ pub(crate) fn open_project_database(
 mod tests {
     use super::*;
     use crate::settings::{RuleTemplate, WindowSettings};
+
+    fn fixture(label: &str) -> ProjectSettings {
+        let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target/project-storage-tests")
+            .join(format!(
+                "{label}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+        ProjectSettings {
+            id: "storage-fixture".into(),
+            name: "Storage fixture".into(),
+            folder: folder.to_string_lossy().into_owned(),
+        }
+    }
+
+    #[test]
+    fn copied_database_keeps_each_computers_folder_and_shared_identity() {
+        let first = fixture("first");
+        drop(open_project_database_for_computer(&first, "windows:first").unwrap());
+        let mut second = fixture("second");
+        second.id = "different-local-registration".into();
+        second.name = "Local alias".into();
+        fs::create_dir_all(settings::project_data_dir(&second)).unwrap();
+        fs::copy(
+            settings::project_database_path(&first),
+            settings::project_database_path(&second),
+        )
+        .unwrap();
+        let db = open_project_database_for_computer(&second, "linux:second").unwrap();
+        let folders: Vec<(String, String)> = db
+            .prepare(
+                "SELECT computer_id, repository_path FROM project_computers ORDER BY computer_id",
+            )
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            folders,
+            vec![
+                ("linux:second".into(), second.folder.clone()),
+                ("windows:first".into(), first.folder.clone())
+            ]
+        );
+        let header: (String, String, Option<String>) = db
+            .query_row(
+                "SELECT name, slug, repository_path FROM projects",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(header, (first.name.clone(), first.id.clone(), None));
+        drop(db);
+
+        // Git brings both records back to the first computer; opening does not rewrite them.
+        fs::copy(
+            settings::project_database_path(&second),
+            settings::project_database_path(&first),
+        )
+        .unwrap();
+        let before = fs::read(settings::project_database_path(&first)).unwrap();
+        drop(open_project_database_for_computer(&first, "windows:first").unwrap());
+        assert_eq!(
+            before,
+            fs::read(settings::project_database_path(&first)).unwrap()
+        );
+
+        // Moving this computer's checkout changes only its own mapping.
+        let moved = fixture("moved");
+        fs::create_dir_all(settings::project_data_dir(&moved)).unwrap();
+        fs::copy(
+            settings::project_database_path(&first),
+            settings::project_database_path(&moved),
+        )
+        .unwrap();
+        let db = open_project_database_for_computer(&moved, "windows:first").unwrap();
+        assert_eq!(
+            db.query_row(
+                "SELECT repository_path FROM project_computers WHERE computer_id='linux:second'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            second.folder
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT repository_path FROM project_computers WHERE computer_id='windows:first'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            moved.folder
+        );
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM project_computers", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        drop(db);
+        for project in [first, second, moved] {
+            fs::remove_dir_all(project.folder).unwrap();
+        }
+    }
+
+    #[test]
+    fn repeated_reads_leave_database_bytes_timestamp_and_revision_unchanged() {
+        for demo in [false, true] {
+            let mut project = fixture("read-only");
+            if demo {
+                project.id = "adashi".into();
+                project.name = "Adashi".into();
+            }
+            let db = open_project_database_for_computer(&project, "test:computer").unwrap();
+            let revision = crate::state::load_project_revision(&db, 1)
+                .unwrap()
+                .revision;
+            drop(db);
+            let path = settings::project_database_path(&project);
+            let before = fs::read(&path).unwrap();
+            let modified = fs::metadata(&path).unwrap().modified().unwrap();
+            for _ in 0..3 {
+                let db = open_project_database_for_computer(&project, "test:computer").unwrap();
+                crate::memory::load_memory(&db, 1).unwrap();
+                fixed_hooks::load_fixed_hook_prompts(&db, 1).unwrap();
+                crate::rules::load_rules(&db).unwrap();
+                crate::tasks::load_tasks(&db, 1, &crate::tasks::ALL_TASK_STATES).unwrap();
+                crate::qa::load_jobs(&db, 1, None).unwrap();
+                assert_eq!(db.total_changes(), 0);
+                assert_eq!(
+                    crate::state::load_project_revision(&db, 1)
+                        .unwrap()
+                        .revision,
+                    revision
+                );
+                drop(db);
+                assert_eq!(fs::read(&path).unwrap(), before);
+                assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
+            }
+            fs::remove_dir_all(project.folder).unwrap();
+        }
+    }
 
     fn settings_with_projects() -> AppSettings {
         AppSettings {

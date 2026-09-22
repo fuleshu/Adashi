@@ -279,7 +279,8 @@ pub fn publish_intent(
 }
 
 pub fn load_live_intents(db: &Connection, project_id: i64) -> Result<Vec<ResourceIntent>, String> {
-    prune_expired_intents(db, project_id)?;
+    // Reads filter expired entries; the next publish cleans them up without making
+    // browsing a shared database change its file just because time has passed.
     let mut statement = db
         .prepare(
             "SELECT agent_run_id, resource_kind, resource_id, expires_at
@@ -447,7 +448,10 @@ mod tests {
             [],
         )
         .unwrap();
+        db.pragma_update(None, "query_only", true).unwrap();
         assert_eq!(load_live_intents(&db, 1).unwrap().len(), 1);
+        db.pragma_update(None, "query_only", false).unwrap();
+        publish_intent(&db, 1, "run-b", "task", "3", 30).unwrap();
         assert_eq!(
             db.query_row(
                 "SELECT COUNT(*) FROM resource_intents WHERE agent_run_id='expired'",

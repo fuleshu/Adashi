@@ -682,10 +682,9 @@ pub fn preview_png(db: &Connection, mockup: &UiMockup, variant: &str) -> Result<
     };
     if let Some(png) = db.query_row("SELECT png FROM ui_mockup_preview_cache WHERE mockup_id=?1 AND source_revision=?2 AND variant=?3",
         params![mockup.id, revision, variant], |row| row.get::<_, Vec<u8>>(0)).optional().map_err(|err| err.to_string())? { return Ok(png); }
-    let png = render_png(svg, width, height)?;
-    db.execute("INSERT OR REPLACE INTO ui_mockup_preview_cache(mockup_id, source_revision, variant, png) VALUES (?1, ?2, ?3, ?4)",
-        params![mockup.id, revision, variant, png]).map_err(|err| err.to_string())?;
-    Ok(png)
+    // Rendering is a read operation. Existing legacy cache entries remain usable,
+    // but browsing a preview must not dirty the shared project database.
+    render_png(svg, width, height)
 }
 
 pub fn preview_base64(db: &Connection, mockup: &UiMockup, variant: &str) -> Result<String, String> {
@@ -1230,6 +1229,18 @@ mod tests {
                 .revision,
             1
         );
+    }
+
+    #[test]
+    fn an_uncached_preview_can_be_rendered_on_a_read_only_connection() {
+        let mut db = database();
+        let mockup = create_mockup(&mut db, 1, create_input(0)).unwrap();
+        let before = db.total_changes();
+        db.pragma_update(None, "query_only", true).unwrap();
+        let png = preview_png(&db, &mockup, "accepted").unwrap();
+        assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert_eq!(db.total_changes(), before);
+        assert_eq!(db.query_row("SELECT COUNT(*) FROM ui_mockup_preview_cache", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
     }
 
     #[test]

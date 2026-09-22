@@ -20,6 +20,13 @@ CREATE TABLE IF NOT EXISTS project_state (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS project_computers (
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    computer_id TEXT NOT NULL,
+    repository_path TEXT NOT NULL,
+    PRIMARY KEY(project_id, computer_id)
+);
+
 CREATE TABLE IF NOT EXISTS design_workspaces (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,

@@ -20,6 +20,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tokio",
+ "winreg",
 ]
 
 [[package]]

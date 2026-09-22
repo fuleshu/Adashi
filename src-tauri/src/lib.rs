@@ -1,6 +1,7 @@
 #![cfg_attr(not(feature = "desktop"), allow(dead_code))]
 
 mod concurrency;
+mod computer;
 mod design;
 mod design_health;
 mod fixed_hooks;

@@ -1,5 +1,6 @@
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -1856,19 +1857,6 @@ pub(crate) fn resolve_project_from_settings(
         .ok_or_else(|| format!("Unknown project id or name: {project_ref}"))
 }
 
-pub(crate) fn open_project_database(
-    project: &ProjectSettings,
-) -> Result<Connection, Box<dyn std::error::Error>> {
-    let data_dir = settings::project_data_dir(project);
-    fs::create_dir_all(&data_dir)?;
-
-    let mut db = Connection::open(settings::project_database_path(project))?;
-    schema::migrate(&mut db)?;
-    seed::seed_initial_data(&mut db, project)?;
-    fixed_hooks::ensure_fixed_hook_prompts(&db).map_err(std::io::Error::other)?;
-    Ok(db)
-}
-
 fn verify_project_database(db: &Connection) -> Result<(), String> {
     let project_row_id = load_project_row_id(db)?;
     project_state::load_project_revision(db, project_row_id)?;
@@ -2602,7 +2590,7 @@ mod tests {
         verify_project_database(&db).unwrap();
         assert!(settings::project_database_path(&project).exists());
         assert_eq!(
-            db.query_row("SELECT repository_path FROM projects LIMIT 1", [], |row| {
+            db.query_row("SELECT repository_path FROM project_computers WHERE computer_id = ?1", [crate::computer::id().unwrap()], |row| {
                 row.get::<_, String>(0)
             })
             .unwrap(),
@@ -2657,6 +2645,40 @@ mod tests {
 
         drop(db);
         let _ = fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn opening_and_refreshing_dashboard_does_not_write_the_database() {
+        let folder = temp_project_folder("adashi-dashboard-read-only");
+        let project = ProjectSettings {
+            id: "adashi".into(),
+            name: "Adashi".into(),
+            folder: folder.to_string_lossy().into_owned(),
+        };
+        let state = AppState {
+            settings_path: folder.join("settings.json"),
+            settings: Arc::new(Mutex::new(AppSettings {
+                window: WindowSettings::default(),
+                projects: vec![project.clone()],
+                last_active_project_id: Some(project.id.clone()),
+                rule_templates: vec![],
+                architecture_projection: Default::default(),
+            })),
+        };
+        drop(open_project_database(&project).unwrap());
+        let path = settings::project_database_path(&project);
+        let before = fs::read(&path).unwrap();
+        let modified = fs::metadata(&path).unwrap().modified().unwrap();
+        for _ in 0..3 {
+            let db = open_project_database(&project).unwrap();
+            let payload = load_dashboard_payload(project.clone(), &db, &state).unwrap();
+            assert!(!payload.design_elements.is_empty());
+            assert_eq!(db.total_changes(), 0);
+            drop(db);
+            assert_eq!(fs::read(&path).unwrap(), before);
+            assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
+        }
+        fs::remove_dir_all(folder).unwrap();
     }
 
     #[test]

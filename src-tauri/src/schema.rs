@@ -1,6 +1,36 @@
 use rusqlite::Connection;
 
+// Bump when adding a schema/data migration. Never replay migrations during reads:
+// even an ignored AUTOINCREMENT insert can change sqlite_sequence and the file.
+const SCHEMA_VERSION: i64 = 13;
+
 pub fn migrate(db: &mut Connection) -> rusqlite::Result<()> {
+    db.pragma_update(None, "foreign_keys", true)?;
+    if db.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))? >= SCHEMA_VERSION {
+        return Ok(());
+    }
+
+    // The legacy task-table rebuild requires foreign keys off. Keep the complete
+    // migration and its version marker atomic, restoring enforcement on errors too.
+    db.pragma_update(None, "foreign_keys", false)?;
+    let result = (|| {
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if tx.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))? < SCHEMA_VERSION
+        {
+            migrate_schema(&tx)?;
+            tx.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version) VALUES (?1)",
+                [SCHEMA_VERSION],
+            )?;
+            tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        }
+        tx.commit()
+    })();
+    db.pragma_update(None, "foreign_keys", true)?;
+    result
+}
+
+fn migrate_schema(db: &Connection) -> rusqlite::Result<()> {
     db.execute_batch(include_str!("schema.sql"))?;
     db.execute_batch(include_str!("concurrency_schema.sql"))?;
     db.execute_batch(include_str!("design_health_schema.sql"))?;
@@ -391,8 +421,8 @@ fn add_task_column_if_missing(
 /// `todo`/`active`/`finished`/`closed`.
 ///
 /// SQLite cannot alter a CHECK constraint in place, so the table is rebuilt. Foreign keys from
-/// the task link tables must be off while the table is renamed and recreated, otherwise the
-/// rename would repoint them at the legacy name that is then dropped.
+/// the task link tables must be off during the rebuild. The caller owns the migration
+/// transaction and restores foreign-key enforcement even if the rebuild fails.
 ///
 /// Mapping: `open` becomes `todo` because every existing task started unclaimed and no stored
 /// task recorded that work had begun; `confirmed` becomes `closed` because both mean "reviewed
@@ -409,10 +439,7 @@ fn ensure_task_state_vocabulary(db: &Connection) -> rusqlite::Result<()> {
     }
 
     db.execute_batch(
-        "PRAGMA foreign_keys=OFF;
-         BEGIN IMMEDIATE;
-
-         CREATE TABLE agent_tasks_rebuilt (
+        "CREATE TABLE agent_tasks_rebuilt (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
             number INTEGER NOT NULL DEFAULT 0,
@@ -452,10 +479,7 @@ fn ensure_task_state_vocabulary(db: &Connection) -> rusqlite::Result<()> {
          ALTER TABLE agent_tasks_rebuilt RENAME TO agent_tasks;
 
          CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_tasks_project_number
-            ON agent_tasks(project_id, number);
-
-         COMMIT;
-         PRAGMA foreign_keys=ON;",
+            ON agent_tasks(project_id, number);",
     )?;
     Ok(())
 }
@@ -689,7 +713,10 @@ mod tests {
                 [],
             )
             .unwrap_err();
-        assert!(error.to_string().contains("CHECK constraint failed"), "{error}");
+        assert!(
+            error.to_string().contains("CHECK constraint failed"),
+            "{error}"
+        );
 
         // A second migration is a no-op: the table is already rebuilt.
         let before: String = db
@@ -724,5 +751,41 @@ mod tests {
         assert!(sql.contains("'todo'"), "{sql}");
         assert!(sql.contains("'closed'"), "{sql}");
         assert!(!sql.contains("'confirmed'"), "{sql}");
+    }
+
+    #[test]
+    fn migration_failure_rolls_back_and_restores_foreign_keys() {
+        let mut db = legacy_database();
+        // Force an error late in migration, after the legacy task table was rebuilt.
+        db.execute_batch("CREATE TABLE project_memory(project_id INTEGER PRIMARY KEY);")
+            .unwrap();
+        assert!(migrate(&mut db).is_err());
+        assert_eq!(
+            db.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert!(db
+            .pragma_query_value(None, "foreign_keys", |row| row.get::<_, bool>(0))
+            .unwrap());
+        assert_eq!(
+            db.query_row("SELECT state FROM agent_tasks WHERE id=1", [], |row| row
+                .get::<_, String>(
+                0
+            ))
+            .unwrap(),
+            "open"
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name='project_computers'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        db.execute_batch("DROP TABLE project_memory;").unwrap();
+        migrate(&mut db).unwrap();
     }
 }

@@ -41,6 +41,20 @@ Adashi is a Tauri desktop dashboard that manages context for multiple local proj
 
 This keeps project memory, tasks, rules, design, and QA evidence local to the repository instead of scattering it across chat history.
 
+Project folders are stored per computer in the project database. The key is an
+Adashi-specific SHA-256 hash of Windows `MachineGuid`, Linux `machine-id`, or macOS
+`IOPlatformUUID`; host-name changes do not change it. Register the local checkout
+in app settings on each computer. Opening it records or updates only that
+computer's folder, leaving other computers' folders and the shared project identity
+alone. The old single `projects.repository_path` is retained as legacy data but is
+no longer written or used.
+
+After the one-time schema upgrade and registration of a computer's folder, opening,
+refreshing, polling, or browsing the project leaves the database bytes and modification
+time unchanged. Migrations run only when the schema version changes, and viewing
+mockup previews no longer saves rendered PNGs into the database. Actual edits,
+folder changes, and necessary legacy prompt/memory repairs still write their changes.
+
 ### First-Project Onboarding
 
 When no usable project is configured, Adashi shows a blocking onboarding flow instead of silently inventing a fake default project. You can create or select the first project folder, and Adashi initializes the local project store before opening the dashboard.
