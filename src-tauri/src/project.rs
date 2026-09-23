@@ -1,11 +1,10 @@
-use std::fs;
+use rusqlite::Connection;
 
-use rusqlite::{params, Connection};
+use crate::settings::{AppSettings, ProjectSettings};
+use crate::storage::{ProjectStore, StorageResult};
 
-use crate::fixed_hooks;
-use crate::schema;
-use crate::seed;
-use crate::settings::{self, AppSettings, ProjectSettings};
+#[cfg(test)]
+use {crate::{fixed_hooks, settings}, std::fs};
 
 pub(crate) fn resolve_project_from_settings(
     settings: &AppSettings,
@@ -43,32 +42,21 @@ pub(crate) fn resolve_project_from_settings(
 pub(crate) fn open_project_database(
     project: &ProjectSettings,
 ) -> Result<Connection, Box<dyn std::error::Error>> {
-    open_project_database_for_computer(project, crate::computer::id()?)
+    Ok(open_project_store(project)?.into_legacy_sqlite())
 }
 
+/// Shared by desktop and MCP. The database-returning function above is the
+/// explicit task-14 compatibility bridge, not another opening implementation.
+pub(crate) fn open_project_store(project: &ProjectSettings) -> StorageResult<ProjectStore> {
+    ProjectStore::open(project)
+}
+
+#[cfg(test)]
 fn open_project_database_for_computer(
     project: &ProjectSettings,
     computer_id: &str,
 ) -> Result<Connection, Box<dyn std::error::Error>> {
-    let data_dir = settings::project_data_dir(project);
-    fs::create_dir_all(&data_dir)?;
-
-    let mut db = Connection::open(settings::project_database_path(project))?;
-    schema::migrate(&mut db)?;
-    seed::seed_initial_data(&mut db, project)?;
-    fixed_hooks::ensure_fixed_hook_prompts(&db).map_err(std::io::Error::other)?;
-    // Seeded or repaired resources need initial versions on their very first open.
-    // This uses non-AUTOINCREMENT keys and does not change existing rows.
-    db.execute_batch(include_str!("concurrency_schema.sql"))?;
-    db.execute(
-        "INSERT INTO project_computers(project_id, computer_id, repository_path)
-         SELECT id, ?1, ?2 FROM projects ORDER BY id LIMIT 1
-         ON CONFLICT(project_id, computer_id) DO UPDATE
-         SET repository_path = excluded.repository_path
-         WHERE project_computers.repository_path != excluded.repository_path",
-        params![computer_id, project.folder],
-    )?;
-    Ok(db)
+    Ok(ProjectStore::open_for_computer(project, computer_id)?.into_legacy_sqlite())
 }
 
 #[cfg(test)]

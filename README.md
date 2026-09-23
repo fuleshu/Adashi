@@ -55,6 +55,20 @@ time unchanged. Migrations run only when the schema version changes, and viewing
 mockup previews no longer saves rendered PNGs into the database. Actual edits,
 folder changes, and necessary legacy prompt/memory repairs still write their changes.
 
+Desktop and MCP now resolve project storage through the same shared Rust core.
+Projects without `.adashi/storage.json` continue using their existing SQLite file.
+An optional descriptor can explicitly select SQLite:
+
+```json
+{"schemaVersion": 1, "backend": {"kind": "sqlite"}}
+```
+
+Git-friendly text and shared server SQL selections are reserved for subsequent
+roadmap tasks; this build reports them as unavailable without opening a fallback
+database. See the [project storage contract and migration roadmap](docs/project-storage.md).
+Reading application settings also leaves their bytes unchanged. Invalid settings
+produce an error without replacing the user's registered projects.
+
 ### First-Project Onboarding
 
 When no usable project is configured, Adashi shows a blocking onboarding flow instead of silently inventing a fake default project. You can create or select the first project folder, and Adashi initializes the local project store before opening the dashboard.

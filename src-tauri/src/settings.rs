@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -130,38 +131,74 @@ fn linux_settings_path(xdg_config_home: Option<&Path>, home: Option<&Path>) -> P
 }
 
 pub fn load_or_init(path: &Path) -> Result<AppSettings, Box<dyn std::error::Error>> {
-    if path.exists() {
-        let text = fs::read_to_string(path)?;
-        match serde_json::from_str::<AppSettings>(text.trim_start_matches('\u{feff}')) {
-            Ok(settings) => {
-                let settings = normalize(settings);
-                save(path, &settings)?;
-                return Ok(settings);
-            }
-            Err(_) => {
-                let backup_path = path.with_extension("json.invalid");
-                let _ = fs::copy(path, backup_path);
-                let settings = default_settings();
-                save(path, &settings)?;
-                return Ok(settings);
+    match fs::read_to_string(path) {
+        Ok(text) => parse_settings(&text),
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            let settings = default_settings();
+            let temporary = write_settings_temp(path, &settings)?;
+            // Another client may have initialized settings since our read. Never
+            // replace its project registrations with this onboarding default.
+            match temporary.persist_noclobber(path) {
+                Ok(_) => Ok(settings),
+                Err(error) if error.error.kind() == ErrorKind::AlreadyExists => {
+                    parse_settings(&fs::read_to_string(path)?)
+                }
+                Err(error) => Err(Box::new(error.error)),
             }
         }
+        Err(error) => Err(Box::new(error)),
     }
+}
 
-    let settings = default_settings();
-    save(path, &settings)?;
-    Ok(settings)
+fn parse_settings(text: &str) -> Result<AppSettings, Box<dyn std::error::Error>> {
+    // Normalize only in memory. Reads by independent MCP/desktop clients must
+    // never truncate/rewrite the shared settings file or reset it on a parse error.
+    let settings = serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|error| {
+        std::io::Error::new(ErrorKind::InvalidData, format!(
+            "Invalid Adashi settings at line {}, column {}; the file was left unchanged",
+            error.line(), error.column()
+        ))
+    })?;
+    Ok(normalize(settings))
+}
+
+fn write_settings_temp(path: &Path, settings: &AppSettings) -> Result<tempfile::NamedTempFile, Box<dyn std::error::Error>> {
+    let parent = path.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+    let settings = normalize(settings.clone());
+    let text = serde_json::to_string_pretty(&settings)?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    writeln!(temporary, "{text}")?;
+    temporary.as_file().sync_all()?;
+    Ok(temporary)
 }
 
 pub fn save(path: &Path, settings: &AppSettings) -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
+    // Same-directory atomic replacement keeps readers from observing partial JSON.
+    let temporary = write_settings_temp(path, settings)?;
+    persist_settings(temporary, path)
+}
 
-    let settings = normalize(settings.clone());
-    let text = serde_json::to_string_pretty(&settings)?;
-    fs::write(path, format!("{text}\n"))?;
-    Ok(())
+fn persist_settings(mut temporary: tempfile::NamedTempFile, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    // Windows can briefly deny replacement while a reader or scanner releases
+    // the old file. Retain the complete temporary file and retry the *atomic*
+    // operation; never delete/truncate the destination as a fallback.
+    let mut retries = 0;
+    loop {
+        match temporary.persist(path) {
+            Ok(_) => return Ok(()),
+            Err(error) => {
+                let sharing_violation = cfg!(windows)
+                    && matches!(error.error.raw_os_error(), Some(5 | 32 | 33));
+                if !sharing_violation || retries == 8 {
+                    return Err(Box::new(error.error));
+                }
+                temporary = error.file;
+                std::thread::sleep(std::time::Duration::from_millis(2 << retries));
+                retries += 1;
+            }
+        }
+    }
 }
 
 pub fn project_data_dir(project: &ProjectSettings) -> PathBuf {
@@ -486,6 +523,52 @@ fn validate_rule_template_hook(hook: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn successful_reads_preserve_settings_bytes_and_mtime() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let original = "{\n  \"window\":{\"width\":1440,\"height\":940,\"x\":null,\"y\":null},\n  \"projects\":[],\"lastActiveProjectId\":null\n}\n";
+        fs::write(&path, original).unwrap();
+        let mtime = fs::metadata(&path).unwrap().modified().unwrap();
+        for _ in 0..3 { assert!(load_or_init(&path).unwrap().projects.is_empty()); }
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), mtime);
+    }
+
+    #[test]
+    fn invalid_settings_never_replace_registered_projects_or_recovery_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let original = "{\"projects\":[";
+        fs::write(&path, original).unwrap();
+        fs::write(path.with_extension("json.invalid"), "existing recovery copy").unwrap();
+        assert!(load_or_init(&path).unwrap_err().to_string().contains("left unchanged"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        assert_eq!(fs::read_to_string(path.with_extension("json.invalid")).unwrap(), "existing recovery copy");
+    }
+
+    #[test]
+    fn readers_never_observe_partial_settings_during_atomic_saves() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let mut settings = default_settings();
+        settings.projects.push(ProjectSettings { id: "shared".into(), name: "Shared".into(), folder: directory.path().to_string_lossy().into_owned() });
+        save(&path, &settings).unwrap();
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                let path = &path;
+                scope.spawn(move || {
+                    for _ in 0..50 { assert_eq!(load_or_init(path).unwrap().projects[0].id, "shared"); }
+                });
+            }
+            for i in 0..20 {
+                settings.window.width = 1000 + i;
+                save(&path, &settings).unwrap();
+            }
+        });
+        assert_eq!(load_or_init(&path).unwrap().projects.len(), 1);
+    }
 
     #[test]
     fn architecture_file_name_rejects_paths_and_honours_overrides() {

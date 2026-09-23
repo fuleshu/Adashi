@@ -155,13 +155,8 @@ pub fn load_rule_injections(
 }
 
 pub fn create_rule(db: &Connection, project_id: i64, input: NewRule) -> Result<i64, String> {
-    validate_intend(&input.intend)?;
-    validate_hook(&input.hook)?;
-
+    validate_rule(&input.name, &input.intend, &input.hook)?;
     let name = input.name.trim();
-    if name.is_empty() {
-        return Err("Rule name is required".to_string());
-    }
 
     db.execute(
         "INSERT INTO rules(project_id, name, enabled, intend, hook, prompt)
@@ -199,13 +194,8 @@ pub fn create_rule_from_template(
 }
 
 pub fn update_rule(db: &Connection, input: UpdateRule) -> Result<(), String> {
-    validate_intend(&input.intend)?;
-    validate_hook(&input.hook)?;
-
+    validate_rule(&input.name, &input.intend, &input.hook)?;
     let name = input.name.trim();
-    if name.is_empty() {
-        return Err("Rule name is required".to_string());
-    }
 
     let affected = db
         .execute(
@@ -245,6 +235,16 @@ pub fn delete_rule(db: &Connection, rule_id: i64) -> Result<(), String> {
     } else {
         Ok(())
     }
+}
+
+/// Domain validation shared by legacy callers and every storage adapter.
+pub(crate) fn validate_rule(name: &str, intend: &str, hook: &str) -> Result<(), String> {
+    validate_intend(intend)?;
+    validate_hook(hook)?;
+    if name.trim().is_empty() {
+        return Err("Rule name is required".to_string());
+    }
+    Ok(())
 }
 
 fn validate_intend(intend: &str) -> Result<(), String> {

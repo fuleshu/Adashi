@@ -2522,6 +2522,27 @@ mod tests {
         let _ = fs::remove_dir_all(folder);
     }
 
+    #[test]
+    fn desktop_registration_rejects_an_unavailable_backend_without_creating_sqlite() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("project");
+        fs::create_dir_all(folder.join(".adashi")).unwrap();
+        fs::write(folder.join(".adashi/storage.json"),
+            r#"{"schemaVersion":1,"backend":{"kind":"text"}}"#).unwrap();
+        let state = AppState {
+            settings_path: root.path().join("settings.json"),
+            settings: Arc::new(Mutex::new(AppSettings {
+                window: WindowSettings::default(), projects: vec![], last_active_project_id: None,
+                rule_templates: vec![], architecture_projection: Default::default(),
+            })),
+        };
+        let error = add_project_to_settings("Text project".into(), folder.to_string_lossy().into_owned(), &state).unwrap_err();
+        assert!(error.contains("storage.backend_unavailable"), "{error}");
+        assert!(!folder.join(".adashi/adashi.sqlite3").exists());
+        assert!(!state.settings_path.exists());
+        assert!(state.settings.lock().unwrap().projects.is_empty());
+    }
+
     /// The dashboard shows a checkbox per task state, so its payload has to carry every state.
     /// When the payload filtered states instead, the closed checkbox could be ticked but nothing
     /// could ever appear under it.

@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 // Bump when adding a schema/data migration. Never replay migrations during reads:
 // even an ignored AUTOINCREMENT insert can change sqlite_sequence and the file.
-const SCHEMA_VERSION: i64 = 13;
+pub(crate) const SCHEMA_VERSION: i64 = 13;
 
 pub fn migrate(db: &mut Connection) -> rusqlite::Result<()> {
     db.pragma_update(None, "foreign_keys", true)?;

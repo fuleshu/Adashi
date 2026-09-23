@@ -7,7 +7,8 @@ use crate::design_health;
 use crate::grep::{self, GrepParams};
 use crate::memory::{self, AppendMemoryNote, MemoryNote, ProjectMemory};
 use crate::mockups::{self, MockupSummary, UiMockup};
-use crate::project::{open_project_database, resolve_project_from_settings};
+use crate::project::{open_project_store, resolve_project_from_settings};
+use crate::storage::{ProjectStorage, ProjectStore, StorageError};
 use crate::qa::{
     self, NewQaJob, QaDesignLinkInput, QaJob, QaJobQuery, QaJobSummary, QaRun, QaRunSummary,
     UpdateQaJob,
@@ -63,11 +64,19 @@ impl AdashiMcpServer {
         &self,
         project_name: Option<&str>,
     ) -> Result<(ProjectSettings, rusqlite::Connection), ErrorData> {
+        let (project, store) = self.open_project_storage(project_name)?;
+        Ok((project, store.into_legacy_sqlite()))
+    }
+
+    fn open_project_storage(
+        &self,
+        project_name: Option<&str>,
+    ) -> Result<(ProjectSettings, ProjectStore), ErrorData> {
         let settings = self.load_settings()?;
         let project = resolve_project_from_settings(&settings, project_name)
             .map_err(|err| ErrorData::invalid_params(err, None))?;
-        let db = open_project_database(&project).map_err(internal_error)?;
-        Ok((project, db))
+        let store = open_project_store(&project).map_err(storage_error)?;
+        Ok((project, store))
     }
 
     /// The router method's body, reachable from other modules' tests without widening the
@@ -985,8 +994,8 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<ProjectParams>,
     ) -> Result<Json<RuleListResult>, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
-        let rules = rules::load_rules(&db).map_err(tool_error)?;
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let rules = store.rules_snapshot().map_err(storage_error)?.rules;
         Ok(Json(RuleListResult {
             project_id: project.id,
             project_name: project.name,
@@ -3032,6 +3041,16 @@ fn required_with_help<T>(
 /// client relays only that to the model — a reason that exists solely in `data` reads to the
 /// caller as an opaque failure it cannot act on. Typed payloads such as resource conflicts keep
 /// their exact JSON shape in `data` and keep the generic top-level text.
+fn storage_error(error: StorageError) -> ErrorData {
+    match error {
+        StorageError::Backend(_) => internal_error(error),
+        StorageError::Conflict(conflicts) => tool_error(
+            json!({"code": "resource.conflict", "conflicts": conflicts}).to_string(),
+        ),
+        _ => tool_error(error.to_string()),
+    }
+}
+
 fn tool_error(message: String) -> ErrorData {
     match serde_json::from_str::<serde_json::Value>(&message) {
         Ok(value) => ErrorData::invalid_params("Adashi MCP request failed", Some(value)),
@@ -3050,6 +3069,34 @@ mod tests {
     use crate::mockups::CreateMockupInput;
     use crate::settings::{AppSettings, ProjectSettings, WindowSettings};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn mcp_resolves_project_backend_without_rewriting_settings_or_falling_back() {
+        let root = tempfile::tempdir().unwrap();
+        let project = ProjectSettings {
+            id: "storage-selection".into(), name: "Storage selection".into(),
+            folder: root.path().join("project").to_string_lossy().into_owned(),
+        };
+        let settings_path = root.path().join("settings.json");
+        settings::save(&settings_path, &AppSettings {
+            window: WindowSettings::default(), projects: vec![project.clone()],
+            last_active_project_id: Some(project.id.clone()), rule_templates: vec![],
+            architecture_projection: Default::default(),
+        }).unwrap();
+        let before = std::fs::read(&settings_path).unwrap();
+        let server = AdashiMcpServer::new(settings_path.clone());
+        let (_, mut store) = server.open_project_storage(Some(&project.id)).unwrap();
+        assert_eq!(store.rules_snapshot().unwrap().project.id, project.id);
+        drop(store);
+        let db_path = settings::project_database_path(&project);
+        let db_before = std::fs::read(&db_path).unwrap();
+        std::fs::write(settings::project_data_dir(&project).join("storage.json"),
+            r#"{"schemaVersion":1,"backend":{"kind":"text"}}"#).unwrap();
+        let error = server.open_project(Some(&project.id)).unwrap_err();
+        assert!(error.message.contains("storage.backend_unavailable"), "{error}");
+        assert_eq!(std::fs::read(&db_path).unwrap(), db_before);
+        assert_eq!(std::fs::read(&settings_path).unwrap(), before);
+    }
 
     fn resolve_ref<'a>(schema: &'a serde_json::Value, reference: &str) -> &'a serde_json::Value {
         let path = reference.strip_prefix("#/").unwrap_or(reference);

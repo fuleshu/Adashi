@@ -18,6 +18,7 @@ mod schema;
 mod seed;
 mod settings;
 mod state;
+pub mod storage;
 mod tasks;
 
 #[cfg(test)]
