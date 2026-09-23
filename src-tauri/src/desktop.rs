@@ -1,4 +1,8 @@
+#[cfg(test)]
 use rusqlite::{Connection, OptionalExtension};
+use crate::storage::{ProjectStorage,StorageError};
+use crate::storage::api::{ReadSnapshot,Mutation,Change,TaskWrite,QaWrite,RuleWrite,MemoryWrite,MockupWrite,DesignWrite,FixedPromptWrite,LocalDerivedCache,HealthCacheKey};
+use crate::project::open_project_store;
 use serde::{Deserialize, Serialize};
 #[cfg(test)]
 use std::fs;
@@ -21,11 +25,12 @@ use crate::mockups::{
 use crate::qa::{NewQaJob, QaDesignLinkInput, QaJob, QaJobQuery, QaRun, UpdateQaJob};
 use crate::projection::{self, ProjectionStatus};
 use crate::prompt_hygiene::{self, PromptWarning};
-use crate::rules::{NewRule, Rule, UpdateRule};
+use crate::rules::{NewRule, Rule};
 use crate::settings::{
     AppSettings, ProjectSettings, RuleTemplate, RuleTemplateDraft, WindowSettings,
     architecture_file_name, architecture_projection_enabled,
 };
+#[cfg(test)]
 use crate::state as project_state;
 use crate::tasks::{FinishTask, NewTask, Task, TaskDesignSpecificationLinkInput, UpdateTask};
 
@@ -153,117 +158,48 @@ fn get_dashboard(
     project_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    let project = resolve_project(&state, project_id.as_deref())?;
-    let db = open_project_database(&project).map_err(|err| err.to_string())?;
-    load_dashboard_payload(project, &db, &state)
+    let project=resolve_project(&state,project_id.as_deref())?;
+    let mut store=open_project_store(&project).map_err(|e|e.to_string())?;
+    load_dashboard_payload(project,&mut store,&state)
 }
 
-fn load_dashboard_payload(
-    project: ProjectSettings,
-    db: &Connection,
-    state: &AppState,
-) -> Result<DashboardPayload, String> {
-    let workspace = db
-        .query_row(
-            "SELECT w.name, w.description, w.structurizr_dsl, w.structurizr_json
-             FROM design_workspaces w
-             ORDER BY w.id
-             LIMIT 1",
-            [],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                ))
-            },
-        )
-        .optional()
-        .map_err(|err| err.to_string())?
-        .ok_or_else(|| "No design workspace has been seeded".to_string())?;
-
-    let project_row_id = load_project_row_id(db)?;
-    let memory = memory::load_memory(db, project_row_id)?;
-    let revision = project_state::load_project_revision(db, project_row_id)?.revision;
-    let structurizr_view_key = db
-        .query_row(
-            "SELECT key
-             FROM diagrams
-             WHERE kind = 'structurizr'
-             ORDER BY sort_order, id
-             LIMIT 1",
-            [],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()
-        .map_err(|err| err.to_string())?
-        .unwrap_or_else(|| "ProjectContext".to_string());
-
-    let architecture_projection = {
-        let settings = state
-            .settings
-            .lock()
-            .map_err(|_| "Settings lock poisoned".to_string())?
-            .clone();
-        let file_name = architecture_file_name(&settings, &project.id);
-        let enabled = architecture_projection_enabled(&settings, &project.id);
-        // Opening or refreshing a project keeps its projections current. Regeneration is
-        // idempotent and only writes when the rendered content actually changed.
-        let mut status = projection::status(
-            db,
-            project_row_id,
-            Path::new(&project.folder),
-            &file_name,
-            enabled,
-        )?;
-        if let Err(error) = projection::regenerate(
-            db,
-            project_row_id,
-            Path::new(&project.folder),
-            &file_name,
-            enabled,
-        ) {
-            status.error = Some(error);
-        }
+fn load_dashboard_payload(project:ProjectSettings,store:&mut dyn ProjectStorage,state:&AppState) -> Result<DashboardPayload,String> {
+    let snapshot=store.snapshot().map_err(|e|e.to_string())?;
+    let db=snapshot.as_ref();
+    let inventory=db.design_inventory().map_err(|e|e.to_string())?;
+    let legacy=db.legacy_content().map_err(|e|e.to_string())?;
+    let revision=db.metadata().revision;
+    let workspace=inventory.workspace;
+    let mut diagrams=inventory.diagrams;
+    diagrams.sort_by_key(|v|(v.value.sort_order,v.id));
+    let structurizr_view_key=diagrams.iter().find(|d|d.value.language=="structurizr").map(|d|d.value.key.clone()).unwrap_or_else(||"ProjectContext".into());
+    let architecture_projection={
+        let settings=state.settings.lock().map_err(|_|"Settings lock poisoned".to_string())?.clone();
+        let file_name=architecture_file_name(&settings,&project.id);
+        let enabled=architecture_projection_enabled(&settings,&project.id);
+        let mut status=projection::status(db,Path::new(&project.folder),&file_name,enabled)?;
+        if let Err(error)=projection::regenerate(db,Path::new(&project.folder),&file_name,enabled) {status.error=Some(error);}
         status
     };
-
-    let rules = rules::load_rules(db)?;
-    let rule_templates = load_rule_templates(state)?;
-    let fixed_hook_prompts = fixed_hooks::load_fixed_hook_prompts(db, project_row_id)?;
-    let prompt_warnings = collect_prompt_warnings(&rules, &fixed_hook_prompts, &rule_templates);
-
+    let rules=db.rules().map_err(|e|e.to_string())?;
+    let rule_templates=load_rule_templates(state)?;
+    let fixed_hook_prompts=db.fixed_prompts().map_err(|e|e.to_string())?;
+    let prompt_warnings=collect_prompt_warnings(&rules,&fixed_hook_prompts,&rule_templates);
+    let design_health=recorded_design_health(db,Path::new(&project.folder))?;
     Ok(DashboardPayload {
-        project_id: project.id,
-        project_name: project.name,
-        project_folder: project.folder,
-        revision,
-        workspace_name: workspace.0,
-        workspace_description: workspace.1,
-        structurizr_dsl: workspace.2,
-        structurizr_workspace: workspace.3,
-        structurizr_view_key,
-        design_elements: load_design_elements(&db)?,
-        design_relationships: load_design_relationships(&db)?,
-        uml_artifact_types: design::supported_uml_artifact_types(),
-        diagrams: load_diagrams(&db)?,
-        mockups: mockups::load_summaries(db, project_row_id)?,
-        // The dashboard owns task visibility: it offers a per-state checkbox, so it needs every
-        // state in the payload. What the user is shown is decided by those checkboxes, not here.
-        tasks: tasks::load_tasks(db, project_row_id, &tasks::ALL_TASK_STATES)?,
-        guidelines: load_guidelines(&db)?,
-        post_task_commands: load_post_task_commands(&db)?,
-        qa_checks: load_qa_checks(&db)?,
-        qa_jobs: qa::load_jobs(db, project_row_id, None)?,
-        qa_runs: qa::load_runs(db, project_row_id, Some(20))?,
-        rules,
-        rule_templates,
-        fixed_hook_prompts,
-        memory,
-        architecture_projection,
-        prompt_warnings,
-        design_health: recorded_design_health(db, project_row_id)?,
+        project_id:project.id,project_name:project.name,project_folder:project.folder,revision,
+        workspace_name:workspace.name,workspace_description:workspace.description,
+        structurizr_dsl:workspace.structurizr_dsl,structurizr_workspace:workspace.structurizr_json,structurizr_view_key,
+        design_elements:inventory.elements.into_iter().map(|v|DesignElement {id:v.id,version:v.value.version,external_id:v.value.external_id,parent_external_id:v.value.parent_external_id,element_type:v.value.element_type,name:v.value.name,description:v.value.description,technology:v.value.technology,tags:v.value.tags}).collect(),
+        design_relationships:inventory.relationships.into_iter().map(|v|DesignRelationship {id:v.id,version:v.value.version,external_id:v.value.external_id,source_external_id:v.value.source_external_id,destination_external_id:v.value.destination_external_id,description:v.value.description,technology:v.value.technology,tags:v.value.tags}).collect(),
+        diagrams:diagrams.into_iter().map(|v|DesignDiagram {id:v.id,version:v.value.version,kind:v.value.language,key:v.value.key,title:v.value.title,source:v.value.source,diagram_type:v.value.diagram_type,artifact_role:v.value.artifact_role,artifact_label:v.value.artifact_label,artifact_rank:v.value.artifact_rank,attached_to_external_id:v.value.attached_to_external_id,attached_to_target_type:v.value.attached_to_target_type,sort_order:v.value.sort_order}).collect(),
+        uml_artifact_types:design::supported_uml_artifact_types(),mockups:db.mockups(false).map_err(|e|e.to_string())?,
+        tasks:db.tasks(&tasks::ALL_TASK_STATES).map_err(|e|e.to_string())?,
+        guidelines:legacy.guidelines.into_iter().map(|v|Guideline {id:v.id,title:v.title,body:v.body}).collect(),
+        post_task_commands:legacy.post_task_commands.into_iter().map(|v|PostTaskCommand {id:v.id,label:v.label,command:v.command,trigger:v.trigger}).collect(),
+        qa_checks:legacy.qa_checks.into_iter().map(|v|QaCheck {id:v.id,label:v.label,command:v.command,required:v.required}).collect(),
+        qa_jobs:db.qa_jobs(&QaJobQuery::default()).map_err(|e|e.to_string())?,qa_runs:db.qa_runs(20).map_err(|e|e.to_string())?,
+        rules,rule_templates,fixed_hook_prompts,memory:db.memory().map_err(|e|e.to_string())?,architecture_projection,prompt_warnings,design_health,
     })
 }
 
@@ -272,92 +208,15 @@ fn load_dashboard_payload(
 /// The scan itself reads source files, so it runs on request rather than on every dashboard
 /// refresh; this rebuilds the same shape from the recorded rows so the design view always has
 /// something to show, including the honest "never scanned" state.
-fn recorded_design_health(
-    db: &rusqlite::Connection,
-    project_row_id: i64,
-) -> Result<design_health::DesignHealthResult, String> {
-    let counts = design_health::recorded_counts(db, project_row_id)?;
-    let states = design_health::recorded_states(db, project_row_id)?;
-    let details: std::collections::HashMap<String, String> = db
-        .prepare("SELECT design_external_id, detail FROM design_element_checks WHERE project_id=?1")
-        .map_err(|error| error.to_string())?
-        .query_map([project_row_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .map_err(|error| error.to_string())?
-        .collect::<rusqlite::Result<std::collections::HashMap<_, _>>>()
-        .map_err(|error| error.to_string())?;
-    let broken: std::collections::HashMap<String, Vec<design_health::BrokenBinding>> = {
-        let mut map: std::collections::HashMap<String, Vec<design_health::BrokenBinding>> =
-            std::collections::HashMap::new();
-        let mut statement = db
-            .prepare(
-                "SELECT design_external_id, target_type, target, detail
-                 FROM design_binding_checks WHERE project_id=?1 ORDER BY target",
-            )
-            .map_err(|error| error.to_string())?;
-        let rows = statement
-            .query_map([project_row_id], |row| {
-                let design_external_id: String = row.get(0)?;
-                Ok((
-                    design_external_id,
-                    design_health::BrokenBinding {
-                        design_external_id: row.get(0)?,
-                        target_type: row.get(1)?,
-                        target: row.get(2)?,
-                        detail: row.get(3)?,
-                    },
-                ))
-            })
-            .map_err(|error| error.to_string())?;
-        for row in rows {
-            let (design_external_id, binding) = row.map_err(|error| error.to_string())?;
-            map.entry(design_external_id).or_default().push(binding);
-        }
-        map
-    };
-    let mut elements = db
-        .prepare(
-            "SELECT e.external_id, e.name, e.element_type
-             FROM c4_elements e JOIN design_workspaces w ON w.id = e.workspace_id
-             ORDER BY e.id",
-        )
-        .map_err(|error| error.to_string())?
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })
-        .map_err(|error| error.to_string())?
-        .filter_map(|row| row.ok())
-        .filter_map(|(external_id, name, element_type)| {
-            let (state, files) = states.get(&external_id).cloned()?;
-            Some(design_health::ElementFinding {
-                design_external_id: external_id.clone(),
-                name,
-                element_type,
-                state,
-                next_action: state.next_action().to_string(),
-                files,
-                broken: broken.get(&external_id).cloned().unwrap_or_default(),
-                detail: details.get(&external_id).cloned().unwrap_or_default(),
-                waivers: Vec::new(),
-            })
-        })
-        .collect::<Vec<_>>();
-    elements.sort_by(|left, right| left.design_external_id.cmp(&right.design_external_id));
-
-    Ok(design_health::DesignHealthResult {
-        summary: design_health::recorded_summary(&counts),
-        counts,
-        elements,
-        not_checked: "These checks prove that an element is attached and that what it binds to \
-                      exists. They do not check whether a bound file is a correct implementation \
-                      of the element's responsibility."
-            .to_string(),
-    })
+fn recorded_design_health(db:&dyn ReadSnapshot,folder:&Path) -> Result<design_health::DesignHealthResult,String> {
+    let key=HealthCacheKey {project_id:db.metadata().identity.id.clone(),computer_id:crate::computer::id()?.into(),cursor:db.metadata().cursor.clone()};
+    let mut result=crate::storage::local_cache::FileDerivedCache::for_checkout(folder).health(&key).ok().flatten().unwrap_or_else(||design_health::DesignHealthResult {
+        counts:Default::default(),elements:vec![],summary:"Not scanned for the current project revision.".into(),
+        not_checked:"These checks locate bound code; they do not verify its implementation.".into(),
+    });
+    for element in &mut result.elements {element.waivers=db.health_waivers(&element.design_external_id).map_err(|e|e.to_string())?;}
+    result.counts.waivers=result.elements.iter().map(|e|e.waivers.len() as u32).sum();
+    Ok(result)
 }
 
 /// Runs the design-to-code check for a project and returns the refreshed dashboard.
@@ -366,11 +225,11 @@ fn rescan_design_health(
     project_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    let project = resolve_project(&state, project_id.as_deref())?;
-    let db = open_project_database(&project).map_err(|error| error.to_string())?;
-    let project_row_id = load_project_row_id(&db)?;
-    design_health::scan_and_record(&db, project_row_id, std::path::Path::new(&project.folder))?;
-    load_dashboard_payload(project, &db, &state)
+    let project=resolve_project(&state,project_id.as_deref())?;
+    let mut store=open_project_store(&project).map_err(|e|e.to_string())?;
+    {let snapshot=store.snapshot().map_err(|e|e.to_string())?;
+     design_health::scan_snapshot(snapshot.as_ref(),Path::new(&project.folder))?;}
+    load_dashboard_payload(project,&mut store,&state)
 }
 
 /// Stored prompts that name tools which no longer exist. Detecting these turns a silent rot
@@ -417,10 +276,10 @@ fn get_mockup(
     external_id: String,
     state: State<'_, AppState>,
 ) -> Result<UiMockup, String> {
-    let project = resolve_project(&state, Some(&project_id))?;
-    let db = open_project_database(&project).map_err(|err| err.to_string())?;
-    let project_row_id = load_project_row_id(&db)?;
-    mockups::load_mockup(&db, project_row_id, external_id.trim())
+    let project=resolve_project(&state,Some(&project_id))?;
+    let mut store=open_project_store(&project).map_err(|e|e.to_string())?;
+    let snapshot=store.snapshot().map_err(|e|e.to_string())?;
+    snapshot.mockup(external_id.trim()).map_err(|e|e.to_string())
 }
 
 #[tauri::command]
@@ -429,9 +288,8 @@ fn create_mockup(
     input: CreateMockupInput,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    mutate_mockup_dashboard(&state, &project_id, |db, row_id| {
-        mockups::create_mockup(db, row_id, input).map(|_| ())
-    })
+    let project=resolve_project(&state,Some(&project_id))?;
+    mutate_dashboard(project,input.operation_id.clone(),vec![Change::Mockup(MockupWrite::Create(input))],&state)
 }
 
 #[tauri::command]
@@ -440,9 +298,8 @@ fn save_mockup_draft(
     input: SaveDraftInput,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    mutate_mockup_dashboard(&state, &project_id, |db, row_id| {
-        mockups::save_draft(db, row_id, input).map(|_| ())
-    })
+    let project=resolve_project(&state,Some(&project_id))?;
+    mutate_dashboard(project,input.operation_id.clone(),vec![Change::Mockup(MockupWrite::SaveDraft(input))],&state)
 }
 
 macro_rules! mockup_lifecycle_command {
@@ -453,18 +310,17 @@ macro_rules! mockup_lifecycle_command {
             input: MockupMutationInput,
             state: State<'_, AppState>,
         ) -> Result<DashboardPayload, String> {
-            mutate_mockup_dashboard(&state, &project_id, |db, row_id| {
-                mockups::$runtime(db, row_id, input).map(|_| ())
-            })
+            let project=resolve_project(&state,Some(&project_id))?;
+            mutate_dashboard(project,input.operation_id.clone(),vec![Change::Mockup(MockupWrite::$runtime(input))],&state)
         }
     };
 }
 
-mockup_lifecycle_command!(request_mockup_revision, request_revision);
-mockup_lifecycle_command!(resume_mockup_editing, resume_editing);
-mockup_lifecycle_command!(accept_mockup_proposal, accept_proposal);
-mockup_lifecycle_command!(reject_mockup_proposal, reject_proposal);
-mockup_lifecycle_command!(discard_mockup_draft, discard_draft);
+mockup_lifecycle_command!(request_mockup_revision, RequestRevision);
+mockup_lifecycle_command!(resume_mockup_editing, ResumeEditing);
+mockup_lifecycle_command!(accept_mockup_proposal, AcceptProposal);
+mockup_lifecycle_command!(reject_mockup_proposal, RejectProposal);
+mockup_lifecycle_command!(discard_mockup_draft, DiscardDraft);
 
 #[tauri::command]
 fn delete_mockup(
@@ -472,30 +328,22 @@ fn delete_mockup(
     input: MockupMutationInput,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    mutate_mockup_dashboard(&state, &project_id, |db, row_id| {
-        mockups::delete_mockup(db, row_id, input)
-    })
+    let project=resolve_project(&state,Some(&project_id))?;
+    mutate_dashboard(project,input.operation_id.clone(),vec![Change::Mockup(MockupWrite::Delete(input))],&state)
 }
 
-fn mutate_mockup_dashboard<F>(
-    state: &AppState,
-    project_id: &str,
-    mutation: F,
-) -> Result<DashboardPayload, String>
-where
-    F: FnOnce(&mut Connection, i64) -> Result<(), String>,
-{
-    let project = {
-        let settings = state
-            .settings
-            .lock()
-            .map_err(|_| "Settings lock was poisoned".to_string())?;
-        resolve_project_from_settings(&settings, Some(project_id))?
-    };
-    let mut db = open_project_database(&project).map_err(|err| err.to_string())?;
-    let row_id = load_project_row_id(&db)?;
-    mutation(&mut db, row_id)?;
-    load_dashboard_payload(project, &db, state)
+fn mutate_dashboard(project:ProjectSettings,operation_id:String,changes:Vec<Change>,state:&AppState) -> Result<DashboardPayload,String> {
+    let mut store=open_project_store(&project).map_err(|e|e.to_string())?;
+    store.commit(Mutation {operation_id,changes}).map_err(desktop_storage_error)?;
+    load_dashboard_payload(project,&mut store,state)
+}
+
+fn desktop_storage_error(error:StorageError) -> String {
+    match error {
+        StorageError::Conflict(conflicts)=>serde_json::json!({"code":"resource.conflict","conflicts":conflicts}).to_string(),
+        StorageError::DesignRejected(result)=>serde_json::to_string(&result.errors).unwrap_or_else(|_|"Design validation failed".into()),
+        other=>other.to_string(),
+    }
 }
 
 fn load_rule_templates(state: &AppState) -> Result<Vec<RuleTemplate>, String> {
@@ -519,15 +367,11 @@ fn get_project_revision(
     project_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<ProjectRevisionPayload, String> {
-    let project = resolve_project(&state, project_id.as_deref())?;
-    let db = open_project_database(&project).map_err(|err| err.to_string())?;
-    let revision = project_state::load_project_revision(&db, load_project_row_id(&db)?)?;
-
-    Ok(ProjectRevisionPayload {
-        project_id: project.id,
-        revision: revision.revision,
-        updated_at: revision.updated_at,
-    })
+    let project=resolve_project(&state,project_id.as_deref())?;
+    let mut store=open_project_store(&project).map_err(|e|e.to_string())?;
+    let snapshot=store.snapshot().map_err(|e|e.to_string())?;
+    let metadata=snapshot.metadata();
+    Ok(ProjectRevisionPayload {project_id:project.id,revision:metadata.revision,updated_at:metadata.updated_at.clone()})
 }
 
 #[tauri::command]
@@ -682,8 +526,8 @@ fn add_project_to_settings(
 
     drop(settings);
 
-    let db = open_project_database(&project).map_err(|err| err.to_string())?;
-    verify_project_database(&db)?;
+    let mut store=open_project_store(&project).map_err(|e|e.to_string())?;
+    verify_project_database(store.snapshot().map_err(|e|e.to_string())?.as_ref())?;
 
     let mut settings = state
         .settings
@@ -937,97 +781,19 @@ struct RunQaJobsRequest {
     trigger_source: Option<String>,
 }
 
-fn desktop_guard(
-    operation_id: String,
-    kind: &str,
-    id: i64,
-    expected_version: i64,
-) -> concurrency::MutationGuard {
-    concurrency::MutationGuard {
-        operation_id,
-        read_set: Vec::new(),
-        write_set: vec![concurrency::ResourceExpectation {
-            resource_kind: kind.to_string(),
-            resource_id: id.to_string(),
-            expected_version,
-        }],
-    }
-}
 
-fn same_desktop_task(left: &Task, right: &Task) -> bool {
-    left.title == right.title
-        && left.description == right.description
-        && left.state == right.state
-        && left.completion_memo == right.completion_memo
-        && left.created_files == right.created_files
-        && left.changed_files == right.changed_files
-        && left.design_specification_links.len() == right.design_specification_links.len()
-        && left
-            .design_specification_links
-            .iter()
-            .zip(&right.design_specification_links)
-            .all(|(a, b)| {
-                a.target_type == b.target_type && a.design_external_id == b.design_external_id
-            })
-}
 
-fn same_desktop_qa(left: &QaJob, right: &QaJob) -> bool {
-    left.name == right.name
-        && left.description == right.description
-        && left.command == right.command
-        && left.working_directory == right.working_directory
-        && left.shell == right.shell
-        && left.timeout_seconds == right.timeout_seconds
-        && left.enabled == right.enabled
-        && left.tags == right.tags
-        && left.design_specification_links.len() == right.design_specification_links.len()
-        && left
-            .design_specification_links
-            .iter()
-            .zip(&right.design_specification_links)
-            .all(|(a, b)| {
-                a.target_type == b.target_type && a.design_external_id == b.design_external_id
-            })
-        && left
-            .task_links
-            .iter()
-            .map(|link| link.task_id)
-            .collect::<Vec<_>>()
-            == right
-                .task_links
-                .iter()
-                .map(|link| link.task_id)
-                .collect::<Vec<_>>()
-}
+
+
+
 
 #[tauri::command]
 fn create_rule(
     input: CreateRuleRequest,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    let project = resolve_project(&state, input.project_id.as_deref())?;
-    let mut db = open_project_database(&project).map_err(|error| error.to_string())?;
-    let project_row_id = load_project_row_id(&db)?;
-    if concurrency::load_operation::<Rule>(&db, project_row_id, &input.operation_id)?.is_none() {
-        let tx = db.transaction().map_err(|error| error.to_string())?;
-        let rule_id = rules::create_rule(
-            &tx,
-            project_row_id,
-            NewRule {
-                name: input.name,
-                enabled: input.enabled,
-                intend: input.intend,
-                hook: input.hook,
-                prompt: input.prompt,
-            },
-        )?;
-        concurrency::bump_version(&tx, project_row_id, "rule", &rule_id.to_string())?;
-        project_state::bump_project_revision(&tx, project_row_id)?;
-        let rule = rules::load_rule(&tx, rule_id)?;
-        concurrency::record_no_op(&tx, project_row_id, &input.operation_id, &rule)?;
-        tx.commit().map_err(|error| error.to_string())?;
-    }
-    load_dashboard_payload(project, &db, &state)
+    let project=resolve_project(&state,input.project_id.as_deref())?;
+    mutate_dashboard(project,input.operation_id,vec![Change::Rule(RuleWrite::Create {input:NewRule {name:input.name,enabled:input.enabled,intend:input.intend,hook:input.hook,prompt:input.prompt} })],&state)
 }
 
 #[tauri::command]
@@ -1035,40 +801,8 @@ fn update_rule(
     input: UpdateRuleRequest,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    let project = resolve_project(&state, input.project_id.as_deref())?;
-    let mut db = open_project_database(&project).map_err(|error| error.to_string())?;
-    let project_row_id = load_project_row_id(&db)?;
-    let guard = desktop_guard(input.operation_id, "rule", input.id, input.expected_version);
-    if concurrency::load_operation::<Rule>(&db, project_row_id, &guard.operation_id)?.is_none() {
-        let tx = db.transaction().map_err(|error| error.to_string())?;
-        concurrency::validate_guard(&tx, project_row_id, &guard)?;
-        let before = rules::load_rule(&tx, input.id)?;
-        rules::update_rule(
-            &tx,
-            UpdateRule {
-                id: input.id,
-                name: input.name,
-                enabled: input.enabled,
-                intend: input.intend,
-                hook: input.hook,
-                prompt: input.prompt,
-            },
-        )?;
-        let updated = rules::load_rule(&tx, input.id)?;
-        if serde_json::to_value(&before).map_err(|error| error.to_string())?
-            == serde_json::to_value(&updated).map_err(|error| error.to_string())?
-        {
-            tx.rollback().map_err(|error| error.to_string())?;
-            concurrency::record_no_op(&db, project_row_id, &guard.operation_id, &before)?;
-        } else {
-            concurrency::bump_version(&tx, project_row_id, "rule", &input.id.to_string())?;
-            project_state::bump_project_revision(&tx, project_row_id)?;
-            let updated = rules::load_rule(&tx, input.id)?;
-            concurrency::record_no_op(&tx, project_row_id, &guard.operation_id, &updated)?;
-            tx.commit().map_err(|error| error.to_string())?;
-        }
-    }
-    load_dashboard_payload(project, &db, &state)
+    let project=resolve_project(&state,input.project_id.as_deref())?;
+    mutate_dashboard(project,input.operation_id,vec![Change::Rule(RuleWrite::Update {id:input.id,expected_version:input.expected_version,input:NewRule {name:input.name,enabled:input.enabled,intend:input.intend,hook:input.hook,prompt:input.prompt} })],&state)
 }
 
 #[tauri::command]
@@ -1079,20 +813,8 @@ fn delete_rule(
     expected_version: i64,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    let project = resolve_project(&state, project_id.as_deref())?;
-    let mut db = open_project_database(&project).map_err(|error| error.to_string())?;
-    let project_row_id = load_project_row_id(&db)?;
-    let guard = desktop_guard(operation_id, "rule", rule_id, expected_version);
-    if concurrency::load_operation::<i64>(&db, project_row_id, &guard.operation_id)?.is_none() {
-        let tx = db.transaction().map_err(|error| error.to_string())?;
-        concurrency::validate_guard(&tx, project_row_id, &guard)?;
-        rules::delete_rule(&tx, rule_id)?;
-        concurrency::tombstone_version(&tx, project_row_id, "rule", &rule_id.to_string())?;
-        project_state::bump_project_revision(&tx, project_row_id)?;
-        concurrency::record_no_op(&tx, project_row_id, &guard.operation_id, &rule_id)?;
-        tx.commit().map_err(|error| error.to_string())?;
-    }
-    load_dashboard_payload(project, &db, &state)
+    let project=resolve_project(&state,project_id.as_deref())?;
+    mutate_dashboard(project,operation_id,vec![Change::Rule(RuleWrite::Delete {id:rule_id,expected_version})],&state)
 }
 
 #[tauri::command]
@@ -1101,8 +823,8 @@ fn save_rule_template(
     state: State<'_, AppState>,
 ) -> Result<AppSettings, String> {
     let project = resolve_project(&state, input.project_id.as_deref())?;
-    let db = open_project_database(&project).map_err(|err| err.to_string())?;
-    let rule = rules::load_rule(&db, input.rule_id)?;
+    let mut store=open_project_store(&project).map_err(|e|e.to_string())?;
+    let rule=store.snapshot().map_err(|e|e.to_string())?.rules().map_err(|e|e.to_string())?.into_iter().find(|r|r.id==input.rule_id).ok_or_else(||format!("Unknown rule id: {}",input.rule_id))?;
     let mut settings = state
         .settings
         .lock()
@@ -1127,7 +849,7 @@ fn create_rule_from_template(
     input: CreateRuleFromTemplateRequest,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    let project = resolve_project(&state, input.project_id.as_deref())?;
+    let project=resolve_project(&state,input.project_id.as_deref())?;
     let template = state
         .settings
         .lock()
@@ -1137,18 +859,7 @@ fn create_rule_from_template(
         .find(|template| template.id == input.template_id)
         .cloned()
         .ok_or_else(|| format!("Unknown rule template id: {}", input.template_id))?;
-    let mut db = open_project_database(&project).map_err(|err| err.to_string())?;
-    let project_row_id = load_project_row_id(&db)?;
-    if concurrency::load_operation::<Rule>(&db, project_row_id, &input.operation_id)?.is_none() {
-        let tx = db.transaction().map_err(|err| err.to_string())?;
-        let rule_id = rules::create_rule_from_template(&tx, project_row_id, &template)?;
-        concurrency::bump_version(&tx, project_row_id, "rule", &rule_id.to_string())?;
-        project_state::bump_project_revision(&tx, project_row_id)?;
-        let rule = rules::load_rule(&tx, rule_id)?;
-        concurrency::record_no_op(&tx, project_row_id, &input.operation_id, &rule)?;
-        tx.commit().map_err(|err| err.to_string())?;
-    }
-    load_dashboard_payload(project, &db, &state)
+    mutate_dashboard(project,input.operation_id,vec![Change::Rule(RuleWrite::Create {input:NewRule {name:template.name,enabled:template.enabled,intend:template.intend,hook:template.hook,prompt:template.prompt}})],&state)
 }
 
 #[tauri::command]
@@ -1171,17 +882,8 @@ fn update_memory_rule(
     input: UpdateMemoryRuleRequest,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    let project = resolve_project(&state, input.project_id.as_deref())?;
-    let mut db = open_project_database(&project).map_err(|err| err.to_string())?;
-    let project_row_id = load_project_row_id(&db)?;
-    memory::update_memory_rule(
-        &mut db,
-        project_row_id,
-        input.expected_version,
-        &input.operation_id,
-        input.rule,
-    )?;
-    load_dashboard_payload(project, &db, &state)
+    let project=resolve_project(&state,input.project_id.as_deref())?;
+    mutate_dashboard(project,input.operation_id,vec![Change::Memory(MemoryWrite::Protocol {expected_version:input.expected_version,rule:input.rule})],&state)
 }
 
 #[tauri::command]
@@ -1189,17 +891,8 @@ fn update_memory(
     input: UpdateMemoryRequest,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    let project = resolve_project(&state, input.project_id.as_deref())?;
-    let mut db = open_project_database(&project).map_err(|err| err.to_string())?;
-    let project_row_id = load_project_row_id(&db)?;
-    memory::compact_memory(
-        &mut db,
-        project_row_id,
-        input.expected_version,
-        &input.operation_id,
-        input.memory,
-    )?;
-    load_dashboard_payload(project, &db, &state)
+    let project=resolve_project(&state,input.project_id.as_deref())?;
+    mutate_dashboard(project,input.operation_id,vec![Change::Memory(MemoryWrite::Compact {expected_version:input.expected_version,summary:input.memory,superseded_note_ids:vec![]})],&state)
 }
 
 #[tauri::command]
@@ -1207,49 +900,8 @@ fn update_fixed_hook_prompt(
     input: UpdateFixedHookPromptRequest,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    let project = resolve_project(&state, input.project_id.as_deref())?;
-    let mut db = open_project_database(&project).map_err(|err| err.to_string())?;
-    let project_row_id = load_project_row_id(&db)?;
-    if concurrency::load_operation::<FixedHookPrompt>(&db, project_row_id, &input.operation_id)?
-        .is_none()
-    {
-        let guard = concurrency::MutationGuard {
-            operation_id: input.operation_id,
-            read_set: Vec::new(),
-            write_set: vec![concurrency::ResourceExpectation {
-                resource_kind: "fixed-hook".into(),
-                resource_id: input.key.clone(),
-                expected_version: input.expected_version,
-            }],
-        };
-        let tx = db.transaction().map_err(|err| err.to_string())?;
-        concurrency::validate_guard(&tx, project_row_id, &guard)?;
-        let before = fixed_hooks::load_prompt(&tx, project_row_id, &input.key)?
-            .ok_or_else(|| format!("Unknown fixed hook prompt key: {}", input.key))?;
-        if before == input.prompt.trim() {
-            let current = fixed_hooks::load_fixed_hook_prompts(&tx, project_row_id)?
-                .into_iter()
-                .find(|item| item.key == input.key)
-                .ok_or_else(|| "Fixed hook prompt disappeared".to_string())?;
-            concurrency::record_no_op(&tx, project_row_id, &guard.operation_id, &current)?;
-        } else {
-            fixed_hooks::update_fixed_hook_prompt(
-                &tx,
-                project_row_id,
-                input.key.clone(),
-                input.prompt,
-            )?;
-            concurrency::bump_version(&tx, project_row_id, "fixed-hook", &input.key)?;
-            project_state::bump_project_revision(&tx, project_row_id)?;
-            let current = fixed_hooks::load_fixed_hook_prompts(&tx, project_row_id)?
-                .into_iter()
-                .find(|item| item.key == input.key)
-                .ok_or_else(|| "Fixed hook prompt disappeared".to_string())?;
-            concurrency::record_no_op(&tx, project_row_id, &guard.operation_id, &current)?;
-        }
-        tx.commit().map_err(|err| err.to_string())?;
-    }
-    load_dashboard_payload(project, &db, &state)
+    let project=resolve_project(&state,input.project_id.as_deref())?;
+    mutate_dashboard(project,input.operation_id,vec![Change::FixedPrompt(FixedPromptWrite {key:input.key,expected_version:input.expected_version,prompt:input.prompt})],&state)
 }
 
 #[tauri::command]
@@ -1257,61 +909,8 @@ fn update_design_element(
     input: UpdateDesignElementRequest,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    let project = resolve_project(&state, input.project_id.as_deref())?;
-    let mut db = open_project_database(&project).map_err(|err| err.to_string())?;
-    let project_row_id = load_project_row_id(&db)?;
-    let workspace_id = load_workspace_id(&db)?;
-    let (parent_external_id, element_type): (Option<String>, String) = db.query_row(
-        "SELECT parent_external_id, element_type FROM c4_elements WHERE workspace_id=?1 AND external_id=?2",
-        rusqlite::params![workspace_id, input.external_id], |row| Ok((row.get(0)?, row.get(1)?)),
-    ).map_err(|_| format!("Unknown design element id: {}", input.external_id))?;
-    let mut read_set = Vec::new();
-    if let Some(parent) = parent_external_id.as_ref() {
-        read_set.push(concurrency::ResourceExpectation {
-            resource_kind: "design.element".into(),
-            resource_id: parent.clone(),
-            expected_version: concurrency::load_version(
-                &db,
-                project_row_id,
-                "design.element",
-                parent,
-            )?,
-        });
-    }
-    let guard = concurrency::MutationGuard {
-        operation_id: input.operation_id,
-        read_set,
-        write_set: vec![concurrency::ResourceExpectation {
-            resource_kind: "design.element".into(),
-            resource_id: input.external_id.clone(),
-            expected_version: input.expected_version,
-        }],
-    };
-    let change = DesignChange::UpsertElement {
-        external_id: input.external_id,
-        parent_external_id,
-        element_type,
-        name: input.name,
-        description: Some(input.description),
-        technology: Some(input.technology),
-        tags: Some(input.tags),
-    };
-    let result = design::save_changes(
-        &mut db,
-        project_row_id,
-        &guard,
-        "Update a design element from the dashboard.",
-        &[change],
-    )?;
-    if !result.ok
-        && result
-            .errors
-            .first()
-            .is_none_or(|error| error.code != "save.no_changes")
-    {
-        return Err(serde_json::to_string(&result.errors).map_err(|err| err.to_string())?);
-    }
-    load_dashboard_payload(project, &db, &state)
+    let project=resolve_project(&state,input.project_id.as_deref())?;
+    mutate_dashboard(project,input.operation_id,vec![Change::Design(DesignWrite::EditElement {external_id:input.external_id,expected_version:input.expected_version,name:input.name,description:input.description,technology:input.technology,tags:input.tags})],&state)
 }
 
 #[tauri::command]
@@ -1319,62 +918,8 @@ fn update_design_relationship(
     input: UpdateDesignRelationshipRequest,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    let project = resolve_project(&state, input.project_id.as_deref())?;
-    let mut db = open_project_database(&project).map_err(|err| err.to_string())?;
-    let project_row_id = load_project_row_id(&db)?;
-    let workspace_id = load_workspace_id(&db)?;
-    let (source_external_id, destination_external_id): (String, String) = db.query_row(
-        "SELECT source_external_id, destination_external_id FROM c4_relationships WHERE workspace_id=?1 AND external_id=?2",
-        rusqlite::params![workspace_id, input.external_id], |row| Ok((row.get(0)?, row.get(1)?)),
-    ).map_err(|_| format!("Unknown design relationship id: {}", input.external_id))?;
-    let read_set = [&source_external_id, &destination_external_id]
-        .into_iter()
-        .map(|id| {
-            Ok(concurrency::ResourceExpectation {
-                resource_kind: "design.element".into(),
-                resource_id: id.clone(),
-                expected_version: concurrency::load_version(
-                    &db,
-                    project_row_id,
-                    "design.element",
-                    id,
-                )?,
-            })
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    let guard = concurrency::MutationGuard {
-        operation_id: input.operation_id,
-        read_set,
-        write_set: vec![concurrency::ResourceExpectation {
-            resource_kind: "design.relationship".into(),
-            resource_id: input.external_id.clone(),
-            expected_version: input.expected_version,
-        }],
-    };
-    let change = DesignChange::UpsertRelationship {
-        external_id: input.external_id,
-        source_external_id,
-        destination_external_id,
-        description: input.description,
-        technology: Some(input.technology),
-        tags: Some(input.tags),
-    };
-    let result = design::save_changes(
-        &mut db,
-        project_row_id,
-        &guard,
-        "Update a design relationship from the dashboard.",
-        &[change],
-    )?;
-    if !result.ok
-        && result
-            .errors
-            .first()
-            .is_none_or(|error| error.code != "save.no_changes")
-    {
-        return Err(serde_json::to_string(&result.errors).map_err(|err| err.to_string())?);
-    }
-    load_dashboard_payload(project, &db, &state)
+    let project=resolve_project(&state,input.project_id.as_deref())?;
+    mutate_dashboard(project,input.operation_id,vec![Change::Design(DesignWrite::EditRelationship {external_id:input.external_id,expected_version:input.expected_version,description:input.description,technology:input.technology,tags:input.tags})],&state)
 }
 
 #[tauri::command]
@@ -1382,15 +927,8 @@ fn create_design_relationship(
     input: CreateDesignRelationshipRequest,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    let project = resolve_project(&state, input.project_id.as_deref())?;
-    let mut db = open_project_database(&project).map_err(|err| err.to_string())?;
-    let project_row_id = load_project_row_id(&db)?;
-    let workspace_id = load_workspace_id(&db)?;
-    if input.source_external_id == input.destination_external_id {
-        return Err("A relationship must connect two different elements".to_string());
-    }
-    ensure_element_exists(&db, workspace_id, &input.source_external_id)?;
-    ensure_element_exists(&db, workspace_id, &input.destination_external_id)?;
+    let project=resolve_project(&state,input.project_id.as_deref())?;
+    if input.source_external_id==input.destination_external_id {return Err("A relationship must connect two different elements".into());}
     let relationship_suffix = input
         .operation_id
         .chars()
@@ -1401,49 +939,7 @@ fn create_design_relationship(
         return Err("operationId must contain an ASCII letter or digit".to_string());
     }
     let external_id = format!("ui-rel-{relationship_suffix}");
-    let read_set = [&input.source_external_id, &input.destination_external_id]
-        .into_iter()
-        .map(|id| {
-            Ok(concurrency::ResourceExpectation {
-                resource_kind: "design.element".into(),
-                resource_id: id.clone(),
-                expected_version: concurrency::load_version(
-                    &db,
-                    project_row_id,
-                    "design.element",
-                    id,
-                )?,
-            })
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    let guard = concurrency::MutationGuard {
-        operation_id: input.operation_id,
-        read_set,
-        write_set: vec![concurrency::ResourceExpectation {
-            resource_kind: "design.relationship".into(),
-            resource_id: external_id.clone(),
-            expected_version: 0,
-        }],
-    };
-    let change = DesignChange::UpsertRelationship {
-        external_id,
-        source_external_id: input.source_external_id,
-        destination_external_id: input.destination_external_id,
-        description: input.description,
-        technology: Some(input.technology),
-        tags: Some(input.tags),
-    };
-    let result = design::save_changes(
-        &mut db,
-        project_row_id,
-        &guard,
-        "Create a design relationship from the dashboard.",
-        &[change],
-    )?;
-    if !result.ok {
-        return Err(serde_json::to_string(&result.errors).map_err(|err| err.to_string())?);
-    }
-    load_dashboard_payload(project, &db, &state)
+    mutate_dashboard(project,input.operation_id,vec![Change::Design(DesignWrite::Save {change_intent:"Create a design relationship from the dashboard.".into(),read_tokens:vec![],changes:vec![DesignChange::UpsertRelationship {external_id,source_external_id:input.source_external_id,destination_external_id:input.destination_external_id,description:input.description,technology:Some(input.technology),tags:Some(input.tags)}]})],&state)
 }
 
 #[tauri::command]
@@ -1451,27 +947,12 @@ fn create_task(
     input: CreateTaskRequest,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    let project = resolve_project(&state, input.project_id.as_deref())?;
-    let mut db = open_project_database(&project).map_err(|error| error.to_string())?;
-    let project_row_id = load_project_row_id(&db)?;
-    if concurrency::load_operation::<Task>(&db, project_row_id, &input.operation_id)?.is_none() {
-        let tx = db.transaction().map_err(|error| error.to_string())?;
-        let created = tasks::create_task(
-            &tx,
-            project_row_id,
-            NewTask {
+    let project=resolve_project(&state,input.project_id.as_deref())?;
+    mutate_dashboard(project,input.operation_id,vec![Change::Task(TaskWrite::Create { input:NewTask {
                 title: input.title,
                 description: input.description,
                 design_specification_links: input.design_specification_links,
-            },
-        )?;
-        concurrency::bump_version(&tx, project_row_id, "task", &created.id.to_string())?;
-        project_state::bump_project_revision(&tx, project_row_id)?;
-        let created = tasks::load_task(&tx, project_row_id, created.id)?;
-        concurrency::record_no_op(&tx, project_row_id, &input.operation_id, &created)?;
-        tx.commit().map_err(|error| error.to_string())?;
-    }
-    load_dashboard_payload(project, &db, &state)
+            } })],&state)
 }
 
 #[tauri::command]
@@ -1479,42 +960,14 @@ fn update_task(
     input: UpdateTaskRequest,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    let project = resolve_project(&state, input.project_id.as_deref())?;
-    let mut db = open_project_database(&project).map_err(|error| error.to_string())?;
-    let project_row_id = load_project_row_id(&db)?;
-    let guard = desktop_guard(
-        input.operation_id,
-        "task",
-        input.task_id,
-        input.expected_version,
-    );
-    if concurrency::load_operation::<Task>(&db, project_row_id, &guard.operation_id)?.is_none() {
-        let tx = db.transaction().map_err(|error| error.to_string())?;
-        concurrency::validate_guard(&tx, project_row_id, &guard)?;
-        let before = tasks::load_task(&tx, project_row_id, input.task_id)?;
-        let updated = tasks::update_task(
-            &tx,
-            project_row_id,
-            UpdateTask {
+    let project=resolve_project(&state,input.project_id.as_deref())?;
+    mutate_dashboard(project,input.operation_id,vec![Change::Task(TaskWrite::Update { expected_version:input.expected_version,input:UpdateTask {
                 task_id: input.task_id,
                 title: input.title,
                 description: input.description,
                 state: input.state,
                 design_specification_links: input.design_specification_links,
-            },
-        )?;
-        if same_desktop_task(&before, &updated) {
-            tx.rollback().map_err(|error| error.to_string())?;
-            concurrency::record_no_op(&db, project_row_id, &guard.operation_id, &before)?;
-        } else {
-            concurrency::bump_version(&tx, project_row_id, "task", &input.task_id.to_string())?;
-            project_state::bump_project_revision(&tx, project_row_id)?;
-            let updated = tasks::load_task(&tx, project_row_id, input.task_id)?;
-            concurrency::record_no_op(&tx, project_row_id, &guard.operation_id, &updated)?;
-            tx.commit().map_err(|error| error.to_string())?;
-        }
-    }
-    load_dashboard_payload(project, &db, &state)
+            } })],&state)
 }
 
 #[tauri::command]
@@ -1522,41 +975,13 @@ fn finish_task(
     input: FinishTaskRequest,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    let project = resolve_project(&state, input.project_id.as_deref())?;
-    let mut db = open_project_database(&project).map_err(|error| error.to_string())?;
-    let project_row_id = load_project_row_id(&db)?;
-    let guard = desktop_guard(
-        input.operation_id,
-        "task",
-        input.task_id,
-        input.expected_version,
-    );
-    if concurrency::load_operation::<Task>(&db, project_row_id, &guard.operation_id)?.is_none() {
-        let tx = db.transaction().map_err(|error| error.to_string())?;
-        concurrency::validate_guard(&tx, project_row_id, &guard)?;
-        let before = tasks::load_task(&tx, project_row_id, input.task_id)?;
-        let updated = tasks::finish_task(
-            &tx,
-            project_row_id,
-            FinishTask {
+    let project=resolve_project(&state,input.project_id.as_deref())?;
+    mutate_dashboard(project,input.operation_id,vec![Change::Task(TaskWrite::Finish { expected_version:input.expected_version,input:FinishTask {
                 task_id: input.task_id,
                 completion_memo: input.completion_memo,
                 created_files: input.created_files,
                 changed_files: input.changed_files,
-            },
-        )?;
-        if same_desktop_task(&before, &updated) {
-            tx.rollback().map_err(|error| error.to_string())?;
-            concurrency::record_no_op(&db, project_row_id, &guard.operation_id, &before)?;
-        } else {
-            concurrency::bump_version(&tx, project_row_id, "task", &input.task_id.to_string())?;
-            project_state::bump_project_revision(&tx, project_row_id)?;
-            let updated = tasks::load_task(&tx, project_row_id, input.task_id)?;
-            concurrency::record_no_op(&tx, project_row_id, &guard.operation_id, &updated)?;
-            tx.commit().map_err(|error| error.to_string())?;
-        }
-    }
-    load_dashboard_payload(project, &db, &state)
+            } })],&state)
 }
 
 #[tauri::command]
@@ -1567,27 +992,8 @@ fn close_task(
     expected_version: i64,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    let project = resolve_project(&state, project_id.as_deref())?;
-    let mut db = open_project_database(&project).map_err(|error| error.to_string())?;
-    let project_row_id = load_project_row_id(&db)?;
-    let guard = desktop_guard(operation_id, "task", task_id, expected_version);
-    if concurrency::load_operation::<Task>(&db, project_row_id, &guard.operation_id)?.is_none() {
-        let tx = db.transaction().map_err(|error| error.to_string())?;
-        concurrency::validate_guard(&tx, project_row_id, &guard)?;
-        let before = tasks::load_task(&tx, project_row_id, task_id)?;
-        let updated = tasks::close_task(&tx, project_row_id, task_id)?;
-        if same_desktop_task(&before, &updated) {
-            tx.rollback().map_err(|error| error.to_string())?;
-            concurrency::record_no_op(&db, project_row_id, &guard.operation_id, &before)?;
-        } else {
-            concurrency::bump_version(&tx, project_row_id, "task", &task_id.to_string())?;
-            project_state::bump_project_revision(&tx, project_row_id)?;
-            let updated = tasks::load_task(&tx, project_row_id, task_id)?;
-            concurrency::record_no_op(&tx, project_row_id, &guard.operation_id, &updated)?;
-            tx.commit().map_err(|error| error.to_string())?;
-        }
-    }
-    load_dashboard_payload(project, &db, &state)
+    let project=resolve_project(&state,project_id.as_deref())?;
+    mutate_dashboard(project,operation_id,vec![Change::Task(TaskWrite::Close {id:task_id,expected_version})],&state)
 }
 
 #[tauri::command]
@@ -1598,32 +1004,8 @@ fn delete_task(
     expected_version: i64,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    let project = resolve_project(&state, project_id.as_deref())?;
-    let mut db = open_project_database(&project).map_err(|error| error.to_string())?;
-    let project_row_id = load_project_row_id(&db)?;
-    let guard = desktop_guard(operation_id, "task", task_id, expected_version);
-    if concurrency::load_operation::<i64>(&db, project_row_id, &guard.operation_id)?.is_none() {
-        let tx = db.transaction().map_err(|error| error.to_string())?;
-        concurrency::validate_guard(&tx, project_row_id, &guard)?;
-        let dependents: i64 = tx
-            .query_row(
-                "SELECT COUNT(*) FROM qa_job_task_links WHERE task_id=?1",
-                [task_id],
-                |row| row.get(0),
-            )
-            .map_err(|error| error.to_string())?;
-        if dependents > 0 {
-            return Err(format!(
-                "Task {task_id} is linked from {dependents} QA job(s)"
-            ));
-        }
-        tasks::delete_task(&tx, project_row_id, task_id)?;
-        concurrency::tombstone_version(&tx, project_row_id, "task", &task_id.to_string())?;
-        project_state::bump_project_revision(&tx, project_row_id)?;
-        concurrency::record_no_op(&tx, project_row_id, &guard.operation_id, &task_id)?;
-        tx.commit().map_err(|error| error.to_string())?;
-    }
-    load_dashboard_payload(project, &db, &state)
+    let project=resolve_project(&state,project_id.as_deref())?;
+    mutate_dashboard(project,operation_id,vec![Change::Task(TaskWrite::Delete {id:task_id,expected_version})],&state)
 }
 
 #[tauri::command]
@@ -1631,15 +1013,8 @@ fn create_qa_job(
     input: CreateQaJobRequest,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    let project = resolve_project(&state, input.project_id.as_deref())?;
-    let mut db = open_project_database(&project).map_err(|error| error.to_string())?;
-    let project_row_id = load_project_row_id(&db)?;
-    if concurrency::load_operation::<QaJob>(&db, project_row_id, &input.operation_id)?.is_none() {
-        let tx = db.transaction().map_err(|error| error.to_string())?;
-        let created = qa::create_job(
-            &tx,
-            project_row_id,
-            NewQaJob {
+    let project=resolve_project(&state,input.project_id.as_deref())?;
+    mutate_dashboard(project,input.operation_id,vec![Change::Qa(QaWrite::CreateJob { input:NewQaJob {
                 name: input.name,
                 description: input.description,
                 command: input.command,
@@ -1651,15 +1026,7 @@ fn create_qa_job(
                 design_specification_links: input.design_specification_links,
                 task_ids: input.task_ids,
                 tags: input.tags,
-            },
-        )?;
-        concurrency::bump_version(&tx, project_row_id, "qa.job", &created.id.to_string())?;
-        project_state::bump_project_revision(&tx, project_row_id)?;
-        let created = qa::load_job(&tx, project_row_id, created.id)?;
-        concurrency::record_no_op(&tx, project_row_id, &input.operation_id, &created)?;
-        tx.commit().map_err(|error| error.to_string())?;
-    }
-    load_dashboard_payload(project, &db, &state)
+            } })],&state)
 }
 
 #[tauri::command]
@@ -1667,23 +1034,8 @@ fn update_qa_job(
     input: UpdateQaJobRequest,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    let project = resolve_project(&state, input.project_id.as_deref())?;
-    let mut db = open_project_database(&project).map_err(|error| error.to_string())?;
-    let project_row_id = load_project_row_id(&db)?;
-    let guard = desktop_guard(
-        input.operation_id,
-        "qa.job",
-        input.qa_job_id,
-        input.expected_version,
-    );
-    if concurrency::load_operation::<QaJob>(&db, project_row_id, &guard.operation_id)?.is_none() {
-        let tx = db.transaction().map_err(|error| error.to_string())?;
-        concurrency::validate_guard(&tx, project_row_id, &guard)?;
-        let before = qa::load_job(&tx, project_row_id, input.qa_job_id)?;
-        let updated = qa::update_job(
-            &tx,
-            project_row_id,
-            UpdateQaJob {
+    let project=resolve_project(&state,input.project_id.as_deref())?;
+    mutate_dashboard(project,input.operation_id,vec![Change::Qa(QaWrite::UpdateJob { expected_version:input.expected_version,input:UpdateQaJob {
                 qa_job_id: input.qa_job_id,
                 name: input.name,
                 description: input.description,
@@ -1695,20 +1047,7 @@ fn update_qa_job(
                 design_specification_links: input.design_specification_links,
                 task_ids: input.task_ids,
                 tags: input.tags,
-            },
-        )?;
-        if same_desktop_qa(&before, &updated) {
-            tx.rollback().map_err(|error| error.to_string())?;
-            concurrency::record_no_op(&db, project_row_id, &guard.operation_id, &before)?;
-        } else {
-            concurrency::bump_version(&tx, project_row_id, "qa.job", &input.qa_job_id.to_string())?;
-            project_state::bump_project_revision(&tx, project_row_id)?;
-            let updated = qa::load_job(&tx, project_row_id, input.qa_job_id)?;
-            concurrency::record_no_op(&tx, project_row_id, &guard.operation_id, &updated)?;
-            tx.commit().map_err(|error| error.to_string())?;
-        }
-    }
-    load_dashboard_payload(project, &db, &state)
+            } })],&state)
 }
 
 #[tauri::command]
@@ -1719,20 +1058,8 @@ fn delete_qa_job(
     expected_version: i64,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    let project = resolve_project(&state, project_id.as_deref())?;
-    let mut db = open_project_database(&project).map_err(|error| error.to_string())?;
-    let project_row_id = load_project_row_id(&db)?;
-    let guard = desktop_guard(operation_id, "qa.job", qa_job_id, expected_version);
-    if concurrency::load_operation::<i64>(&db, project_row_id, &guard.operation_id)?.is_none() {
-        let tx = db.transaction().map_err(|error| error.to_string())?;
-        concurrency::validate_guard(&tx, project_row_id, &guard)?;
-        qa::delete_job(&tx, project_row_id, qa_job_id)?;
-        concurrency::tombstone_version(&tx, project_row_id, "qa.job", &qa_job_id.to_string())?;
-        project_state::bump_project_revision(&tx, project_row_id)?;
-        concurrency::record_no_op(&tx, project_row_id, &guard.operation_id, &qa_job_id)?;
-        tx.commit().map_err(|error| error.to_string())?;
-    }
-    load_dashboard_payload(project, &db, &state)
+    let project=resolve_project(&state,project_id.as_deref())?;
+    mutate_dashboard(project,operation_id,vec![Change::Qa(QaWrite::DeleteJob {id:qa_job_id,expected_version})],&state)
 }
 
 #[tauri::command]
@@ -1740,21 +1067,10 @@ fn run_qa_jobs(
     input: RunQaJobsRequest,
     state: State<'_, AppState>,
 ) -> Result<DashboardPayload, String> {
-    let project = resolve_project(&state, input.project_id.as_deref())?;
-    let db = open_project_database(&project).map_err(|err| err.to_string())?;
-    let project_row_id = load_project_row_id(&db)?;
-    if concurrency::load_operation::<QaRun>(&db, project_row_id, &input.operation_id)?.is_none() {
-        let run = qa::run_jobs(
-            &db,
-            project_row_id,
-            &project.folder,
-            input.query,
-            input.trigger_source.as_deref().unwrap_or("dashboard"),
-        )?;
-        project_state::bump_project_revision(&db, project_row_id)?;
-        concurrency::record_no_op(&db, project_row_id, &input.operation_id, &run)?;
-    }
-    load_dashboard_payload(project, &db, &state)
+    let project=resolve_project(&state,input.project_id.as_deref())?;
+    let mut store=open_project_store(&project).map_err(|e|e.to_string())?;
+    crate::qa_runner::run(&mut store,&project.folder,&input.operation_id,input.query,input.trigger_source.as_deref().unwrap_or("dashboard")).map_err(|e|e.to_string())?;
+    load_dashboard_payload(project,&mut store,&state)
 }
 
 pub fn run() {
@@ -1857,20 +1173,10 @@ pub(crate) fn resolve_project_from_settings(
         .ok_or_else(|| format!("Unknown project id or name: {project_ref}"))
 }
 
-fn verify_project_database(db: &Connection) -> Result<(), String> {
-    let project_row_id = load_project_row_id(db)?;
-    project_state::load_project_revision(db, project_row_id)?;
-    memory::load_memory(db, project_row_id)?;
-
-    if fixed_hooks::load_fixed_hook_prompts(db, project_row_id)?.len() < 2 {
-        return Err("Project database is missing default fixed hook prompts".to_string());
-    }
-
-    db.query_row("SELECT id FROM design_workspaces LIMIT 1", [], |row| {
-        row.get::<_, i64>(0)
-    })
-    .map_err(|err| format!("Project database is missing the default design workspace: {err}"))?;
-
+fn verify_project_database(snapshot:&dyn ReadSnapshot) -> Result<(),String> {
+    snapshot.memory().map_err(|e|e.to_string())?;
+    snapshot.design_inventory().map_err(|e|e.to_string())?;
+    if snapshot.fixed_prompts().map_err(|e|e.to_string())?.len()<2 {return Err("Project database is missing default fixed hook prompts".into());}
     Ok(())
 }
 
@@ -1898,10 +1204,10 @@ fn refresh_architecture_projection(
             }
         }
 
-        let db = open_project_database(project).map_err(|error| error.to_string())?;
-        let project_row_id = load_project_row_id(&db)?;
+        let mut store=open_project_store(project).map_err(|e|e.to_string())?;
+        let db=store.snapshot().map_err(|e|e.to_string())?;
         if architecture_projection_enabled(settings, &project.id) {
-            projection::regenerate(&db, project_row_id, folder, &file_name, true)?;
+            projection::regenerate(db.as_ref(), folder, &file_name, true)?;
         } else {
             projection::remove_managed_blocks(folder, &file_name)?;
         }
@@ -2006,6 +1312,7 @@ fn set_project_architecture_projection(
     store_settings(&state, settings)
 }
 
+#[cfg(test)]
 fn load_project_row_id(db: &Connection) -> Result<i64, String> {
     db.query_row("SELECT id FROM projects ORDER BY id LIMIT 1", [], |row| {
         row.get(0)
@@ -2013,6 +1320,7 @@ fn load_project_row_id(db: &Connection) -> Result<i64, String> {
     .map_err(|err| err.to_string())
 }
 
+#[cfg(test)]
 fn load_workspace_id(db: &Connection) -> Result<i64, String> {
     db.query_row(
         "SELECT id FROM design_workspaces ORDER BY id LIMIT 1",
@@ -2164,197 +1472,19 @@ fn window_monitor_intersection_area(window: &WindowSettings, monitor: &Monitor) 
     intersection_width * intersection_height
 }
 
-fn load_diagrams(db: &Connection) -> Result<Vec<DesignDiagram>, String> {
-    let mut statement = db
-        .prepare(
-            "SELECT
-                d.id,
-                d.kind,
-                d.key,
-                d.title,
-                d.source,
-                d.diagram_type,
-                d.attached_to_external_id,
-                CASE
-                    WHEN e.external_id IS NOT NULL THEN 'element'
-                    WHEN r.external_id IS NOT NULL THEN 'relationship'
-                    ELSE NULL
-                END AS attached_to_target_type,
-                d.sort_order,
-                COALESCE(rv.version, 0)
-             FROM diagrams d
-             JOIN design_workspaces w ON w.id=d.workspace_id
-             LEFT JOIN resource_versions rv
-               ON rv.project_id=w.project_id AND rv.resource_kind='design.uml' AND rv.resource_id=d.key
-             LEFT JOIN c4_elements e
-                ON e.workspace_id = d.workspace_id
-                AND e.external_id = d.attached_to_external_id
-             LEFT JOIN c4_relationships r
-                ON r.workspace_id = d.workspace_id
-                AND r.external_id = d.attached_to_external_id
-             ORDER BY d.sort_order, d.id",
-        )
-        .map_err(|err| err.to_string())?;
-    let rows = statement
-        .query_map([], |row| {
-            let diagram_type: String = row.get(5)?;
-            Ok(DesignDiagram {
-                version: row.get(9)?,
-                id: row.get(0)?,
-                kind: row.get(1)?,
-                key: row.get(2)?,
-                title: row.get(3)?,
-                source: row.get(4)?,
-                artifact_role: design::diagram_artifact_role(&diagram_type).to_string(),
-                artifact_label: design::diagram_artifact_label(&diagram_type).to_string(),
-                artifact_rank: design::diagram_artifact_rank(&diagram_type),
-                diagram_type,
-                attached_to_external_id: row.get(6)?,
-                attached_to_target_type: row.get(7)?,
-                sort_order: row.get(8)?,
-            })
-        })
-        .map_err(|err| err.to_string())?;
 
-    rows.collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|err| err.to_string())
-}
 
-fn load_design_elements(db: &Connection) -> Result<Vec<DesignElement>, String> {
-    let mut statement = db
-        .prepare(
-            "SELECT e.id, e.external_id, e.parent_external_id, e.element_type, e.name, e.description, e.technology, e.tags, COALESCE(rv.version, 0)
-             FROM c4_elements e
-             JOIN design_workspaces w ON w.id=e.workspace_id
-             LEFT JOIN resource_versions rv ON rv.project_id=w.project_id AND rv.resource_kind='design.element' AND rv.resource_id=e.external_id
-             ORDER BY e.parent_external_id IS NOT NULL, e.parent_external_id, e.id",
-        )
-        .map_err(|err| err.to_string())?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok(DesignElement {
-                version: row.get(8)?,
-                id: row.get(0)?,
-                external_id: row.get(1)?,
-                parent_external_id: row.get(2)?,
-                element_type: row.get(3)?,
-                name: row.get(4)?,
-                description: row.get(5)?,
-                technology: row.get(6)?,
-                tags: row.get(7)?,
-            })
-        })
-        .map_err(|err| err.to_string())?;
 
-    rows.collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|err| err.to_string())
-}
 
-fn load_design_relationships(db: &Connection) -> Result<Vec<DesignRelationship>, String> {
-    let mut statement = db
-        .prepare(
-            "SELECT r.id, r.external_id, r.source_external_id, r.destination_external_id, r.description, r.technology, r.tags, COALESCE(rv.version, 0)
-             FROM c4_relationships r
-             JOIN design_workspaces w ON w.id=r.workspace_id
-             LEFT JOIN resource_versions rv ON rv.project_id=w.project_id AND rv.resource_kind='design.relationship' AND rv.resource_id=r.external_id
-             ORDER BY r.id",
-        )
-        .map_err(|err| err.to_string())?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok(DesignRelationship {
-                version: row.get(7)?,
-                id: row.get(0)?,
-                external_id: row.get(1)?,
-                source_external_id: row.get(2)?,
-                destination_external_id: row.get(3)?,
-                description: row.get(4)?,
-                technology: row.get(5)?,
-                tags: row.get(6)?,
-            })
-        })
-        .map_err(|err| err.to_string())?;
 
-    rows.collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|err| err.to_string())
-}
 
-fn ensure_element_exists(
-    db: &Connection,
-    workspace_id: i64,
-    external_id: &str,
-) -> Result<(), String> {
-    let exists = db
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM c4_elements WHERE workspace_id = ?1 AND external_id = ?2)",
-            rusqlite::params![workspace_id, external_id],
-            |row| row.get::<_, i64>(0),
-        )
-        .map_err(|err| err.to_string())?
-        != 0;
 
-    if exists {
-        Ok(())
-    } else {
-        Err(format!("Unknown design element id: {external_id}"))
-    }
-}
 
-fn load_guidelines(db: &Connection) -> Result<Vec<Guideline>, String> {
-    let mut statement = db
-        .prepare("SELECT id, title, body FROM coding_guidelines ORDER BY id")
-        .map_err(|err| err.to_string())?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok(Guideline {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                body: row.get(2)?,
-            })
-        })
-        .map_err(|err| err.to_string())?;
 
-    rows.collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|err| err.to_string())
-}
 
-fn load_post_task_commands(db: &Connection) -> Result<Vec<PostTaskCommand>, String> {
-    let mut statement = db
-        .prepare("SELECT id, label, command, trigger FROM post_task_commands ORDER BY id")
-        .map_err(|err| err.to_string())?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok(PostTaskCommand {
-                id: row.get(0)?,
-                label: row.get(1)?,
-                command: row.get(2)?,
-                trigger: row.get(3)?,
-            })
-        })
-        .map_err(|err| err.to_string())?;
 
-    rows.collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|err| err.to_string())
-}
 
-fn load_qa_checks(db: &Connection) -> Result<Vec<QaCheck>, String> {
-    let mut statement = db
-        .prepare("SELECT id, label, command, required FROM qa_checks ORDER BY id")
-        .map_err(|err| err.to_string())?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok(QaCheck {
-                id: row.get(0)?,
-                label: row.get(1)?,
-                command: row.get(2)?,
-                required: row.get::<_, i64>(3)? != 0,
-            })
-        })
-        .map_err(|err| err.to_string())?;
 
-    rows.collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|err| err.to_string())
-}
 
 #[cfg(test)]
 mod tests {
@@ -2517,7 +1647,7 @@ mod tests {
         assert!(settings::project_database_path(&settings.projects[0]).exists());
 
         let db = open_project_database(&settings.projects[0]).unwrap();
-        verify_project_database(&db).unwrap();
+        verify_project_database(crate::storage::sqlite::test_snapshot(&db, load_project_row_id(&db).unwrap()).as_ref()).unwrap();
         drop(db);
         let _ = fs::remove_dir_all(folder);
     }
@@ -2579,7 +1709,9 @@ mod tests {
             .unwrap();
         }
 
-        let payload = load_dashboard_payload(project, &db, &state).unwrap();
+        let mut store = open_project_store(&project).unwrap();
+        let payload = load_dashboard_payload(project, &mut store, &state).unwrap();
+        drop(store);
         let states = payload
             .tasks
             .iter()
@@ -2608,7 +1740,7 @@ mod tests {
 
         let db = open_project_database(&project).unwrap();
 
-        verify_project_database(&db).unwrap();
+        verify_project_database(crate::storage::sqlite::test_snapshot(&db, load_project_row_id(&db).unwrap()).as_ref()).unwrap();
         assert!(settings::project_database_path(&project).exists());
         assert_eq!(
             db.query_row("SELECT repository_path FROM project_computers WHERE computer_id = ?1", [crate::computer::id().unwrap()], |row| {
@@ -2692,7 +1824,9 @@ mod tests {
         let modified = fs::metadata(&path).unwrap().modified().unwrap();
         for _ in 0..3 {
             let db = open_project_database(&project).unwrap();
-            let payload = load_dashboard_payload(project.clone(), &db, &state).unwrap();
+            let mut store = open_project_store(&project).unwrap();
+            let payload = load_dashboard_payload(project.clone(), &mut store, &state).unwrap();
+            drop(store);
             assert!(!payload.design_elements.is_empty());
             assert_eq!(db.total_changes(), 0);
             drop(db);

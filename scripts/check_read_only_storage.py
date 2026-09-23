@@ -61,6 +61,7 @@ def main():
             assert db.execute("SELECT repository_path FROM projects").fetchone()[0] == "/another/computer/project"
             assert db.execute("SELECT repository_path FROM project_computers").fetchone()[0] == str(folder)
         baseline = fingerprint(path)
+        revision = body(client.call("adashi_tasks", operation="list"))["revision"]
         requests = [
             ("adashi_memory", {"operation": "get"}),
             ("adashi_tasks", {"operation": "list"}),
@@ -80,11 +81,12 @@ def main():
             for tool, args in requests:
                 body(client.call(tool, **args))
                 assert fingerprint(path) == baseline, (cycle, tool, args, fingerprint(path), baseline)
+            assert body(client.call("adashi_tasks", operation="list"))["revision"] == revision
     finally:
         client.close()
     assert fingerprint(path) == baseline
     evidence = {"fixtureRoot": str(root), "database": str(path),
-                "callsVerified": 3 * len(requests), "baseline": baseline}
+                "callsVerified": 3 * (len(requests) + 1), "revision": revision, "baseline": baseline}
     (root / "evidence.json").write_text(json.dumps(evidence, indent=2), encoding="utf-8")
     print(json.dumps(evidence, indent=2))
 

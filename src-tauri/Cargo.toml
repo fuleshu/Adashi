@@ -27,6 +27,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+adashi-storage-api = { path = "storage-api" }
 base64 = "0.22"
 resvg = "0.45"
 roxmltree = "0.20"

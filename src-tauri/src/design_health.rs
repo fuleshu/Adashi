@@ -31,253 +31,85 @@
 //!   its file, so no language can be misjudged — and a name that is only data, in a string or a
 //!   comment, does not count as a definition.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+use crate::storage::sqlite::health::*;
+#[cfg(test)]
 use rusqlite::{params, Connection};
-use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum ElementHealth {
-    /// Attached to the model, but no binding: its code cannot be located.
-    Unmapped,
-    /// No parent and no relationship names it: floating in the hierarchy.
-    Orphaned,
-    /// Attached, with at least one binding that does not resolve.
-    Broken,
-    /// Attached, with bindings that all resolve.
-    Resolved,
-}
-
-impl ElementHealth {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Unmapped => "unmapped",
-            Self::Orphaned => "orphaned",
-            Self::Broken => "broken",
-            Self::Resolved => "resolved",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "unmapped" => Some(Self::Unmapped),
-            "orphaned" => Some(Self::Orphaned),
-            "broken" => Some(Self::Broken),
-            "resolved" => Some(Self::Resolved),
-            _ => None,
-        }
-    }
-
-    /// Whether the model's claim is currently unsupported by the code. These are the states a task
-    /// close has to address or knowingly keep.
-    #[allow(dead_code)]
-    pub fn needs_attention(self) -> bool {
-        !matches!(self, Self::Resolved)
-    }
-
-    /// Most actionable first, so a listing reads as a work queue.
-    fn weight(self) -> u8 {
-        match self {
-            Self::Broken => 0,
-            Self::Orphaned => 1,
-            Self::Unmapped => 2,
-            Self::Resolved => 3,
-        }
-    }
-
-    /// The next action, in words, so the state does not need a legend.
-    pub fn next_action(self) -> &'static str {
-        match self {
-            Self::Orphaned => "Attach it to the model: give it a parent or a relationship.",
-            Self::Unmapped => "Bind it to the file that implements it.",
-            Self::Broken => "Fix the binding: what it names is not there.",
-            Self::Resolved => "Nothing to do.",
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct BrokenBinding {
-    pub design_external_id: String,
-    pub target_type: String,
-    pub target: String,
-    pub detail: String,
-}
-
-#[derive(Clone, Debug, Serialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ElementFinding {
-    pub design_external_id: String,
-    pub name: String,
-    pub element_type: String,
-    pub state: ElementHealth,
-    /// What to do about it, in one line.
-    pub next_action: String,
-    /// Files the element's bindings resolve to.
-    pub files: Vec<String>,
-    /// Bindings that name something that is not there.
-    pub broken: Vec<BrokenBinding>,
-    /// Human-readable summary of why the element is in this state.
-    pub detail: String,
-    /// Findings reviewed and knowingly kept, with their reasons.
-    pub waivers: Vec<HealthWaiver>,
-}
-
-#[derive(Clone, Debug, Serialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct HealthWaiver {
-    pub id: i64,
-    pub state: String,
-    pub reason: String,
-    pub task_id: Option<i64>,
-    pub created_by: String,
-    pub created_at: String,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct HealthCounts {
-    pub orphaned: u32,
-    pub unmapped: u32,
-    pub broken: u32,
-    pub resolved: u32,
-    /// Individual bindings that do not resolve, which can exceed the number of broken elements.
-    pub broken_bindings: u32,
-    pub waivers: u32,
-    pub elements: u32,
-}
-
-impl HealthCounts {
-    /// Elements whose claim is not currently supported by the code. The close gate reads this;
-    /// until the gate lands, it is exercised by the tests.
-    #[allow(dead_code)]
-    pub fn needs_attention(&self) -> u32 {
-        self.orphaned + self.unmapped + self.broken
-    }
-}
-
-#[derive(Clone, Debug, Serialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct DesignHealthResult {
-    pub counts: HealthCounts,
-    /// Every element, most actionable first, so a client can list or filter by state without a
-    /// second call.
-    pub elements: Vec<ElementFinding>,
-    /// One line stating what the numbers mean, so a reader does not have to infer it.
-    pub summary: String,
-    /// What these checks do not establish, stated in the result itself.
-    pub not_checked: String,
-}
+pub use adashi_storage_api::health::*;
 
 /// What the model says, as the scan needs it.
-struct Model {
+pub(crate) struct Model {
     /// `(external_id, name, element_type, parent_external_id)`
-    elements: Vec<(String, String, String, Option<String>)>,
+    pub(crate) elements: Vec<(String, String, String, Option<String>)>,
     /// `(design_external_id, target_type, target)`
-    bindings: Vec<(String, String, String)>,
+    pub(crate) bindings: Vec<(String, String, String)>,
     /// Every external id named by at least one relationship, either end, plus every id that holds
     /// children. A top-level element is reached through its children rather than through a parent,
     /// and a relationship that happens to name nothing at the top must not orphan it.
-    connected: BTreeSet<String>,
-}
-
-fn collect_model(db: &Connection) -> Result<Model, String> {
-    let mut element_statement = db
-        .prepare(
-            "SELECT e.external_id, e.name, e.element_type, e.parent_external_id
-             FROM c4_elements e
-             JOIN design_workspaces w ON w.id = e.workspace_id
-             ORDER BY e.id",
-        )
-        .map_err(|err| err.to_string())?;
-    let elements = element_statement
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?,
-            ))
-        })
-        .map_err(|err| err.to_string())?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|err| err.to_string())?;
-
-    let mut binding_statement = db
-        .prepare(
-            "SELECT b.design_external_id, b.target_type, b.target
-             FROM design_bindings b
-             JOIN design_workspaces w ON w.id = b.workspace_id
-             ORDER BY b.target_type, b.target",
-        )
-        .map_err(|err| err.to_string())?;
-    let bindings = binding_statement
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })
-        .map_err(|err| err.to_string())?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|err| err.to_string())?;
-
-    let mut connected = BTreeSet::new();
-    let mut relationship_statement = db
-        .prepare(
-            "SELECT r.source_external_id, r.destination_external_id
-             FROM c4_relationships r
-             JOIN design_workspaces w ON w.id = r.workspace_id",
-        )
-        .map_err(|err| err.to_string())?;
-    let relationships = relationship_statement
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .map_err(|err| err.to_string())?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|err| err.to_string())?;
-    for (source, destination) in relationships {
-        connected.insert(source);
-        connected.insert(destination);
-    }
-    // An element that holds children is attached: it is reached from above by descent, which is
-    // how a top-level Software System is placed when no relationship names it.
-    for (_, _, _, parent) in &elements {
-        if let Some(parent) = parent {
-            connected.insert(parent.clone());
-        }
-    }
-
-    Ok(Model {
-        elements,
-        bindings,
-        connected,
-    })
+    pub(crate) connected: BTreeSet<String>,
 }
 
 /// Runs the scan against a project folder and records the result.
-pub fn scan_and_record(
-    db: &Connection,
-    project_id: i64,
+
+pub fn scan_snapshot(
+    snapshot: &dyn adashi_storage_api::ReadSnapshot,
     project_folder: &Path,
 ) -> Result<DesignHealthResult, String> {
-    let result = scan(project_folder, collect_model(db)?)?;
-    record(db, project_id, &result)?;
+    use adashi_storage_api::{HealthCacheKey, LocalDerivedCache};
+    let content = snapshot.design_inventory().map_err(|e| e.to_string())?;
+    let mut connected = BTreeSet::new();
+    for relation in &content.relationships {
+        connected.insert(relation.value.source_external_id.clone());
+        connected.insert(relation.value.destination_external_id.clone());
+    }
+    for element in &content.elements {
+        if let Some(parent) = &element.value.parent_external_id {
+            connected.insert(parent.clone());
+        }
+    }
+    let model = Model {
+        elements: content
+            .elements
+            .into_iter()
+            .map(|v| {
+                (
+                    v.value.external_id,
+                    v.value.name,
+                    v.value.element_type,
+                    v.value.parent_external_id,
+                )
+            })
+            .collect(),
+        bindings: content
+            .bindings
+            .into_iter()
+            .map(|v| (v.design_external_id, v.target_type, v.target))
+            .collect(),
+        connected,
+    };
+    let result = scan(project_folder, model)?;
+    let key = HealthCacheKey {
+        project_id: snapshot.metadata().identity.id.clone(),
+        computer_id: crate::computer::id()?.into(),
+        cursor: snapshot.metadata().cursor.clone(),
+    };
+    let _ = crate::storage::local_cache::FileDerivedCache::for_checkout(project_folder)
+        .record_health(&key, &result);
     Ok(result)
 }
 
 /// The pure scan: model plus files in, findings out. No database, no clock, no side effects.
-fn scan(project_folder: &Path, model: Model) -> Result<DesignHealthResult, String> {
+pub(crate) fn scan(project_folder: &Path, model: Model) -> Result<DesignHealthResult, String> {
     let mut findings = Vec::new();
 
     for (external_id, name, element_type, parent_external_id) in &model.elements {
-        let attached = parent_external_id.is_some() || model.connected.contains(external_id.as_str());
+        let attached =
+            parent_external_id.is_some() || model.connected.contains(external_id.as_str());
 
         let own_bindings = model
             .bindings
@@ -371,12 +203,27 @@ fn scan(project_folder: &Path, model: Model) -> Result<DesignHealthResult, Strin
             .then(left.design_external_id.cmp(&right.design_external_id))
     });
 
-    let broken_bindings = findings.iter().map(|finding| finding.broken.len() as u32).sum();
+    let broken_bindings = findings
+        .iter()
+        .map(|finding| finding.broken.len() as u32)
+        .sum();
     let counts = HealthCounts {
-        orphaned: findings.iter().filter(|f| f.state == ElementHealth::Orphaned).count() as u32,
-        unmapped: findings.iter().filter(|f| f.state == ElementHealth::Unmapped).count() as u32,
-        broken: findings.iter().filter(|f| f.state == ElementHealth::Broken).count() as u32,
-        resolved: findings.iter().filter(|f| f.state == ElementHealth::Resolved).count() as u32,
+        orphaned: findings
+            .iter()
+            .filter(|f| f.state == ElementHealth::Orphaned)
+            .count() as u32,
+        unmapped: findings
+            .iter()
+            .filter(|f| f.state == ElementHealth::Unmapped)
+            .count() as u32,
+        broken: findings
+            .iter()
+            .filter(|f| f.state == ElementHealth::Broken)
+            .count() as u32,
+        resolved: findings
+            .iter()
+            .filter(|f| f.state == ElementHealth::Resolved)
+            .count() as u32,
         broken_bindings,
         waivers: 0,
         elements: findings.len() as u32,
@@ -424,7 +271,9 @@ fn resolve_file(project_folder: &Path, target: &str) -> Option<PathBuf> {
 /// The resolved path is canonical, which on Windows carries a `\\?\` prefix the configured folder
 /// does not, so the strip is attempted against both forms rather than assuming they match.
 fn relative_display(project_folder: &Path, path: &Path) -> String {
-    let canonical_root = project_folder.canonicalize().unwrap_or_else(|_| project_folder.to_path_buf());
+    let canonical_root = project_folder
+        .canonicalize()
+        .unwrap_or_else(|_| project_folder.to_path_buf());
     path.strip_prefix(&canonical_root)
         .or_else(|_| path.strip_prefix(project_folder))
         .unwrap_or(path)
@@ -565,130 +414,20 @@ fn looks_like_path(value: &str) -> bool {
     value.rsplit_once('.').is_some_and(|(_, extension)| {
         !extension.is_empty()
             && extension.len() <= 4
-            && extension.chars().all(|character| character.is_ascii_alphanumeric())
+            && extension
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric())
     })
 }
 
 /// Writes the scan result, replacing the previous verdict for this project.
-fn record(db: &Connection, project_id: i64, result: &DesignHealthResult) -> Result<(), String> {
-    let tx = db.unchecked_transaction().map_err(|err| err.to_string())?;
-    tx.execute(
-        "DELETE FROM design_binding_checks WHERE project_id = ?1",
-        params![project_id],
-    )
-    .map_err(|err| err.to_string())?;
-    tx.execute(
-        "DELETE FROM design_element_checks WHERE project_id = ?1",
-        params![project_id],
-    )
-    .map_err(|err| err.to_string())?;
-
-    for finding in &result.elements {
-        for binding in &finding.broken {
-            tx.execute(
-                "INSERT INTO design_binding_checks(project_id, design_external_id, target_type, target, state, detail)
-                 VALUES(?1, ?2, ?3, ?4, 'broken', ?5)",
-                params![
-                    project_id,
-                    binding.design_external_id,
-                    binding.target_type,
-                    binding.target,
-                    binding.detail
-                ],
-            )
-            .map_err(|err| err.to_string())?;
-        }
-        tx.execute(
-            "INSERT INTO design_element_checks(project_id, design_external_id, state, detail, files, checked_at)
-             VALUES(?1, ?2, ?3, ?4, ?5, CURRENT_TIMESTAMP)",
-            params![
-                project_id,
-                finding.design_external_id,
-                finding.state.as_str(),
-                finding.detail,
-                serde_json::to_string(&finding.files).unwrap_or_else(|_| "[]".to_string())
-            ],
-        )
-        .map_err(|err| err.to_string())?;
-    }
-    tx.commit().map_err(|err| err.to_string())
-}
 
 /// The recorded state of every element, without touching the filesystem.
 ///
 /// Returns the state and the files the bindings resolved to, so a client can show what an element
 /// owns without a scan.
-pub fn recorded_states(
-    db: &Connection,
-    project_id: i64,
-) -> Result<HashMap<String, (ElementHealth, Vec<String>)>, String> {
-    let mut statement = db
-        .prepare(
-            "SELECT design_external_id, state, files
-             FROM design_element_checks WHERE project_id=?1",
-        )
-        .map_err(|err| err.to_string())?;
-    let rows = statement
-        .query_map(params![project_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })
-        .map_err(|err| err.to_string())?;
-    let mut states = HashMap::new();
-    for row in rows {
-        let (external_id, state, files) = row.map_err(|err| err.to_string())?;
-        if let Some(state) = ElementHealth::parse(&state) {
-            let files = serde_json::from_str::<Vec<String>>(&files).unwrap_or_default();
-            states.insert(external_id, (state, files));
-        }
-    }
-    Ok(states)
-}
 
 /// The recorded counts, without touching the filesystem.
-pub fn recorded_counts(db: &Connection, project_id: i64) -> Result<HealthCounts, String> {
-    let mut statement = db
-        .prepare("SELECT state, COUNT(*) FROM design_element_checks WHERE project_id=?1 GROUP BY state")
-        .map_err(|err| err.to_string())?;
-    let rows = statement
-        .query_map(params![project_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-        })
-        .map_err(|err| err.to_string())?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|err| err.to_string())?;
-
-    let mut counts = HealthCounts::default();
-    for (state, count) in rows {
-        let count = count as u32;
-        match state.as_str() {
-            "orphaned" => counts.orphaned = count,
-            "unmapped" => counts.unmapped = count,
-            "broken" => counts.broken = count,
-            "resolved" => counts.resolved = count,
-            _ => {}
-        }
-        counts.elements += count;
-    }
-    counts.broken_bindings = db
-        .query_row(
-            "SELECT COUNT(*) FROM design_binding_checks WHERE project_id=?1 AND state='broken'",
-            params![project_id],
-            |row| row.get::<_, i64>(0),
-        )
-        .map_err(|err| err.to_string())? as u32;
-    counts.waivers = db
-        .query_row(
-            "SELECT COUNT(*) FROM design_health_waivers WHERE project_id=?1",
-            params![project_id],
-            |row| row.get::<_, i64>(0),
-        )
-        .map_err(|err| err.to_string())? as u32;
-    Ok(counts)
-}
 
 /// One line describing the recorded state, so a reader does not have to interpret numbers.
 pub fn recorded_summary(counts: &HealthCounts) -> String {
@@ -703,86 +442,16 @@ pub fn recorded_summary(counts: &HealthCounts) -> String {
 
 /// The recorded state of one element, without a filesystem scan.
 #[allow(dead_code)]
-pub fn recorded_state(
-    db: &Connection,
-    project_id: i64,
-    external_id: &str,
-) -> Result<Option<ElementHealth>, String> {
-    let state: Option<String> = db
-        .query_row(
-            "SELECT state FROM design_element_checks WHERE project_id=?1 AND design_external_id=?2",
-            params![project_id, external_id],
-            |row| row.get(0),
-        )
-        .ok();
-    Ok(state.and_then(|state| ElementHealth::parse(&state)))
-}
 
 /// The recorded state of one element, with the files its bindings resolved to.
 #[allow(dead_code)]
-pub fn recorded_state_with_files(
-    db: &Connection,
-    project_id: i64,
-    external_id: &str,
-) -> Result<Option<(ElementHealth, Vec<String>)>, String> {
-    Ok(recorded_states(db, project_id)?.remove(external_id))
-}
 
 /// The findings that were reviewed and knowingly kept, newest first.
 #[allow(dead_code)]
-pub fn load_waivers(
-    db: &Connection,
-    project_id: i64,
-    external_id: &str,
-) -> Result<Vec<HealthWaiver>, String> {
-    let mut statement = db
-        .prepare(
-            "SELECT id, state, reason, task_id, created_by, created_at
-             FROM design_health_waivers
-             WHERE project_id=?1 AND design_external_id=?2
-             ORDER BY id DESC",
-        )
-        .map_err(|err| err.to_string())?;
-    let rows = statement
-        .query_map(params![project_id, external_id], |row| {
-            Ok(HealthWaiver {
-                id: row.get(0)?,
-                state: row.get(1)?,
-                reason: row.get(2)?,
-                task_id: row.get(3)?,
-                created_by: row.get(4)?,
-                created_at: row.get(5)?,
-            })
-        })
-        .map_err(|err| err.to_string())?;
-    rows.collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|err| err.to_string())
-}
 
 /// Records a finding that was reviewed and knowingly kept. The reason is required: keeping a
 /// finding without one is a silence, and silence is what made the drift invisible.
 #[allow(dead_code)]
-pub fn record_waiver(
-    db: &Connection,
-    project_id: i64,
-    external_id: &str,
-    state: ElementHealth,
-    reason: &str,
-    task_id: Option<i64>,
-) -> Result<i64, String> {
-    let reason = reason.trim();
-    if reason.is_empty() {
-        return Err("A kept finding needs a reason. Without one it is a silence.".to_string());
-    }
-    db.execute(
-        "INSERT INTO design_health_waivers(project_id, design_external_id, state, reason, task_id)
-         VALUES(?1, ?2, ?3, ?4, ?5)",
-        params![project_id, external_id, state.as_str(), reason, task_id],
-    )
-    .map_err(|err| err.to_string())?;
-    Ok(db.last_insert_rowid())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -828,7 +497,11 @@ mod tests {
             bindings: bindings
                 .iter()
                 .map(|(id, kind, target)| {
-                    ((*id).to_string(), (*kind).to_string(), (*target).to_string())
+                    (
+                        (*id).to_string(),
+                        (*kind).to_string(),
+                        (*target).to_string(),
+                    )
                 })
                 .collect(),
             connected,
@@ -906,17 +579,15 @@ mod tests {
         let root = scratch("unmapped");
         let result = scan(
             &root,
-            model(
-                &[("a", "A", "Component", Some("root"))],
-                &[],
-                &[],
-            ),
+            model(&[("a", "A", "Component", Some("root"))], &[], &[]),
         )
         .unwrap();
         let element = finding(&result, "a");
         assert_eq!(element.state, ElementHealth::Unmapped);
         assert!(
-            element.detail.contains("nothing is claimed about where its code lives"),
+            element
+                .detail
+                .contains("nothing is claimed about where its code lives"),
             "{}",
             element.detail
         );
@@ -977,7 +648,10 @@ mod tests {
             &root,
             model(
                 &[("a", "A", "Component", Some("root"))],
-                &[("a", "file", "src/a.rs"), ("a", "symbol", "src/a.rs::Thing")],
+                &[
+                    ("a", "file", "src/a.rs"),
+                    ("a", "symbol", "src/a.rs::Thing"),
+                ],
                 &[],
             ),
         )
@@ -988,7 +662,10 @@ mod tests {
             &root,
             model(
                 &[("a", "A", "Component", Some("root"))],
-                &[("a", "file", "src/a.rs"), ("a", "symbol", "src/a.rs::Absent")],
+                &[
+                    ("a", "file", "src/a.rs"),
+                    ("a", "symbol", "src/a.rs::Absent"),
+                ],
                 &[],
             ),
         )
@@ -1031,7 +708,10 @@ mod tests {
             &root,
             model(
                 &[("a", "A", "Component", Some("root"))],
-                &[("a", "file", "src/a.rs"), ("a", "symbol", "src/a.rs::Absent")],
+                &[
+                    ("a", "file", "src/a.rs"),
+                    ("a", "symbol", "src/a.rs::Absent"),
+                ],
                 &[],
             ),
         )
@@ -1237,9 +917,16 @@ mod tests {
         let recorded = recorded_states(&db, project_id).unwrap();
         println!(
             "recorded elements with files: {}",
-            recorded.values().filter(|(_, files)| !files.is_empty()).count()
+            recorded
+                .values()
+                .filter(|(_, files)| !files.is_empty())
+                .count()
         );
-        for (external_id, (_, files)) in recorded.iter().filter(|(_, (_, files))| !files.is_empty()).take(5) {
+        for (external_id, (_, files)) in recorded
+            .iter()
+            .filter(|(_, (_, files))| !files.is_empty())
+            .take(5)
+        {
             println!("  {external_id} owns {files:?}");
         }
     }
@@ -1281,14 +968,20 @@ mod tests {
             .iter()
             .filter(|element| !element.files.is_empty())
             .count();
-        println!("resolved elements: {} ({resolved_with_files} with files)", resolved.len());
+        println!(
+            "resolved elements: {} ({resolved_with_files} with files)",
+            resolved.len()
+        );
         for element in resolved.iter().take(5) {
             println!("  {} owns {:?}", element.design_external_id, element.files);
         }
         // The recorded files are what the design view shows, so an empty file list means an
         // element appears to own nothing even though its bindings resolved.
         let recorded = recorded_states(&db, project_id).unwrap();
-        let recorded_with_files = recorded.values().filter(|(_, files)| !files.is_empty()).count();
+        let recorded_with_files = recorded
+            .values()
+            .filter(|(_, files)| !files.is_empty())
+            .count();
         // A broken element can still own files: it has some bindings that resolve and some that do
         // not. So the recorded count is compared against every element that owns something, not
         // against the resolved ones alone.
@@ -1319,7 +1012,10 @@ mod tests {
                 element.detail
             );
             for binding in &element.broken {
-                println!("         broken: {} {}", binding.target_type, binding.target);
+                println!(
+                    "         broken: {} {}",
+                    binding.target_type, binding.target
+                );
             }
         }
         println!();

@@ -5,8 +5,6 @@
 //! folders that contain bound files. Nothing here is a source of truth — every block is a
 //! projection, marked as generated and overwritten on regeneration.
 
-use crate::state;
-use rusqlite::Connection;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -159,79 +157,42 @@ impl DesignSnapshot {
     }
 }
 
-fn load_snapshot(db: &Connection, project_row_id: i64) -> Result<DesignSnapshot, String> {
-    let mut snapshot = DesignSnapshot::default();
-
-    let mut statement = db
-        .prepare(
-            "SELECT e.external_id, e.element_type, e.name, e.description, e.parent_external_id
-             FROM c4_elements e
-             JOIN design_workspaces w ON w.id = e.workspace_id
-             WHERE w.project_id = ?1
-             ORDER BY e.id",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = statement
-        .query_map([project_row_id], |row| {
-            Ok(Element {
-                external_id: row.get(0)?,
-                element_type: row.get(1)?,
-                name: row.get(2)?,
-                description: row.get(3)?,
-                parent_external_id: row.get(4)?,
+fn load_snapshot(db: &dyn adashi_storage_api::ReadSnapshot) -> Result<DesignSnapshot, String> {
+    let inventory = db.design_inventory().map_err(|e| e.to_string())?;
+    let mut elements = inventory.elements;
+    let mut relationships = inventory.relationships;
+    elements.sort_by_key(|v| v.id);
+    relationships.sort_by_key(|v| v.id);
+    Ok(DesignSnapshot {
+        elements: elements
+            .into_iter()
+            .map(|v| Element {
+                external_id: v.value.external_id,
+                element_type: v.value.element_type,
+                name: v.value.name,
+                description: v.value.description,
+                parent_external_id: v.value.parent_external_id,
             })
-        })
-        .map_err(|error| error.to_string())?;
-    snapshot.elements = rows
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|error| error.to_string())?;
-
-    let mut statement = db
-        .prepare(
-            "SELECT r.external_id, r.source_external_id, r.destination_external_id, r.description
-             FROM c4_relationships r
-             JOIN design_workspaces w ON w.id = r.workspace_id
-             WHERE w.project_id = ?1
-             ORDER BY r.id",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = statement
-        .query_map([project_row_id], |row| {
-            Ok(Relationship {
-                external_id: row.get(0)?,
-                source: row.get(1)?,
-                destination: row.get(2)?,
-                description: row.get(3)?,
+            .collect(),
+        relationships: relationships
+            .into_iter()
+            .map(|v| Relationship {
+                external_id: v.value.external_id,
+                source: v.value.source_external_id,
+                destination: v.value.destination_external_id,
+                description: v.value.description,
             })
-        })
-        .map_err(|error| error.to_string())?;
-    snapshot.relationships = rows
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|error| error.to_string())?;
-
-    let mut statement = db
-        .prepare(
-            "SELECT b.design_external_id, b.target_type, b.target
-             FROM design_bindings b
-             JOIN design_workspaces w ON w.id = b.workspace_id
-             WHERE w.project_id = ?1
-             ORDER BY b.design_external_id, b.target_type, b.target",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = statement
-        .query_map([project_row_id], |row| {
-            Ok(Binding {
-                design_external_id: row.get(0)?,
-                target_type: row.get(1)?,
-                target: row.get(2)?,
+            .collect(),
+        bindings: inventory
+            .bindings
+            .into_iter()
+            .map(|v| Binding {
+                design_external_id: v.design_external_id,
+                target_type: v.target_type,
+                target: v.target,
             })
-        })
-        .map_err(|error| error.to_string())?;
-    snapshot.bindings = rows
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|error| error.to_string())?;
-
-    Ok(snapshot)
+            .collect(),
+    })
 }
 
 /// Orders elements most specific first, so a folder block leads with the components that own
@@ -313,7 +274,10 @@ fn render_root_block(snapshot: &DesignSnapshot, revision: i64) -> String {
             continue;
         }
         let purpose = one_line(&element.description, ROOT_DESCRIPTION_CHARS);
-        element_lines.push(format!("- **{}** (Software System) — {purpose}", element.name));
+        element_lines.push(format!(
+            "- **{}** (Software System) — {purpose}",
+            element.name
+        ));
     }
     for element in &snapshot.elements {
         if element.element_type == "Software System" || !top_layer.contains(&element.external_id) {
@@ -373,8 +337,7 @@ fn render_root_block(snapshot: &DesignSnapshot, revision: i64) -> String {
     };
     let mut body = element_lines;
     let dropped_elements = fit_budget(&mut body, element_budget);
-    let dropped_relationships =
-        push_section(&mut body, "Boundaries:", &relationship_lines, budget);
+    let dropped_relationships = push_section(&mut body, "Boundaries:", &relationship_lines, budget);
 
     let mut block = header;
     block[ROOT_SUMMARY_INDEX] = format!(
@@ -633,9 +596,14 @@ fn expected_blocks(
             .collect::<Vec<_>>();
         bindings.sort_by(|left, right| left.target.cmp(&right.target));
 
-        if let Some(block) =
-            render_folder_block(&folder, &owned, &relationships, snapshot, &bindings, revision)
-        {
+        if let Some(block) = render_folder_block(
+            &folder,
+            &owned,
+            &relationships,
+            snapshot,
+            &bindings,
+            revision,
+        ) {
             blocks.insert(folder, block);
         }
     }
@@ -796,8 +764,7 @@ fn remove_block(path: &Path) -> Result<bool, String> {
 
 /// Regenerates every projection block for one project.
 pub fn regenerate(
-    db: &Connection,
-    project_row_id: i64,
+    db: &dyn adashi_storage_api::ReadSnapshot,
     project_folder: &Path,
     file_name: &str,
     enabled: bool,
@@ -807,8 +774,8 @@ pub fn regenerate(
         return Ok(report);
     }
 
-    let snapshot = load_snapshot(db, project_row_id)?;
-    let revision = state::load_project_revision(db, project_row_id)?.revision;
+    let snapshot = load_snapshot(db)?;
+    let revision = db.metadata().revision;
     let blocks = expected_blocks(&snapshot, project_folder, revision);
 
     let mut expected_paths = BTreeSet::new();
@@ -859,17 +826,16 @@ pub fn remove_managed_blocks(
 
 /// Reports per-file freshness without modifying anything.
 pub fn status(
-    db: &Connection,
-    project_row_id: i64,
+    db: &dyn adashi_storage_api::ReadSnapshot,
     project_folder: &Path,
     file_name: &str,
     enabled: bool,
 ) -> Result<ProjectionStatus, String> {
-    let revision = state::load_project_revision(db, project_row_id)?.revision;
+    let revision = db.metadata().revision;
     let mut files = Vec::new();
 
     if enabled {
-        let snapshot = load_snapshot(db, project_row_id)?;
+        let snapshot = load_snapshot(db)?;
         let blocks = expected_blocks(&snapshot, project_folder, revision);
         for (folder, expected) in &blocks {
             let mut path = project_folder.to_path_buf();
@@ -925,7 +891,13 @@ pub(crate) fn forget_project(settings: &mut crate::settings::AppSettings, projec
 mod tests {
     use super::*;
 
-    fn element(id: &str, kind: &str, name: &str, description: &str, parent: Option<&str>) -> Element {
+    fn element(
+        id: &str,
+        kind: &str,
+        name: &str,
+        description: &str,
+        parent: Option<&str>,
+    ) -> Element {
         Element {
             external_id: id.to_string(),
             element_type: kind.to_string(),
@@ -938,9 +910,27 @@ mod tests {
     fn snapshot() -> DesignSnapshot {
         DesignSnapshot {
             elements: vec![
-                element("1", "Software System", "Adashi", "Local context layer.", None),
-                element("5", "Container", "MCP Server", "Passive stdio server.", Some("1")),
-                element("6", "Container", "Data Store", "Project-local SQLite.", Some("1")),
+                element(
+                    "1",
+                    "Software System",
+                    "Adashi",
+                    "Local context layer.",
+                    None,
+                ),
+                element(
+                    "5",
+                    "Container",
+                    "MCP Server",
+                    "Passive stdio server.",
+                    Some("1"),
+                ),
+                element(
+                    "6",
+                    "Container",
+                    "Data Store",
+                    "Project-local SQLite.",
+                    Some("1"),
+                ),
                 element("9", "Component", "Deep", "Below the top layer.", Some("5")),
                 element("2", "Person", "Developer", "Human actor.", None),
             ],
@@ -980,7 +970,10 @@ mod tests {
 
     #[test]
     fn rendering_is_byte_stable_across_runs() {
-        assert_eq!(render_root_block(&snapshot(), 3), render_root_block(&snapshot(), 3));
+        assert_eq!(
+            render_root_block(&snapshot(), 3),
+            render_root_block(&snapshot(), 3)
+        );
     }
 
     #[test]
@@ -1013,7 +1006,10 @@ mod tests {
 
     #[test]
     fn splice_replaces_only_the_managed_block() {
-        let other = format!("# Hand written\n\nKeep me.\n\n{}\nold\n{}", BLOCK_BEGIN, BLOCK_END);
+        let other = format!(
+            "# Hand written\n\nKeep me.\n\n{}\nold\n{}",
+            BLOCK_BEGIN, BLOCK_END
+        );
         let spliced = splice_block(&other, &format!("{BLOCK_BEGIN}\nnew\n{BLOCK_END}"));
         assert!(spliced.contains("Keep me."));
         assert!(spliced.contains("new"));
@@ -1022,7 +1018,10 @@ mod tests {
 
     #[test]
     fn splice_appends_without_disturbing_existing_content() {
-        let spliced = splice_block("# Hand written\n", &format!("{BLOCK_BEGIN}\nx\n{BLOCK_END}"));
+        let spliced = splice_block(
+            "# Hand written\n",
+            &format!("{BLOCK_BEGIN}\nx\n{BLOCK_END}"),
+        );
         assert!(spliced.starts_with("# Hand written\n"));
         assert!(spliced.contains(BLOCK_BEGIN));
     }
@@ -1042,7 +1041,10 @@ mod tests {
     #[test]
     fn bound_paths_that_escape_the_project_are_rejected() {
         let root = Path::new(r"C:\src\Adashi");
-        assert_eq!(relative_target(root, "src/mcp.rs").as_deref(), Some("src/mcp.rs"));
+        assert_eq!(
+            relative_target(root, "src/mcp.rs").as_deref(),
+            Some("src/mcp.rs")
+        );
         assert_eq!(
             relative_target(root, r"C:\src\Adashi\src\mcp.rs").as_deref(),
             Some("src/mcp.rs")
@@ -1104,9 +1106,11 @@ mod tests {
             })
             .unwrap();
         let workspace_id: i64 = db
-            .query_row("SELECT id FROM design_workspaces ORDER BY id LIMIT 1", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT id FROM design_workspaces ORDER BY id LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
 
         db.execute_batch(
@@ -1114,10 +1118,34 @@ mod tests {
         )
         .unwrap();
         for (external_id, parent, kind, name, description) in [
-            ("sys", None, "Software System", "Adashi", "Local context layer."),
-            ("mcp", Some("sys"), "Container", "MCP Server", "Passive stdio server."),
-            ("store", Some("sys"), "Container", "Data Store", "Project-local SQLite."),
-            ("deep", Some("mcp"), "Component", "Internal", "Below the top layer."),
+            (
+                "sys",
+                None,
+                "Software System",
+                "Adashi",
+                "Local context layer.",
+            ),
+            (
+                "mcp",
+                Some("sys"),
+                "Container",
+                "MCP Server",
+                "Passive stdio server.",
+            ),
+            (
+                "store",
+                Some("sys"),
+                "Container",
+                "Data Store",
+                "Project-local SQLite.",
+            ),
+            (
+                "deep",
+                Some("mcp"),
+                "Component",
+                "Internal",
+                "Below the top layer.",
+            ),
         ] {
             db.execute(
                 "INSERT INTO c4_elements(workspace_id, external_id, parent_external_id, element_type, name, description)
@@ -1138,7 +1166,11 @@ mod tests {
                  VALUES(?1, ?2, ?3, ?4)",
                 rusqlite::params![
                     workspace_id,
-                    if target.ends_with("mcp.rs") { "mcp" } else { "store" },
+                    if target.ends_with("mcp.rs") {
+                        "mcp"
+                    } else {
+                        "store"
+                    },
                     target_type,
                     target
                 ],
@@ -1146,7 +1178,13 @@ mod tests {
             .unwrap();
         }
 
-        let report = regenerate(&db, project_row_id, &project_folder, "AGENTS.md", true).unwrap();
+        let report = regenerate(
+            crate::storage::sqlite::test_snapshot(&db, project_row_id).as_ref(),
+            &project_folder,
+            "AGENTS.md",
+            true,
+        )
+        .unwrap();
         assert_eq!(report.written, vec!["AGENTS.md", "src/AGENTS.md"]);
         assert!(report.repaired.is_empty() && report.removed.is_empty());
 
@@ -1155,37 +1193,70 @@ mod tests {
         let root_block = fs::read_to_string(&root_file).unwrap();
         let folder_block = fs::read_to_string(&folder_file).unwrap();
         assert!(root_block.contains("**MCP Server** (Container) — Passive stdio server."));
-        assert!(root_block.contains("MCP Server -> Data Store: Reads and writes project resources."));
+        assert!(
+            root_block.contains("MCP Server -> Data Store: Reads and writes project resources.")
+        );
         assert!(!root_block.contains("**Internal**"));
         assert!(folder_block.contains("Bound here:"));
         assert!(folder_block.contains("src/mcp.rs"));
 
         // A second identical run writes nothing and keeps the bytes identical.
         let before = fs::read_to_string(&root_file).unwrap();
-        let report = regenerate(&db, project_row_id, &project_folder, "AGENTS.md", true).unwrap();
+        let report = regenerate(
+            crate::storage::sqlite::test_snapshot(&db, project_row_id).as_ref(),
+            &project_folder,
+            "AGENTS.md",
+            true,
+        )
+        .unwrap();
         assert!(report.repaired.is_empty());
         assert_eq!(fs::read_to_string(&root_file).unwrap(), before);
 
         // A hand edit inside the managed block is detected and restored.
         let edited = before.replace("Passive stdio server.", "Someone edited this.");
         fs::write(&root_file, &edited).unwrap();
-        let report = regenerate(&db, project_row_id, &project_folder, "AGENTS.md", true).unwrap();
+        let report = regenerate(
+            crate::storage::sqlite::test_snapshot(&db, project_row_id).as_ref(),
+            &project_folder,
+            "AGENTS.md",
+            true,
+        )
+        .unwrap();
         assert_eq!(report.repaired, vec!["AGENTS.md"]);
         assert_eq!(fs::read_to_string(&root_file).unwrap(), before);
 
         // Hand-written content outside the block survives untouched.
         fs::write(&root_file, format!("# House rules\n\n{before}")).unwrap();
-        regenerate(&db, project_row_id, &project_folder, "AGENTS.md", true).unwrap();
-        assert!(fs::read_to_string(&root_file).unwrap().starts_with("# House rules"));
+        regenerate(
+            crate::storage::sqlite::test_snapshot(&db, project_row_id).as_ref(),
+            &project_folder,
+            "AGENTS.md",
+            true,
+        )
+        .unwrap();
+        assert!(fs::read_to_string(&root_file)
+            .unwrap()
+            .starts_with("# House rules"));
 
         // Disabling removes every managed block and deletes files that held nothing else.
         let removed = remove_managed_blocks(&project_folder, "AGENTS.md").unwrap();
-        assert_eq!(removed, vec!["AGENTS.md".to_string(), "src/AGENTS.md".to_string()]);
+        assert_eq!(
+            removed,
+            vec!["AGENTS.md".to_string(), "src/AGENTS.md".to_string()]
+        );
         assert!(!folder_file.exists());
         assert!(root_file.exists());
-        assert!(fs::read_to_string(&root_file).unwrap().starts_with("# House rules"));
+        assert!(fs::read_to_string(&root_file)
+            .unwrap()
+            .starts_with("# House rules"));
 
-        let status = status(&db, project_row_id, &project_folder, "AGENTS.md", true).unwrap();
+        let status = status(
+            crate::storage::sqlite::test_snapshot(&db, project_row_id).as_ref(),
+            &project_folder,
+            "AGENTS.md",
+            true,
+        )
+        .unwrap();
         assert_eq!(status.files.len(), 2);
         assert!(status.files.iter().all(|file| file.state == "missing"));
 
@@ -1218,7 +1289,13 @@ mod tests {
             })
             .unwrap();
 
-        let report = regenerate(&db, project_row_id, &project_folder, "AGENTS.md", true).unwrap();
+        let report = regenerate(
+            crate::storage::sqlite::test_snapshot(&db, project_row_id).as_ref(),
+            &project_folder,
+            "AGENTS.md",
+            true,
+        )
+        .unwrap();
         println!("--- written files ({}) ---", report.written.len());
         for path in &report.written {
             let full = project_folder.join(path);
@@ -1229,9 +1306,16 @@ mod tests {
         let root_block = fs::read_to_string(project_folder.join("AGENTS.md")).unwrap();
         println!("\n--- root block ---\n{root_block}\n--- end root block ---");
         assert!(root_block.len() <= ROOT_BUDGET + 600);
-        for entry in report.written.iter().filter(|path| path.as_str() != "AGENTS.md") {
+        for entry in report
+            .written
+            .iter()
+            .filter(|path| path.as_str() != "AGENTS.md")
+        {
             let block = fs::read_to_string(project_folder.join(entry)).unwrap();
-            assert!(block.len() <= FOLDER_BUDGET + 600, "{entry} exceeded its budget");
+            assert!(
+                block.len() <= FOLDER_BUDGET + 600,
+                "{entry} exceeded its budget"
+            );
             println!("\n--- {entry} ---\n{block}");
         }
 
@@ -1243,10 +1327,22 @@ mod tests {
     fn disabled_projection_writes_nothing() {
         let root = std::env::temp_dir().join("adashi-projection-disabled");
         let _ = fs::create_dir_all(&root);
-        let db = Connection::open_in_memory().unwrap();
-        let report = regenerate(&db, 1, &root, "AGENTS.md", false).unwrap();
+        let project = crate::settings::ProjectSettings {
+            id: "disabled".into(),
+            name: "Disabled".into(),
+            folder: root.to_string_lossy().into_owned(),
+        };
+        let db = crate::storage::sqlite::open_test_database(&project, "test").unwrap();
+        let report = regenerate(
+            crate::storage::sqlite::test_snapshot(&db, 1).as_ref(),
+            &root,
+            "AGENTS.md",
+            false,
+        )
+        .unwrap();
         assert_eq!(report, ProjectionReport::default());
         assert!(!root.join("AGENTS.md").exists());
+        drop(db);
         let _ = fs::remove_dir_all(root);
     }
 }

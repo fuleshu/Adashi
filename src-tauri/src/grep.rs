@@ -18,11 +18,10 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use rusqlite::Connection;
-use serde::{Deserialize, Serialize};
+use adashi_storage_api::ReadSnapshot;
 
 use crate::design::{self, DesignBindingRecord, DesignDiagramRecord, DesignElementRecord};
-use crate::mockups::{self, MockupSummary};
+use crate::mockups::MockupSummary;
 use crate::tasks;
 
 /// Budget for the whole rendered response. Grep output is read one line at a time, so this
@@ -53,118 +52,7 @@ const WEIGHT_DEFAULT: u16 = 400;
 const WEIGHT_MEMORY_SUMMARY: u16 = 100;
 const WEIGHT_MEMORY_BODY: u16 = 200;
 
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, rmcp::schemars::JsonSchema,
-)]
-#[serde(rename_all = "lowercase")]
-pub enum GrepDomain {
-    Design,
-    Tasks,
-    Memory,
-}
-
-impl GrepDomain {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Design => "design",
-            Self::Tasks => "tasks",
-            Self::Memory => "memory",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum GrepScope {
-    /// Every project-content domain.
-    All,
-    Design,
-    Tasks,
-    Memory,
-}
-
-impl GrepScope {
-    fn domains(self) -> &'static [GrepDomain] {
-        match self {
-            Self::All => &ALL_DOMAINS,
-            Self::Design => &[GrepDomain::Design],
-            Self::Tasks => &[GrepDomain::Tasks],
-            Self::Memory => &[GrepDomain::Memory],
-        }
-    }
-
-    fn from_word(word: &str) -> Option<Self> {
-        match word.to_ascii_lowercase().as_str() {
-            "all" => Some(Self::All),
-            "design" => Some(Self::Design),
-            "tasks" => Some(Self::Tasks),
-            "memory" => Some(Self::Memory),
-            _ => None,
-        }
-    }
-}
-
-/// Task state filter for a grep. The vocabulary is the task lifecycle's own, so a search and a
-/// task listing can never disagree about what a state is called.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum GrepTaskState {
-    Todo,
-    Active,
-    Finished,
-    Closed,
-}
-
-impl GrepTaskState {
-    /// Task states are closed vocabulary, so an unrecognised state is reported as a typo with the
-    /// accepted values rather than being silently searched as text.
-    fn from_word(word: &str) -> Result<Self, String> {
-        tasks::TaskState::parse(word).map(|state| match state {
-            tasks::TaskState::Todo => Self::Todo,
-            tasks::TaskState::Active => Self::Active,
-            tasks::TaskState::Finished => Self::Finished,
-            tasks::TaskState::Closed => Self::Closed,
-        })
-    }
-
-    fn to_task_state(self) -> tasks::TaskState {
-        match self {
-            Self::Todo => tasks::TaskState::Todo,
-            Self::Active => tasks::TaskState::Active,
-            Self::Finished => tasks::TaskState::Finished,
-            Self::Closed => tasks::TaskState::Closed,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GrepParams {
-    /// Configured project name (case-insensitive) or project id.
-    pub project_name: String,
-    /// What to look for: a bare string, whitespace-separated terms (all must appear),
-    /// `"quoted phrases"`, or `key:value` clauses for in/file/type/state/limit. Matching is
-    /// always case-insensitive, and an unrecognised `key:value` clause is searched as text.
-    /// An empty pattern returns the top-layer overview with counts.
-    #[serde(default)]
-    pub pattern: Option<String>,
-    /// Domain scope: all (default), design, tasks, memory.
-    #[serde(default)]
-    pub r#in: Option<GrepScope>,
-    /// Restrict design hits to elements bound to this file or symbol, and task hits to tasks
-    /// whose created or changed file lists contain it.
-    #[serde(default)]
-    pub file: Option<String>,
-    /// Restrict design hits to one C4 element type, for example Container.
-    #[serde(default)]
-    pub r#type: Option<String>,
-    /// Restrict task hits to one state.
-    #[serde(default)]
-    pub state: Option<GrepTaskState>,
-    /// Maximum matches returned (default 50, maximum 200); the response budget can lower it.
-    #[serde(default)]
-    pub limit: Option<usize>,
-}
+pub use adashi_storage_api::search::*;
 
 /// One search term. `display` keeps the text as the caller wrote it; `needle` is what is
 /// matched, always lower-cased.
@@ -217,13 +105,10 @@ impl Query {
     }
 
     fn task_state(&self) -> Option<GrepTaskState> {
-        self.clauses
-            .iter()
-            .rev()
-            .find_map(|clause| match clause {
-                Clause::State(state) => Some(*state),
-                _ => None,
-            })
+        self.clauses.iter().rev().find_map(|clause| match clause {
+            Clause::State(state) => Some(*state),
+            _ => None,
+        })
     }
 
     fn limit(&self) -> usize {
@@ -235,44 +120,6 @@ impl Query {
                 _ => None,
             })
             .unwrap_or(DEFAULT_LIMIT)
-    }
-}
-
-/// Rendered grep output plus the accounting an agent needs in order to narrow deliberately.
-#[derive(Clone, Debug, Serialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GrepResult {
-    /// The complete grep-shaped output, bounded by the reply budget.
-    pub output: String,
-    /// True total over every selected domain, before the limit and the budget apply.
-    pub total: usize,
-    /// Per-domain split of `total`.
-    pub counts: GrepCounts,
-    /// Matches actually rendered.
-    pub shown: usize,
-    /// True when the limit or the reply budget left matches out.
-    pub truncated: bool,
-    /// Bytes of `output`; never larger than the reply budget.
-    pub output_bytes: usize,
-    /// Whether the pattern contained anything to search for.
-    pub pattern_terms: usize,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GrepCounts {
-    pub design: usize,
-    pub tasks: usize,
-    pub memory: usize,
-}
-
-impl GrepCounts {
-    fn of(counts: &BTreeMap<GrepDomain, usize>) -> Self {
-        Self {
-            design: counts.get(&GrepDomain::Design).copied().unwrap_or(0),
-            tasks: counts.get(&GrepDomain::Tasks).copied().unwrap_or(0),
-            memory: counts.get(&GrepDomain::Memory).copied().unwrap_or(0),
-        }
     }
 }
 
@@ -607,11 +454,11 @@ fn relationship_fields(
 /// Loads only the domains in scope. Design content is read through the design store, so the
 /// workspace-scoped queries and their deterministic ordering stay in one place.
 fn load_content(
-    db: &Connection,
-    project_id: i64,
+    db: &dyn ReadSnapshot,
     scope: GrepScope,
     state: Option<GrepTaskState>,
-) -> Result<ProjectContent, String> {    let domains = scope.domains();
+) -> Result<ProjectContent, String> {
+    let domains = scope.domains();
     let mut content = ProjectContent {
         elements: Vec::new(),
         relationships: Vec::new(),
@@ -624,12 +471,15 @@ fn load_content(
     };
 
     if domains.contains(&GrepDomain::Design) {
-        let design = design::load_content(db)?;
-        content.relationships = relationship_fields(design.relationships, &design.elements);
-        content.elements = design.elements;
-        content.diagrams = design.diagrams;
+        let design = db.design_inventory().map_err(|e| e.to_string())?;
+        content.elements = design.elements.into_iter().map(|v| v.value).collect();
+        content.relationships = relationship_fields(
+            design.relationships.into_iter().map(|v| v.value).collect(),
+            &content.elements,
+        );
+        content.diagrams = design.diagrams.into_iter().map(|v| v.value).collect();
         content.bindings = design.bindings;
-        content.mockups = mockups::load_summaries(db, project_id)?;
+        content.mockups = db.mockups(false).map_err(|e| e.to_string())?;
     }
 
     if domains.contains(&GrepDomain::Tasks) {
@@ -639,12 +489,14 @@ fn load_content(
             Some(state) => vec![state.to_task_state()],
             None => tasks::default_state_filter(None),
         };
-        content.tasks = tasks::load_tasks(db, project_id, &filter)?;
+        content.tasks = db.tasks(&filter).map_err(|e| e.to_string())?;
     }
 
     if domains.contains(&GrepDomain::Memory) {
-        content.memory_summary = crate::memory::load_memory(db, project_id)?.memory;
-        content.notes = crate::memory::load_retained_notes(db, project_id)?
+        content.memory_summary = db.memory().map_err(|e| e.to_string())?.memory;
+        content.notes = db
+            .retained_memory_notes()
+            .map_err(|e| e.to_string())?
             .into_iter()
             .filter(|note| note.superseded_by_version.is_none())
             .map(|note| (note.note_id, note.body))
@@ -694,7 +546,11 @@ fn candidates(content: &ProjectContent, query: &Query) -> Vec<Candidate> {
             for (kind, weight, value) in [
                 ("name", WEIGHT_NAME, element.name.clone()),
                 ("type", WEIGHT_ARTIFACT, element.element_type.clone()),
-                ("description", WEIGHT_DESCRIPTION, element.description.clone()),
+                (
+                    "description",
+                    WEIGHT_DESCRIPTION,
+                    element.description.clone(),
+                ),
                 ("technology", WEIGHT_DESCRIPTION, element.technology.clone()),
                 ("tags", WEIGHT_DESCRIPTION, element.tags.clone()),
                 ("id", WEIGHT_DEFAULT, element.external_id.clone()),
@@ -709,7 +565,8 @@ fn candidates(content: &ProjectContent, query: &Query) -> Vec<Candidate> {
             }
         }
         for relationship in &content.relationships {
-            if !bound_to_file(&relationship.source_id) && !bound_to_file(&relationship.destination_id)
+            if !bound_to_file(&relationship.source_id)
+                && !bound_to_file(&relationship.destination_id)
             {
                 continue;
             }
@@ -723,7 +580,9 @@ fn candidates(content: &ProjectContent, query: &Query) -> Vec<Candidate> {
             } else {
                 format!(
                     "{} -> {}: {}",
-                    relationship.source_name, relationship.destination_name, relationship.description
+                    relationship.source_name,
+                    relationship.destination_name,
+                    relationship.description
                 )
             };
             if file.is_some() {
@@ -743,7 +602,11 @@ fn candidates(content: &ProjectContent, query: &Query) -> Vec<Candidate> {
                 text,
             ));
             for (kind, weight, value) in [
-                ("technology", WEIGHT_DESCRIPTION, relationship.technology.clone()),
+                (
+                    "technology",
+                    WEIGHT_DESCRIPTION,
+                    relationship.technology.clone(),
+                ),
                 ("tags", WEIGHT_DESCRIPTION, relationship.tags.clone()),
                 ("id", WEIGHT_DEFAULT, relationship.external_id.clone()),
             ] {
@@ -762,7 +625,11 @@ fn candidates(content: &ProjectContent, query: &Query) -> Vec<Candidate> {
             for (kind, weight, value) in [
                 ("title", WEIGHT_NAME, diagram.title.clone()),
                 ("diagramType", WEIGHT_ARTIFACT, diagram.diagram_type.clone()),
-                ("artifactLabel", WEIGHT_ARTIFACT, diagram.artifact_label.clone()),
+                (
+                    "artifactLabel",
+                    WEIGHT_ARTIFACT,
+                    diagram.artifact_label.clone(),
+                ),
                 ("key", WEIGHT_DEFAULT, diagram.key.clone()),
             ] {
                 out.push(Candidate::new(
@@ -790,7 +657,11 @@ fn candidates(content: &ProjectContent, query: &Query) -> Vec<Candidate> {
             let locator = format!("design:{}", mockup.external_id);
             for (kind, weight, value) in [
                 ("title", WEIGHT_NAME, mockup.title.clone()),
-                ("attachedTo", WEIGHT_BINDING, mockup.attached_to_external_id.clone()),
+                (
+                    "attachedTo",
+                    WEIGHT_BINDING,
+                    mockup.attached_to_external_id.clone(),
+                ),
                 ("screen", WEIGHT_ARTIFACT, mockup.screen.clone()),
                 ("state", WEIGHT_ARTIFACT, mockup.state.clone()),
                 ("fidelity", WEIGHT_ARTIFACT, mockup.fidelity.clone()),
@@ -831,7 +702,8 @@ fn candidates(content: &ProjectContent, query: &Query) -> Vec<Candidate> {
             let files_match = match file {
                 None => true,
                 Some(file) => {
-                    file_matches(&task.created_files, file) || file_matches(&task.changed_files, file)
+                    file_matches(&task.created_files, file)
+                        || file_matches(&task.changed_files, file)
                 }
             };
             if !files_match {
@@ -1012,13 +884,8 @@ fn render_matches(
         } else {
             GREP_REPLY_BUDGET / 2
         };
-        let excerpt = render_excerpt(
-            &hit.text,
-            terms,
-            &hit.kind,
-            line_budget.min(allowance),
-        )
-        .unwrap_or_default();
+        let excerpt = render_excerpt(&hit.text, terms, &hit.kind, line_budget.min(allowance))
+            .unwrap_or_default();
         let line = format!("\n{}: {}", hit.locator, excerpt);
         if body.len() + line.len() + reserve > GREP_REPLY_BUDGET {
             body.push_str(&omission(shown, total));
@@ -1040,7 +907,7 @@ fn render_matches(
 }
 
 /// Runs one grep query against a project database.
-pub fn search(db: &Connection, project_id: i64, params: &GrepParams) -> Result<GrepResult, String> {
+pub fn search(db: &dyn ReadSnapshot, params: &GrepParams) -> Result<GrepResult, String> {
     let pattern = params.pattern.as_deref().unwrap_or("").trim().to_string();
     let mut query = parse_query(&pattern)?;
 
@@ -1076,7 +943,7 @@ pub fn search(db: &Connection, project_id: i64, params: &GrepParams) -> Result<G
     }
 
     let scope = query.scope();
-    let content = load_content(db, project_id, scope, query.task_state())?;
+    let content = load_content(db, scope, query.task_state())?;
     let limit = query.limit();
 
     if query.terms.is_empty() {
@@ -1094,7 +961,10 @@ pub fn search(db: &Connection, project_id: i64, params: &GrepParams) -> Result<G
     let total = matches.len();
     let (output, shown, truncated) = render_matches(&matches, &query.terms, &counts, total, limit);
     let output_bytes = output.len();
-    debug_assert!(output_bytes <= GREP_REPLY_BUDGET, "grep output exceeded its budget");
+    debug_assert!(
+        output_bytes <= GREP_REPLY_BUDGET,
+        "grep output exceeded its budget"
+    );
 
     Ok(GrepResult {
         output,
@@ -1115,11 +985,12 @@ fn overview(content: &ProjectContent, scope: GrepScope, limit: usize) -> GrepRes
     let mut lines: Vec<String> = Vec::new();
 
     if domains.contains(&GrepDomain::Design) {
-        for element in content
-            .elements
-            .iter()
-            .filter(|element| matches!(element.element_type.as_str(), "Software System" | "Container"))
-        {
+        for element in content.elements.iter().filter(|element| {
+            matches!(
+                element.element_type.as_str(),
+                "Software System" | "Container"
+            )
+        }) {
             lines.push(format!(
                 "design:{}: {} \"{}\" — {}",
                 element.external_id,
@@ -1167,7 +1038,11 @@ fn overview(content: &ProjectContent, scope: GrepScope, limit: usize) -> GrepRes
             .map(|state| {
                 format!(
                     "{state}({})",
-                    content.tasks.iter().filter(|task| task.state == *state).count()
+                    content
+                        .tasks
+                        .iter()
+                        .filter(|task| task.state == *state)
+                        .count()
                 )
             })
             .collect::<Vec<_>>()
@@ -1340,7 +1215,12 @@ mod tests {
 
     #[test]
     fn parser_treats_an_unknown_key_as_a_literal_term_and_never_errors() {
-        for pattern in ["sha:abc123", "port:8080", "http://example.com/x", "risk:high"] {
+        for pattern in [
+            "sha:abc123",
+            "port:8080",
+            "http://example.com/x",
+            "risk:high",
+        ] {
             let query = parse_query(pattern)
                 .unwrap_or_else(|error| panic!("{pattern} must not be an error: {error}"));
             assert_eq!(query.terms.len(), 1, "{pattern}");
@@ -1363,13 +1243,22 @@ mod tests {
 
     #[test]
     fn parser_rejects_a_malformed_value_on_a_recognised_clause() {
-        assert!(parse_query("in:nope").unwrap_err().contains("invalid_scope"));
+        assert!(parse_query("in:nope")
+            .unwrap_err()
+            .contains("invalid_scope"));
         let error = parse_query("state:nope").unwrap_err();
         assert!(error.contains("nope"), "{error}");
-        assert!(error.contains("todo"), "the error must name the accepted values: {error}");
+        assert!(
+            error.contains("todo"),
+            "the error must name the accepted values: {error}"
+        );
         assert!(error.contains("closed"), "{error}");
-        assert!(parse_query("limit:many").unwrap_err().contains("invalid_limit"));
-        assert!(parse_query("limit:0").unwrap_err().contains("invalid_limit"));
+        assert!(parse_query("limit:many")
+            .unwrap_err()
+            .contains("invalid_limit"));
+        assert!(parse_query("limit:0")
+            .unwrap_err()
+            .contains("invalid_limit"));
         assert!(parse_query(&"x".repeat(MAX_PATTERN_CHARS + 1))
             .unwrap_err()
             .contains("pattern_too_long"));
@@ -1398,18 +1287,25 @@ mod tests {
         let text = format!("{} NEEDLE {}", "alpha ".repeat(60), "omega ".repeat(60));
         let excerpt = render_excerpt(&text, &terms("needle"), "description", 120).unwrap();
         assert!(excerpt.contains("NEEDLE"), "{excerpt}");
-        assert!(excerpt.len() <= 120 + 6 + "NEEDLE".len(), "{} bytes: {excerpt}", excerpt.len());
-        let body = excerpt
-            .trim_start_matches('…')
-            .trim_end_matches('…')
-            .trim();
+        assert!(
+            excerpt.len() <= 120 + 6 + "NEEDLE".len(),
+            "{} bytes: {excerpt}",
+            excerpt.len()
+        );
+        let body = excerpt.trim_start_matches('…').trim_end_matches('…').trim();
         // Both ends stop on a word boundary, so neither side is a clipped word.
         assert!(
             body.starts_with("alpha") || body.starts_with("NEEDLE"),
             "{body:?}"
         );
-        assert!(body.ends_with("omega") || body.ends_with("NEEDLE"), "{body:?}");
-        assert!(!body.ends_with("omeg") && !body.ends_with("alph"), "{body:?}");
+        assert!(
+            body.ends_with("omega") || body.ends_with("NEEDLE"),
+            "{body:?}"
+        );
+        assert!(
+            !body.ends_with("omeg") && !body.ends_with("alph"),
+            "{body:?}"
+        );
     }
 
     #[test]
@@ -1423,7 +1319,10 @@ mod tests {
             "source window was {} bytes",
             excerpt.len()
         );
-        assert!(text.len() > 5_000, "fixture must be far larger than the window");
+        assert!(
+            text.len() > 5_000,
+            "fixture must be far larger than the window"
+        );
     }
 
     #[test]
@@ -1448,23 +1347,63 @@ mod tests {
         let text = format!("{} 版 revision 界 {}", "🦀".repeat(80), "🦀".repeat(80));
         let excerpt = render_excerpt(&text, &terms("revision"), "description", 60).unwrap();
         assert!(excerpt.contains("revision"), "{excerpt}");
-        assert!(excerpt.chars().count() <= 70, "{} chars", excerpt.chars().count());
+        assert!(
+            excerpt.chars().count() <= 70,
+            "{} chars",
+            excerpt.chars().count()
+        );
     }
 
     // ---------------------------------------------------------------- ordering and dedup
 
-    fn candidate(domain: GrepDomain, locator: &str, kind: &str, weight: u16, text: &str) -> Candidate {
+    fn candidate(
+        domain: GrepDomain,
+        locator: &str,
+        kind: &str,
+        weight: u16,
+        text: &str,
+    ) -> Candidate {
         Candidate::new(domain, locator, kind, weight, text)
     }
 
     #[test]
     fn ordering_is_domain_then_weight_then_locator_never_relevance() {
         let pool = vec![
-            candidate(GrepDomain::Memory, "memory:note-2", "note", WEIGHT_MEMORY_BODY, "revision memory note"),
-            candidate(GrepDomain::Design, "design:9", "description", WEIGHT_DESCRIPTION, "revision in a description"),
-            candidate(GrepDomain::Design, "design:9", "name", WEIGHT_NAME, "revision in a component name"),
-            candidate(GrepDomain::Tasks, "task:4", "title", WEIGHT_NAME, "revision in a task title"),
-            candidate(GrepDomain::Design, "design:10", "name", WEIGHT_NAME, "revision in another name"),
+            candidate(
+                GrepDomain::Memory,
+                "memory:note-2",
+                "note",
+                WEIGHT_MEMORY_BODY,
+                "revision memory note",
+            ),
+            candidate(
+                GrepDomain::Design,
+                "design:9",
+                "description",
+                WEIGHT_DESCRIPTION,
+                "revision in a description",
+            ),
+            candidate(
+                GrepDomain::Design,
+                "design:9",
+                "name",
+                WEIGHT_NAME,
+                "revision in a component name",
+            ),
+            candidate(
+                GrepDomain::Tasks,
+                "task:4",
+                "title",
+                WEIGHT_NAME,
+                "revision in a task title",
+            ),
+            candidate(
+                GrepDomain::Design,
+                "design:10",
+                "name",
+                WEIGHT_NAME,
+                "revision in another name",
+            ),
         ];
 
         let ordered = collect_matches(&pool, &terms("revision"))
@@ -1490,12 +1429,39 @@ mod tests {
     #[test]
     fn deduplication_returns_a_repeated_sentence_once_at_its_best_locator() {
         let pool = vec![
-            candidate(GrepDomain::Design, "design:5", "description", WEIGHT_DESCRIPTION, "Shared sentence about revision."),
-            candidate(GrepDomain::Design, "design:6", "description", WEIGHT_DESCRIPTION, "Shared sentence about revision."),
-            candidate(GrepDomain::Design, "design:5", "file", WEIGHT_BINDING, "Shared sentence about revision."),
-            candidate(GrepDomain::Tasks, "task:1", "title", WEIGHT_NAME, "Shared sentence about revision."),
+            candidate(
+                GrepDomain::Design,
+                "design:5",
+                "description",
+                WEIGHT_DESCRIPTION,
+                "Shared sentence about revision.",
+            ),
+            candidate(
+                GrepDomain::Design,
+                "design:6",
+                "description",
+                WEIGHT_DESCRIPTION,
+                "Shared sentence about revision.",
+            ),
+            candidate(
+                GrepDomain::Design,
+                "design:5",
+                "file",
+                WEIGHT_BINDING,
+                "Shared sentence about revision.",
+            ),
+            candidate(
+                GrepDomain::Tasks,
+                "task:1",
+                "title",
+                WEIGHT_NAME,
+                "Shared sentence about revision.",
+            ),
         ];
-        let matched = drop_duplicate_excerpts(collect_matches(&pool, &terms("revision")), &terms("revision"));
+        let matched = drop_duplicate_excerpts(
+            collect_matches(&pool, &terms("revision")),
+            &terms("revision"),
+        );
         assert_eq!(matched.len(), 1, "{matched:#?}");
         assert_eq!(matched[0].locator, "design:5");
         assert_eq!(matched[0].kind, "description");
@@ -1540,7 +1506,8 @@ mod tests {
         let mut counts = BTreeMap::new();
         counts.insert(GrepDomain::Design, matched.len());
 
-        let (output, shown, truncated) = render_matches(&matched, &terms("e"), &counts, matched.len(), MAX_LIMIT);
+        let (output, shown, truncated) =
+            render_matches(&matched, &terms("e"), &counts, matched.len(), MAX_LIMIT);
         assert!(truncated, "the budget must have left matches out");
         assert!(shown < matched.len());
         assert!(
@@ -1557,8 +1524,20 @@ mod tests {
     fn the_limit_is_reported_as_truncation_without_breaking_the_budget() {
         // Identical text under one locator is one field, so it is returned once.
         let same_artifact = vec![
-            candidate(GrepDomain::Tasks, "task:1", "title", WEIGHT_NAME, "revision guard"),
-            candidate(GrepDomain::Tasks, "task:1", "createdFiles", WEIGHT_BINDING, "revision guard"),
+            candidate(
+                GrepDomain::Tasks,
+                "task:1",
+                "title",
+                WEIGHT_NAME,
+                "revision guard",
+            ),
+            candidate(
+                GrepDomain::Tasks,
+                "task:1",
+                "createdFiles",
+                WEIGHT_BINDING,
+                "revision guard",
+            ),
         ];
         assert_eq!(collect_matches(&same_artifact, &terms("revision")).len(), 1);
 
@@ -1576,7 +1555,8 @@ mod tests {
         let matched = collect_matches(&pool, &terms("revision"));
         let mut counts = BTreeMap::new();
         counts.insert(GrepDomain::Tasks, matched.len());
-        let (output, shown, truncated) = render_matches(&matched, &terms("revision"), &counts, matched.len(), 10);
+        let (output, shown, truncated) =
+            render_matches(&matched, &terms("revision"), &counts, matched.len(), 10);
         assert_eq!(shown, 10);
         assert!(truncated);
         assert!(output.contains(&format!("showing 10 of {}", matched.len())));
@@ -1632,7 +1612,11 @@ mod tests {
             let project_row_id: i64 = db
                 .query_row("SELECT id FROM projects LIMIT 1", [], |row| row.get(0))
                 .unwrap();
-            (AdashiMcpServer::new(self.settings_path.clone()), db, project_row_id)
+            (
+                AdashiMcpServer::new(self.settings_path.clone()),
+                db,
+                project_row_id,
+            )
         }
     }
 
@@ -1666,7 +1650,9 @@ mod tests {
 
     fn populate(db: &mut rusqlite::Connection, project_row_id: i64) {
         let workspace_id: i64 = db
-            .query_row("SELECT id FROM design_workspaces LIMIT 1", [], |row| row.get(0))
+            .query_row("SELECT id FROM design_workspaces LIMIT 1", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         for (external_id, parent, element_type, name, description) in [
             (
@@ -1756,7 +1742,10 @@ mod tests {
         )
         .unwrap();
         for (note_id, body) in [
-            ("note-7", "Routine check: the concurrency guard rejects stale writes."),
+            (
+                "note-7",
+                "Routine check: the concurrency guard rejects stale writes.",
+            ),
             ("note-8", "Unrelated handover about packaging."),
         ] {
             memory::append_note(
@@ -1815,15 +1804,25 @@ mod tests {
         assert!(result.total > 0, "output was:\n{}", result.output);
         assert_eq!(result.pattern_terms, 2);
         assert!(
-            result.output.starts_with(&format!("{} matches — design(", result.total)),
+            result
+                .output
+                .starts_with(&format!("{} matches — design(", result.total)),
             "{}",
             result.output
         );
-        assert!(result.output.contains("design:concurrency-guard"), "{}", result.output);
+        assert!(
+            result.output.contains("design:concurrency-guard"),
+            "{}",
+            result.output
+        );
         assert!(result.output.contains("narrow the query") || !result.truncated);
 
         // Every design locator in the output resolves through the design retrieval surface.
-        for line in result.output.lines().filter(|line| line.starts_with("design:")) {
+        for line in result
+            .output
+            .lines()
+            .filter(|line| line.starts_with("design:"))
+        {
             let external_id = line
                 .trim_start_matches("design:")
                 .split(':')
@@ -1890,7 +1889,12 @@ mod tests {
         );
 
         // The scope parameter cannot reach them either.
-        for scope in [GrepScope::All, GrepScope::Design, GrepScope::Tasks, GrepScope::Memory] {
+        for scope in [
+            GrepScope::All,
+            GrepScope::Design,
+            GrepScope::Tasks,
+            GrepScope::Memory,
+        ] {
             let scoped_result = scoped(
                 &server,
                 &fixture,
@@ -1905,7 +1909,10 @@ mod tests {
                 },
             )
             .unwrap();
-            assert!(!scoped_result.output.contains("Concurrency suite"), "{scope:?}");
+            assert!(
+                !scoped_result.output.contains("Concurrency suite"),
+                "{scope:?}"
+            );
         }
 
         // The protocol rule is a rule, and rule text is tooling, so even a pattern taken
@@ -1919,7 +1926,10 @@ mod tests {
         let fixture = Fixture::new("source-window");
         let (server, mut db, project_row_id) = fixture.open();
         populate(&mut db, project_row_id);
-        let huge = format!("sequenceDiagram\n{}participant Store\n", "  A->>B: filler\n".repeat(2_000));
+        let huge = format!(
+            "sequenceDiagram\n{}participant Store\n",
+            "  A->>B: filler\n".repeat(2_000)
+        );
         db.execute(
             "UPDATE diagrams SET source=?1 WHERE key='uml-save'",
             rusqlite::params![huge],
@@ -2009,7 +2019,11 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(memory.output.contains("memory:summary:"), "{}", memory.output);
+        assert!(
+            memory.output.contains("memory:summary:"),
+            "{}",
+            memory.output
+        );
         assert_eq!(memory.counts.design, 0, "{}", memory.output);
 
         // The task side of the same question: the file list is searchable text, and the task
@@ -2097,7 +2111,11 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(containers.output.contains("design:5"), "{}", containers.output);
+        assert!(
+            containers.output.contains("design:5"),
+            "{}",
+            containers.output
+        );
         assert!(
             !containers.output.contains("design:concurrency-guard"),
             "the Component leaked:\n{}",
@@ -2177,7 +2195,11 @@ mod tests {
         let result = run(&server, &fixture, "");
         assert_eq!(result.pattern_terms, 0);
         assert!(!result.output.starts_with('0'), "{}", result.output);
-        assert!(result.output.contains("Project content overview"), "{}", result.output);
+        assert!(
+            result.output.contains("Project content overview"),
+            "{}",
+            result.output
+        );
         // The top layer only: the Software System and the two Containers, never the Component.
         assert!(result.output.contains("design:2:"), "{}", result.output);
         assert!(result.output.contains("design:5:"), "{}", result.output);
@@ -2188,17 +2210,35 @@ mod tests {
             result.output
         );
         assert!(result.output.contains("Boundaries:"), "{}", result.output);
-        assert!(result.output.contains("tasks: 2 — todo(0), active(1), finished(1)"), "{}", result.output);
-        assert!(result.output.contains("2 active notes"), "{}", result.output);
+        assert!(
+            result
+                .output
+                .contains("tasks: 2 — todo(0), active(1), finished(1)"),
+            "{}",
+            result.output
+        );
+        assert!(
+            result.output.contains("2 active notes"),
+            "{}",
+            result.output
+        );
         assert_eq!(result.counts.tasks, 2);
         assert_eq!(result.counts.memory, 3);
 
         // ...and still not the tooling.
-        assert!(!result.output.contains("Concurrency suite"), "{}", result.output);
+        assert!(
+            !result.output.contains("Concurrency suite"),
+            "{}",
+            result.output
+        );
 
         // The overview's own accounting is honest: the count it reports is the number of lines
         // it actually wrote, and it stays inside the reply budget.
-        assert!(result.output_bytes <= GREP_REPLY_BUDGET, "{}", result.output_bytes);
+        assert!(
+            result.output_bytes <= GREP_REPLY_BUDGET,
+            "{}",
+            result.output_bytes
+        );
         assert_eq!(
             result
                 .output
@@ -2236,7 +2276,11 @@ mod tests {
         .unwrap();
         assert_eq!(limited.shown, 3, "{}", limited.output);
         assert!(limited.truncated);
-        assert!(limited.output.contains("showing 3 of"), "{}", limited.output);
+        assert!(
+            limited.output.contains("showing 3 of"),
+            "{}",
+            limited.output
+        );
         assert!(limited.output_bytes <= GREP_REPLY_BUDGET);
     }
 
@@ -2265,7 +2309,10 @@ mod tests {
 
         // The same scope with a term is the documented form, and it does resolve the owner.
         let paired = run(&server, &fixture, "mcp.rs file:src-tauri/src/mcp.rs");
-        assert_eq!(paired.pattern_terms, 1, "the file clause is a scope, not a term");
+        assert_eq!(
+            paired.pattern_terms, 1,
+            "the file clause is a scope, not a term"
+        );
         assert!(
             paired.output.contains("design:mcp-server"),
             "{}",
@@ -2279,7 +2326,9 @@ mod tests {
         let (server, mut db, project_row_id) = fixture.open();
         populate(&mut db, project_row_id);
         let workspace_id: i64 = db
-            .query_row("SELECT id FROM design_workspaces LIMIT 1", [], |row| row.get(0))
+            .query_row("SELECT id FROM design_workspaces LIMIT 1", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         for index in 0..800 {
             db.execute(
@@ -2296,7 +2345,11 @@ mod tests {
         }
 
         let result = run(&server, &fixture, "e");
-        assert!(result.total > 1_000, "fixture matched only {}", result.total);
+        assert!(
+            result.total > 1_000,
+            "fixture matched only {}",
+            result.total
+        );
         assert!(result.truncated, "{}", result.output);
         assert!(
             result.output_bytes <= GREP_REPLY_BUDGET,
@@ -2304,7 +2357,9 @@ mod tests {
             result.output_bytes
         );
         assert!(
-            result.output.contains(&format!("showing {} of {} ", result.shown, result.total)),
+            result
+                .output
+                .contains(&format!("showing {} of {} ", result.shown, result.total)),
             "{}",
             result.output
         );
@@ -2365,7 +2420,11 @@ mod tests {
                 state: None,
                 limit: None,
             };
-            let result = search(&db, project_row_id, &params).unwrap();
+            let result = search(
+                crate::storage::sqlite::test_snapshot(&db, project_row_id).as_ref(),
+                &params,
+            )
+            .unwrap();
             println!("=== pattern {:?} ===", pattern);
             println!("{}", result.output);
             println!(
@@ -2378,8 +2437,9 @@ mod tests {
             for line in result.output.lines() {
                 if let Some(rest) = line.strip_prefix("design:") {
                     let external_id = rest.split(':').next().unwrap();
-                    let by_ids = design::load_by_ids(&db, project_row_id, &[external_id.to_string()])
-                        .unwrap();
+                    let by_ids =
+                        design::load_by_ids(&db, project_row_id, &[external_id.to_string()])
+                            .unwrap();
                     let resolved = by_ids
                         .elements
                         .iter()
@@ -2388,10 +2448,14 @@ mod tests {
                             .relationships
                             .iter()
                             .any(|relationship| relationship.external_id == external_id)
-                        || by_ids.diagrams.iter().any(|diagram| diagram.key == external_id)
-                        || by_ids.bindings.iter().any(|binding| {
-                            binding.design_external_id == external_id
-                        });
+                        || by_ids
+                            .diagrams
+                            .iter()
+                            .any(|diagram| diagram.key == external_id)
+                        || by_ids
+                            .bindings
+                            .iter()
+                            .any(|binding| binding.design_external_id == external_id);
                     assert!(resolved, "design:{external_id} did not resolve");
                     if by_ids
                         .elements
@@ -2399,15 +2463,8 @@ mod tests {
                         .any(|element| element.external_id == external_id)
                     {
                         // Elements are drillable one step further, into their scope.
-                        design::load_scope(
-                            &db,
-                            project_row_id,
-                            external_id,
-                            false,
-                            Some(0),
-                            false,
-                        )
-                        .unwrap_or_else(|error| panic!("design:{external_id}: {error}"));
+                        design::load_scope(&db, project_row_id, external_id, false, Some(0), false)
+                            .unwrap_or_else(|error| panic!("design:{external_id}: {error}"));
                     }
                 } else if let Some(rest) = line.strip_prefix("task:") {
                     let id = rest.split(':').next().unwrap().parse::<i64>().unwrap();

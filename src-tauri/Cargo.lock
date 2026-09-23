@@ -6,6 +6,7 @@ version = 4
 name = "adashi"
 version = "0.1.0"
 dependencies = [
+ "adashi-storage-api",
  "base64 0.22.1",
  "resvg",
  "rmcp",
@@ -22,6 +23,16 @@ dependencies = [
  "tempfile",
  "tokio",
  "winreg",
+]
+
+[[package]]
+name = "adashi-storage-api"
+version = "0.1.0"
+dependencies = [
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

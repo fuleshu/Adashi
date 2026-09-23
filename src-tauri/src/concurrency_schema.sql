@@ -116,3 +116,16 @@ SELECT project_id, 'mockup.working', external_id
 FROM ui_mockups;
 
 INSERT OR IGNORE INTO schema_migrations(version) VALUES (11);
+
+-- Full storage adapter resources. Only lifecycle initialization/migration runs this.
+INSERT OR IGNORE INTO resource_versions(project_id, resource_kind, resource_id)
+SELECT project_id, 'qa.run', CAST(id AS TEXT) FROM qa_runs;
+INSERT OR IGNORE INTO resource_versions(project_id, resource_kind, resource_id)
+SELECT r.project_id, 'qa.job-run', CAST(j.id AS TEXT)
+FROM qa_job_runs j JOIN qa_runs r ON r.id=j.qa_run_id;
+INSERT OR IGNORE INTO resource_versions(project_id, resource_kind, resource_id)
+SELECT project_id, 'computer', computer_id FROM project_computers;
+INSERT OR IGNORE INTO resource_versions(project_id, resource_kind, resource_id)
+SELECT id, 'legacy', 'content' FROM projects;
+INSERT OR IGNORE INTO resource_versions(project_id, resource_kind, resource_id)
+SELECT project_id, 'memory.note', note_id FROM project_memory_notes;

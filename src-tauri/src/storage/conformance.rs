@@ -31,7 +31,7 @@ fn json(value: &impl serde::Serialize) -> serde_json::Value {
     serde_json::to_value(value).unwrap()
 }
 
-pub(super) fn assert_rules_contract(open: impl Fn() -> Box<dyn ProjectStorage>) {
+pub(super) fn assert_rules_contract(open: impl Fn() -> Box<dyn RuleStorage>) {
     let mut first = open();
     let initial = first.rules_snapshot().unwrap();
     assert_eq!(first.change_cursor().unwrap(), initial.cursor);

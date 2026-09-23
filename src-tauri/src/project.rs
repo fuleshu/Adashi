@@ -1,10 +1,14 @@
+#[cfg(test)]
 use rusqlite::Connection;
 
 use crate::settings::{AppSettings, ProjectSettings};
 use crate::storage::{ProjectStore, StorageResult};
 
 #[cfg(test)]
-use {crate::{fixed_hooks, settings}, std::fs};
+use {
+    crate::{fixed_hooks, settings},
+    std::fs,
+};
 
 pub(crate) fn resolve_project_from_settings(
     settings: &AppSettings,
@@ -39,14 +43,18 @@ pub(crate) fn resolve_project_from_settings(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn open_project_database(
     project: &ProjectSettings,
 ) -> Result<Connection, Box<dyn std::error::Error>> {
-    Ok(open_project_store(project)?.into_legacy_sqlite())
+    Ok(crate::storage::sqlite::open_test_database(
+        project,
+        crate::computer::id()?,
+    )?)
 }
 
-/// Shared by desktop and MCP. The database-returning function above is the
-/// explicit task-14 compatibility bridge, not another opening implementation.
+/// Shared backend-neutral project entry point for desktop and MCP.
+/// Raw database access exists only in test fixtures.
 pub(crate) fn open_project_store(project: &ProjectSettings) -> StorageResult<ProjectStore> {
     ProjectStore::open(project)
 }
@@ -56,7 +64,10 @@ fn open_project_database_for_computer(
     project: &ProjectSettings,
     computer_id: &str,
 ) -> Result<Connection, Box<dyn std::error::Error>> {
-    Ok(ProjectStore::open_for_computer(project, computer_id)?.into_legacy_sqlite())
+    Ok(crate::storage::sqlite::open_test_database(
+        project,
+        computer_id,
+    )?)
 }
 
 #[cfg(test)]

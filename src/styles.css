@@ -3245,3 +3245,17 @@ code {
     grid-template-columns: 1fr;
   }
 }
+.draft-conflict {
+  display: block;
+  margin-top: 0.4rem;
+  color: #8b3a22;
+  font-size: 0.85rem;
+  font-weight: 400;
+  text-transform: none;
+}
+
+.draft-conflict button {
+  padding: 0.2rem 0.4rem;
+  font: inherit;
+  text-decoration: underline;
+}

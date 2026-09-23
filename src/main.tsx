@@ -1,4 +1,5 @@
 import React from "react";
+import { VersionedField, DraftConflict, useVersionedDraft, savedField, type SaveDraft } from "./VersionedField";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import EasyMDE from "easymde";
@@ -2834,14 +2835,14 @@ function ElementInspector({
     );
   }
 
-  function save(changes: Partial<DesignElement>) {
+  function save(changes: Partial<DesignElement>, expectedVersion = element.version) {
     const updatedElement = { ...element, ...changes };
 
-    invoke<DashboardPayload>("update_design_element", {
+    return invoke<DashboardPayload>("update_design_element", {
       input: {
         projectId,
         operationId: newOperationId("design-element"),
-        expectedVersion: element.version,
+        expectedVersion,
         externalId: updatedElement.externalId,
         name: updatedElement.name,
         description: updatedElement.description,
@@ -2849,8 +2850,8 @@ function ElementInspector({
         tags: updatedElement.tags,
       },
     })
-      .then(onChange)
-      .catch((reason) => onError(formatMutationError(reason)));
+      .then((payload) => { onChange(payload); return payload.designElements.find(record => record.externalId === element.externalId) ?? null; })
+      .catch((reason) => { onError(formatMutationError(reason)); return null; });
   }
 
   return (
@@ -2866,35 +2867,39 @@ function ElementInspector({
       <div className="inspector-form">
         <label>
           <span>Name</span>
-          <input
-            defaultValue={element.name}
-            key={`element-name-${element.externalId}-${element.name}`}
-            onBlur={(event) => save({ name: event.target.value })}
-          />
+          <VersionedField
+                  key={element.externalId}
+                  value={element.name}
+                  version={element.version}
+                  onSave={(value, version) => savedField(save({ name: value }, version), record => record.name)}
+                />
         </label>
         <label>
           <span>Description</span>
-          <textarea
-            defaultValue={element.description}
-            key={`element-description-${element.externalId}-${element.description}`}
-            onBlur={(event) => save({ description: event.target.value })}
-          />
+          <VersionedField multiline
+                  key={element.externalId}
+                  value={element.description}
+                  version={element.version}
+                  onSave={(value, version) => savedField(save({ description: value }, version), record => record.description)}
+                />
         </label>
         <label>
           <span>Technology</span>
-          <input
-            defaultValue={element.technology}
-            key={`element-technology-${element.externalId}-${element.technology}`}
-            onBlur={(event) => save({ technology: event.target.value })}
-          />
+          <VersionedField
+                  key={element.externalId}
+                  value={element.technology}
+                  version={element.version}
+                  onSave={(value, version) => savedField(save({ technology: value }, version), record => record.technology)}
+                />
         </label>
         <label>
           <span>Tags</span>
-          <input
-            defaultValue={element.tags}
-            key={`element-tags-${element.externalId}-${element.tags}`}
-            onBlur={(event) => save({ tags: event.target.value })}
-          />
+          <VersionedField
+                  key={element.externalId}
+                  value={element.tags}
+                  version={element.version}
+                  onSave={(value, version) => savedField(save({ tags: value }, version), record => record.tags)}
+                />
         </label>
       </div>
 
@@ -2969,22 +2974,22 @@ function RelationshipInspector({
   const source = elements.find((element) => element.externalId === relationship.sourceExternalId);
   const destination = elements.find((element) => element.externalId === relationship.destinationExternalId);
 
-  function save(changes: Partial<DesignRelationship>) {
+  function save(changes: Partial<DesignRelationship>, expectedVersion = relationship.version) {
     const updatedRelationship = { ...relationship, ...changes };
 
-    invoke<DashboardPayload>("update_design_relationship", {
+    return invoke<DashboardPayload>("update_design_relationship", {
       input: {
         projectId,
         operationId: newOperationId("design-relationship"),
-        expectedVersion: relationship.version,
+        expectedVersion,
         externalId: updatedRelationship.externalId,
         description: updatedRelationship.description,
         technology: updatedRelationship.technology,
         tags: updatedRelationship.tags,
       },
     })
-      .then(onChange)
-      .catch((reason) => onError(formatMutationError(reason)));
+      .then((payload) => { onChange(payload); return payload.designRelationships.find(record => record.externalId === relationship.externalId) ?? null; })
+      .catch((reason) => { onError(formatMutationError(reason)); return null; });
   }
 
   return (
@@ -3002,27 +3007,30 @@ function RelationshipInspector({
       <div className="inspector-form">
         <label>
           <span>Description</span>
-          <textarea
-            defaultValue={relationship.description}
-            key={`relationship-description-${relationship.externalId}-${relationship.description}`}
-            onBlur={(event) => save({ description: event.target.value })}
-          />
+          <VersionedField multiline
+                  key={relationship.externalId}
+                  value={relationship.description}
+                  version={relationship.version}
+                  onSave={(value, version) => savedField(save({ description: value }, version), record => record.description)}
+                />
         </label>
         <label>
           <span>Technology</span>
-          <input
-            defaultValue={relationship.technology}
-            key={`relationship-technology-${relationship.externalId}-${relationship.technology}`}
-            onBlur={(event) => save({ technology: event.target.value })}
-          />
+          <VersionedField
+                  key={relationship.externalId}
+                  value={relationship.technology}
+                  version={relationship.version}
+                  onSave={(value, version) => savedField(save({ technology: value }, version), record => record.technology)}
+                />
         </label>
         <label>
           <span>Tags</span>
-          <input
-            defaultValue={relationship.tags}
-            key={`relationship-tags-${relationship.externalId}-${relationship.tags}`}
-            onBlur={(event) => save({ tags: event.target.value })}
-          />
+          <VersionedField
+                  key={relationship.externalId}
+                  value={relationship.tags}
+                  version={relationship.version}
+                  onSave={(value, version) => savedField(save({ tags: value }, version), record => record.tags)}
+                />
         </label>
       </div>
 
@@ -3507,7 +3515,7 @@ function SettingsView({
   }
 
   function saveFixedHookPrompt(hookPrompt: FixedHookPrompt, prompt: string) {
-    invoke<DashboardPayload>("update_fixed_hook_prompt", {
+    return invoke<DashboardPayload>("update_fixed_hook_prompt", {
       input: {
         projectId: activeProjectId,
         operationId: newOperationId("fixed-hook"),
@@ -3516,8 +3524,8 @@ function SettingsView({
         prompt,
       },
     })
-      .then(onDashboardChange)
-      .catch((reason) => onError(formatMutationError(reason)));
+      .then((payload) => { onDashboardChange(payload); return payload.fixedHookPrompts.find(record => record.key === hookPrompt.key) ?? null; })
+      .catch((reason) => { onError(formatMutationError(reason)); return null; });
   }
 
   function saveArchitectureFileName() {
@@ -3701,10 +3709,11 @@ function SettingsView({
                   <h4>{hookPrompt.title}</h4>
                 </div>
               </div>
-              <MarkdownEditor
-                key={`${hookPrompt.key}-${hookPrompt.updatedAt}`}
+              <VersionedMarkdownEditor
+                key={hookPrompt.key}
                 value={hookPrompt.prompt}
-                onBlur={(prompt) => saveFixedHookPrompt(hookPrompt, prompt)}
+                version={hookPrompt.version}
+                onSave={(prompt, version) => savedField(saveFixedHookPrompt({ ...hookPrompt, version }, prompt), record => record.prompt)}
                 placeholder="Optional project-specific startup instructions. Leave empty to disable."
                 minHeight="260px"
                 maxHeight="420px"
@@ -3749,9 +3758,6 @@ function TasksView({
     closed: false,
   });
   const [linkQuery, setLinkQuery] = React.useState("");
-  const [completionMemo, setCompletionMemo] = React.useState("");
-  const [createdFiles, setCreatedFiles] = React.useState("");
-  const [changedFiles, setChangedFiles] = React.useState("");
 
   const visibleTasks = tasks.filter((task) => visibleStates[task.state]);
   const selectedTask =
@@ -3766,12 +3772,6 @@ function TasksView({
       setSelectedTaskId(visibleTasks[0].id);
     }
   }, [selectedTask, visibleTasks]);
-
-  React.useEffect(() => {
-    setCompletionMemo(selectedTask?.completionMemo ?? "");
-    setCreatedFiles((selectedTask?.createdFiles ?? []).join("\n"));
-    setChangedFiles((selectedTask?.changedFiles ?? []).join("\n"));
-  }, [selectedTask?.id]);
 
   function addTask() {
     invoke<DashboardPayload>("create_task", {
@@ -3797,7 +3797,7 @@ function TasksView({
   function updateTask(task: Task, changes: Partial<Pick<Task, "title" | "description" | "state">> & {
     designSpecificationLinks?: Array<Pick<TaskDesignSpecificationLink, "targetType" | "designExternalId">>;
   }) {
-    invoke<DashboardPayload>("update_task", {
+    return invoke<DashboardPayload>("update_task", {
       input: {
         projectId,
         operationId: newOperationId("task-update"),
@@ -3809,8 +3809,9 @@ function TasksView({
       .then((updatedPayload) => {
         setSelectedTaskId(task.id);
         onChange(updatedPayload);
+        return updatedPayload.tasks.find(record => record.id === task.id) ?? null;
       })
-      .catch((reason) => onError(formatMutationError(reason)));
+      .catch((reason) => { onError(formatMutationError(reason)); return null; });
   }
 
   function deleteSelectedTask(task: Task) {
@@ -3860,20 +3861,21 @@ function TasksView({
     updateTask(task, { designSpecificationLinks: nextLinks });
   }
 
-  function finishSelectedTask(task: Task) {
-    invoke<DashboardPayload>("finish_task", {
+  function finishSelectedTask(task: Task, completion: { completionMemo: string; createdFiles: string[]; changedFiles: string[] }, version: number) {
+    return invoke<DashboardPayload>("finish_task", {
       input: {
         projectId,
         operationId: newOperationId("task-finish"),
-        expectedVersion: task.version,
+        expectedVersion: version,
         taskId: task.id,
-        completionMemo,
-        createdFiles: splitLines(createdFiles),
-        changedFiles: splitLines(changedFiles),
+        ...completion,
       },
     })
-      .then(onChange)
-      .catch((reason) => onError(formatMutationError(reason)));
+      .then((updatedPayload) => {
+        onChange(updatedPayload);
+        return updatedPayload.tasks.find(record => record.id === task.id) ?? null;
+      })
+      .catch((reason) => { onError(formatMutationError(reason)); return null; });
   }
 
   function closeSelectedTask(task: Task) {
@@ -3967,10 +3969,11 @@ function TasksView({
             <div className="task-editor-form">
               <label>
                 <span>Title</span>
-                <input
-                  defaultValue={selectedTask.title}
-                  key={`task-title-${selectedTask.id}`}
-                  onBlur={(event) => updateTask(selectedTask, { title: event.target.value })}
+                <VersionedField
+                  key={selectedTask.id}
+                  value={selectedTask.title}
+                  version={selectedTask.version}
+                  onSave={(value, version) => savedField(updateTask({ ...selectedTask, version }, { title: value }), record => record.title)}
                 />
               </label>
 
@@ -3990,10 +3993,11 @@ function TasksView({
 
               <label className="task-description-label">
                 <span>Description</span>
-                <textarea
-                  defaultValue={selectedTask.description}
-                  key={`task-description-${selectedTask.id}`}
-                  onBlur={(event) => updateTask(selectedTask, { description: event.target.value })}
+                <VersionedField multiline
+                  key={selectedTask.id}
+                  value={selectedTask.description}
+                  version={selectedTask.version}
+                  onSave={(value, version) => savedField(updateTask({ ...selectedTask, version }, { description: value }), record => record.description)}
                 />
               </label>
             </div>
@@ -4073,31 +4077,8 @@ function TasksView({
               ) : null}
             </section>
 
-            <section className="task-detail-section">
-              <div className="task-section-heading">
-                <h4>Completion</h4>
-                {selectedTask.state === "active" || selectedTask.state === "finished" ? (
-                  <button onClick={() => finishSelectedTask(selectedTask)} type="button">
-                    <CheckCircle2 size={17} />
-                    Finish
-                  </button>
-                ) : null}
-              </div>
-              <div className="task-completion-grid">
-                <label>
-                  <span>Memo</span>
-                  <textarea value={completionMemo} onChange={(event) => setCompletionMemo(event.target.value)} />
-                </label>
-                <label>
-                  <span>Created Files</span>
-                  <textarea value={createdFiles} onChange={(event) => setCreatedFiles(event.target.value)} />
-                </label>
-                <label>
-                  <span>Changed Files</span>
-                  <textarea value={changedFiles} onChange={(event) => setChangedFiles(event.target.value)} />
-                </label>
-              </div>
-            </section>
+            <TaskCompletionEditor key={selectedTask.id} task={selectedTask}
+              onFinish={(completion, version) => finishSelectedTask(selectedTask, completion, version)} />
           </>
         ) : (
           <div className="empty-state">Create or reveal a task to start editing</div>
@@ -4105,6 +4086,38 @@ function TasksView({
       </section>
     </section>
   );
+}
+
+function completionText(task: Task): string {
+  return JSON.stringify({ completionMemo: task.completionMemo,
+    createdFiles: task.createdFiles.join("\n"), changedFiles: task.changedFiles.join("\n") });
+}
+
+function TaskCompletionEditor({ task, onFinish }: {
+  task: Task;
+  onFinish: (completion: { completionMemo: string; createdFiles: string[]; changedFiles: string[] }, version: number) => Promise<Task | null>;
+}) {
+  const draft = useVersionedDraft(completionText(task), task.version, async (value, version) => {
+    const fields = JSON.parse(value) as { completionMemo: string; createdFiles: string; changedFiles: string };
+    return savedField(onFinish({ completionMemo: fields.completionMemo,
+      createdFiles: splitLines(fields.createdFiles), changedFiles: splitLines(fields.changedFiles) }, version), completionText);
+  });
+  const fields = JSON.parse(draft.value) as { completionMemo: string; createdFiles: string; changedFiles: string };
+  const edit = (field: keyof typeof fields, value: string) => draft.edit(JSON.stringify({ ...fields, [field]: value }));
+  return <section className="task-detail-section">
+    <div className="task-section-heading">
+      <h4>Completion</h4>
+      {task.state === "active" || task.state === "finished" ? (
+        <button onClick={() => void draft.save(true)} type="button"><CheckCircle2 size={17} />Finish</button>
+      ) : null}
+    </div>
+    <DraftConflict conflict={draft.conflict} reload={draft.reload} />
+    <div className="task-completion-grid">
+      <label><span>Memo</span><textarea value={fields.completionMemo} onChange={event => edit("completionMemo", event.target.value)} /></label>
+      <label><span>Created Files</span><textarea value={fields.createdFiles} onChange={event => edit("createdFiles", event.target.value)} /></label>
+      <label><span>Changed Files</span><textarea value={fields.changedFiles} onChange={event => edit("changedFiles", event.target.value)} /></label>
+    </div>
+  </section>;
 }
 
 type TaskDesignLinkOption = {
@@ -4297,7 +4310,7 @@ function QaView({
       tags?: string[];
     },
   ) {
-    invoke<DashboardPayload>("update_qa_job", {
+    return invoke<DashboardPayload>("update_qa_job", {
       input: {
         projectId,
         operationId: newOperationId("qa-update"),
@@ -4309,8 +4322,9 @@ function QaView({
       .then((updatedPayload) => {
         setSelectedJobId(job.id);
         onChange(updatedPayload);
+        return updatedPayload.qaJobs.find(record => record.id === job.id) ?? null;
       })
-      .catch((reason) => onError(formatMutationError(reason)));
+      .catch((reason) => { onError(formatMutationError(reason)); return null; });
   }
 
   function deleteSelectedJob(job: QaJob) {
@@ -4495,10 +4509,11 @@ function QaView({
             <div className="qa-editor-form">
               <label>
                 <span>Name</span>
-                <input
-                  defaultValue={selectedJob.name}
-                  key={`qa-name-${selectedJob.id}`}
-                  onBlur={(event) => updateJob(selectedJob, { name: event.target.value })}
+                <VersionedField
+                  key={selectedJob.id}
+                  value={selectedJob.name}
+                  version={selectedJob.version}
+                  onSave={(value, version) => savedField(updateJob({ ...selectedJob, version }, { name: value }), record => record.name)}
                 />
               </label>
               <label>
@@ -4516,12 +4531,11 @@ function QaView({
               </label>
               <label>
                 <span>Timeout</span>
-                <input
-                  defaultValue={selectedJob.timeoutSeconds}
-                  key={`qa-timeout-${selectedJob.id}`}
-                  min={1}
-                  onBlur={(event) => updateJob(selectedJob, { timeoutSeconds: Number(event.target.value) || 120 })}
-                  type="number"
+                <VersionedField type="number" min={1}
+                  key={selectedJob.id}
+                  value={String(selectedJob.timeoutSeconds)}
+                  version={selectedJob.version}
+                  onSave={(value, version) => savedField(updateJob({ ...selectedJob, version }, { timeoutSeconds: Number(value) || 120 }), record => String(record.timeoutSeconds))}
                 />
               </label>
               <label className="qa-enabled-toggle">
@@ -4534,35 +4548,38 @@ function QaView({
               </label>
               <label className="task-description-label">
                 <span>Command</span>
-                <textarea
-                  defaultValue={selectedJob.command}
-                  key={`qa-command-${selectedJob.id}`}
-                  onBlur={(event) => updateJob(selectedJob, { command: event.target.value })}
+                <VersionedField multiline
+                  key={selectedJob.id}
+                  value={selectedJob.command}
+                  version={selectedJob.version}
+                  onSave={(value, version) => savedField(updateJob({ ...selectedJob, version }, { command: value }), record => record.command)}
                 />
               </label>
               <label>
                 <span>Working Directory</span>
-                <input
-                  defaultValue={selectedJob.workingDirectory}
-                  key={`qa-cwd-${selectedJob.id}`}
-                  onBlur={(event) => updateJob(selectedJob, { workingDirectory: event.target.value })}
-                  placeholder="project root"
+                <VersionedField
+                  key={selectedJob.id}
+                  value={selectedJob.workingDirectory}
+                  version={selectedJob.version}
+                  onSave={(value, version) => savedField(updateJob({ ...selectedJob, version }, { workingDirectory: value }), record => record.workingDirectory)}
                 />
               </label>
               <label>
                 <span>Tags</span>
-                <input
-                  defaultValue={selectedJob.tags.join(", ")}
-                  key={`qa-tags-${selectedJob.id}`}
-                  onBlur={(event) => updateJob(selectedJob, { tags: splitCommaList(event.target.value) })}
+                <VersionedField
+                  key={selectedJob.id}
+                  value={selectedJob.tags.join(", ")}
+                  version={selectedJob.version}
+                  onSave={(value, version) => savedField(updateJob({ ...selectedJob, version }, { tags: splitCommaList(value) }), record => record.tags.join(", "))}
                 />
               </label>
               <label className="task-description-label">
                 <span>Description</span>
-                <textarea
-                  defaultValue={selectedJob.description}
-                  key={`qa-description-${selectedJob.id}`}
-                  onBlur={(event) => updateJob(selectedJob, { description: event.target.value })}
+                <VersionedField multiline
+                  key={selectedJob.id}
+                  value={selectedJob.description}
+                  version={selectedJob.version}
+                  onSave={(value, version) => savedField(updateJob({ ...selectedJob, version }, { description: value }), record => record.description)}
                 />
               </label>
             </div>
@@ -4814,7 +4831,7 @@ function RulesView({
       ...changes,
     };
 
-    invoke<DashboardPayload>("update_rule", {
+    return invoke<DashboardPayload>("update_rule", {
       input: {
         projectId,
         operationId: newOperationId("rule-update"),
@@ -4830,8 +4847,9 @@ function RulesView({
       .then((updatedPayload) => {
         setSelectedRuleId(updatedRule.id);
         onChange(updatedPayload);
+        return updatedPayload.rules.find(record => record.id === rule.id) ?? null;
       })
-      .catch((reason) => onError(formatMutationError(reason)));
+      .catch((reason) => { onError(formatMutationError(reason)); return null; });
   }
 
   function remove(ruleId: number) {
@@ -4995,11 +5013,11 @@ function RulesView({
             <div className="rule-editor-form">
               <label>
                 <span>Name</span>
-                <input
-                  defaultValue={selectedRule.name}
-                  key={`name-${selectedRule.id}`}
-                  onBlur={(event) => updateRule(selectedRule, { name: event.target.value })}
-                  placeholder="Rule name"
+                <VersionedField
+                  key={selectedRule.id}
+                  value={selectedRule.name}
+                  version={selectedRule.version}
+                  onSave={(value, version) => savedField(updateRule({ ...selectedRule, version }, { name: value }), record => record.name)}
                 />
               </label>
 
@@ -5039,10 +5057,11 @@ function RulesView({
 
               <label className="prompt-editor-label">
                 <span>Prompt</span>
-                <MarkdownEditor
+                <VersionedMarkdownEditor
                   key={selectedRule.id}
                   value={selectedRule.prompt}
-                  onBlur={(value) => updateRule(selectedRule, { prompt: value })}
+                  version={selectedRule.version}
+                  onSave={(value, version) => savedField(updateRule({ ...selectedRule, version }, { prompt: value }), record => record.prompt)}
                 />
               </label>
             </div>
@@ -5066,30 +5085,30 @@ function MemoryView({
   onChange: (payload: DashboardPayload) => void;
   onError: (message: string) => void;
 }) {
-  function saveRule(rule: string) {
-    invoke<DashboardPayload>("update_memory_rule", {
+  function saveRule(rule: string, expectedVersion: number) {
+    return invoke<DashboardPayload>("update_memory_rule", {
       input: {
         projectId,
         operationId: newOperationId("memory-protocol"),
-        expectedVersion: memory.protocolVersion,
+        expectedVersion,
         rule,
       },
     })
-      .then(onChange)
-      .catch((reason) => onError(formatMutationError(reason)));
+      .then((payload) => { onChange(payload); return { value: payload.memory.rule, version: payload.memory.protocolVersion }; })
+      .catch((reason) => { onError(formatMutationError(reason)); return null; });
   }
 
-  function saveMemory(nextMemory: string) {
-    invoke<DashboardPayload>("update_memory", {
+  function saveMemory(nextMemory: string, expectedVersion: number) {
+    return invoke<DashboardPayload>("update_memory", {
       input: {
         projectId,
         operationId: newOperationId("memory-compaction"),
-        expectedVersion: memory.memoryVersion,
+        expectedVersion,
         memory: nextMemory,
       },
     })
-      .then(onChange)
-      .catch((reason) => onError(formatMutationError(reason)));
+      .then((payload) => { onChange(payload); return { value: payload.memory.memory, version: payload.memory.memoryVersion }; })
+      .catch((reason) => { onError(formatMutationError(reason)); return null; });
   }
 
   return (
@@ -5098,10 +5117,11 @@ function MemoryView({
         <summary className="rules-panel-heading">
           <h3>Memory Rule</h3>
         </summary>
-        <MarkdownEditor
-          key={`memory-rule-${memory.protocolVersion}`}
+        <VersionedMarkdownEditor
+          key={`${projectId}-memory-rule`}
           value={memory.rule}
-          onBlur={saveRule}
+          version={memory.protocolVersion}
+          onSave={saveRule}
           placeholder="Optional project-specific memory instructions. Leave empty to disable."
           minHeight="180px"
           maxHeight="260px"
@@ -5134,10 +5154,11 @@ function MemoryView({
         <details className="memory-summary" open={Boolean(memory.memory.trim())}>
           <summary>Shared summary</summary>
           <p className="memory-guidance">Keep durable context within {memory.limits.summaryChars.toLocaleString()} characters.</p>
-          <MarkdownEditor
-            key={`memory-body-${memory.memoryVersion}`}
+          <VersionedMarkdownEditor
+            key={`${projectId}-memory-body`}
             value={memory.memory}
-            onBlur={saveMemory}
+            version={memory.memoryVersion}
+            onSave={saveMemory}
             placeholder="Optional shared project summary..."
             minHeight="180px"
             maxHeight="360px"
@@ -5149,9 +5170,21 @@ function MemoryView({
   );
 }
 
+function VersionedMarkdownEditor({ value, version, onSave, ...options }: {
+  value: string; version: number; onSave: SaveDraft; placeholder?: string;
+  minHeight?: string; maxHeight?: string; height?: string;
+}) {
+  const draft = useVersionedDraft(value, version, onSave);
+  return <>
+    <MarkdownEditor {...options} value={draft.value} onChange={draft.edit} onBlur={() => void draft.save()} />
+    <DraftConflict conflict={draft.conflict} reload={draft.reload} />
+  </>;
+}
+
 function MarkdownEditor({
   value,
   onBlur,
+  onChange,
   placeholder = "Write the injected agent instruction in Markdown...",
   minHeight = "440px",
   maxHeight = "620px",
@@ -5159,6 +5192,7 @@ function MarkdownEditor({
 }: {
   value: string;
   onBlur: (value: string) => void;
+  onChange: (value: string) => void;
   placeholder?: string;
   minHeight?: string;
   maxHeight?: string;
@@ -5166,8 +5200,9 @@ function MarkdownEditor({
 }) {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const editorRef = React.useRef<EasyMDE | null>(null);
-  const savedValueRef = React.useRef(value);
   const onBlurRef = React.useRef(onBlur);
+  const onChangeRef = React.useRef(onChange);
+  onChangeRef.current = onChange;
 
   React.useEffect(() => {
     onBlurRef.current = onBlur;
@@ -5220,14 +5255,11 @@ function MarkdownEditor({
     });
 
     function commit() {
-      const nextValue = editor.value();
-
-      if (nextValue !== savedValueRef.current) {
-        savedValueRef.current = nextValue;
-        onBlurRef.current(nextValue);
-      }
+      onBlurRef.current(editor.value());
     }
 
+    const changed = () => onChangeRef.current(editor.value());
+    editor.codemirror.on("change", changed);
     editor.codemirror.on("blur", commit);
     editorRef.current = editor;
 
@@ -5236,10 +5268,16 @@ function MarkdownEditor({
     return () => {
       commit();
       editor.codemirror.off("blur", commit);
+      editor.codemirror.off("change", changed);
       editor.toTextArea();
       editorRef.current = null;
     };
   }, []);
+
+  React.useEffect(() => {
+    const editor = editorRef.current;
+    if (editor && editor.value() !== value) editor.value(value);
+  }, [value]);
 
   return (
     <div className="markdown-editor-host" style={{ height, minHeight }}>

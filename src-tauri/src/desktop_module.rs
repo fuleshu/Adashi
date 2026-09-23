@@ -1,4 +1,7 @@
+#[cfg(test)]
 use crate::project::open_project_database;
-use crate::{concurrency, design, fixed_hooks, memory, mockups, qa, rules, settings, tasks};
+#[cfg(test)]
+use crate::{concurrency, fixed_hooks, memory};
+use crate::{design, settings, tasks};
 
 include!("desktop.rs");

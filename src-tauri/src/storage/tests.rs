@@ -172,7 +172,7 @@ fn initialized_reads_preserve_database_bytes_mtime_and_identity() {
 #[test]
 fn storage_failure_rolls_back_the_entire_batch_and_receipt() {
     let fixture = Fixture::new();
-    let db = fixture.open().into_legacy_sqlite();
+    let db = sqlite::open_test_database(&fixture.project, "fixture-computer").unwrap();
     db.execute_batch("CREATE TRIGGER fail_second_rule BEFORE INSERT ON rules WHEN NEW.name='Fail' BEGIN SELECT RAISE(ABORT, 'fixture failure'); END;").unwrap();
     drop(db);
     let mut store = fixture.open();
@@ -196,7 +196,8 @@ fn storage_failure_rolls_back_the_entire_batch_and_receipt() {
         serde_json::to_value(store.rules_snapshot().unwrap()).unwrap(),
         before
     );
-    let db = store.into_legacy_sqlite();
+    drop(store);
+    let db = sqlite::open_test_database(&fixture.project, "fixture-computer").unwrap();
     assert_eq!(
         db.query_row(
             "SELECT COUNT(*) FROM mutation_operations WHERE operation_id='rollback'",
@@ -297,7 +298,7 @@ fn snapshots_do_not_mix_concurrent_batch_versions() {
 #[test]
 fn future_sqlite_schema_is_rejected_without_changes() {
     let fixture = Fixture::new();
-    let db = fixture.open().into_legacy_sqlite();
+    let db = sqlite::open_test_database(&fixture.project, "fixture-computer").unwrap();
     db.pragma_update(None, "user_version", crate::schema::SCHEMA_VERSION + 1)
         .unwrap();
     drop(db);

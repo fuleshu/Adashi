@@ -1,5 +1,5 @@
 <!-- adashi:architecture:begin -->
-<!-- adashi:generated revision=310 -->
+<!-- adashi:generated revision=334 -->
 # Architecture — `src` (generated)
 Generated from the Adashi design model; do not edit, change the model.
 These responsibilities are already owned here: extend them, do not duplicate.
@@ -9,7 +9,9 @@ These responsibilities are already owned here: extend them, do not duplicate.
 - **Dashboard UI** (Container) — React dashboard for browsing and rendering formal C4, UML, and UI mockup artifacts, plus m…
 
 Bound here:
+- file `src/VersionedField.tsx`
 - file `src/main.tsx`
+- file `src/versionedDraft.ts`
 
 [Showing 3 of 3 design element(s) bound here, 7 further line(s) dropped. Retrieve the rest with the adashi_design get_scope operation.]
 <!-- adashi:architecture:end -->

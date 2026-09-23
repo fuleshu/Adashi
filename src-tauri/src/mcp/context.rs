@@ -1,6 +1,6 @@
 //! Lifecycle v2: one executable body with addressable, content-versioned sections.
-use crate::{fixed_hooks, memory, rules, settings::ProjectSettings};
-use rusqlite::{params, Connection};
+use crate::{fixed_hooks, rules, settings::ProjectSettings};
+use adashi_storage_api::ReadSnapshot;
 use serde::{Deserialize, Serialize};
 
 pub const SUMMARY_BUDGET: usize = 2_000;
@@ -80,14 +80,19 @@ pub(super) fn content_version(body: &str) -> String {
 }
 
 pub fn build(
-    db: &Connection,
-    project_row_id: i64,
+    db: &dyn ReadSnapshot,
     project: ProjectSettings,
     intend: &str,
     hook: &str,
     memory_context: MemoryContext,
 ) -> Result<RuleInjectionResult, String> {
-    let applicable = rules::load_rule_injections(db, intend, hook)?;
+    rules::validate_intend(intend)?;
+    rules::validate_hook(hook)?;
+    let applicable = db
+        .rules()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|rule| rule.enabled && rule.intend == intend && rule.hook == hook);
     let mut result = RuleInjectionResult {
         contract_version: 2,
         project_id: project.id,
@@ -114,7 +119,7 @@ pub fn build(
     if hook != "run.start" {
         return Ok(result);
     }
-    let memory = memory::load_memory(db, project_row_id)?;
+    let memory = db.memory().map_err(|e| e.to_string())?;
     // Custom project instructions never compete with the informational context budget.
     result.push(
         "memory.protocol",
@@ -144,51 +149,47 @@ pub fn build(
         } else {
             fixed_hooks::IMPLEMENTATION_GUIDANCE_HOOK_KEY
         };
-        if let Some(prompt) = fixed_hooks::load_fixed_hook_prompts(db, project_row_id)?
+        if let Some(prompt) = db
+            .fixed_prompts()
+            .map_err(|e| e.to_string())?
             .into_iter()
             .find(|p| p.key == key)
         {
             result.push(key, "fixedPrompt", Some(prompt.version), &prompt.prompt);
         }
-        result.push(
-            "design.index",
-            "designIndex",
-            None,
-            &design_index(db, project_row_id)?,
-        );
+        result.push("design.index", "designIndex", None, &design_index(db)?);
     }
     Ok(result)
 }
 
 /// Metadata-only SQL projection; never hydrates descriptions, DSL, relationships or artifacts.
-fn design_index(db: &Connection, project_id: i64) -> Result<String, String> {
-    let total: i64 = db.query_row(
-        "SELECT COUNT(*) FROM c4_elements e JOIN design_workspaces w ON w.id=e.workspace_id WHERE w.project_id=?1",
-        [project_id], |row| row.get(0),
-    ).map_err(|e| e.to_string())?;
+fn design_index(db: &dyn ReadSnapshot) -> Result<String, String> {
+    let mut elements = db.design_inventory().map_err(|e| e.to_string())?.elements;
+    let total = elements.len();
+    elements.sort_by_key(|e| {
+        (
+            e.value.parent_external_id.is_some(),
+            match e.value.element_type.as_str() {
+                "Software System" => 0,
+                "Container" => 1,
+                _ => 2,
+            },
+            e.id,
+        )
+    });
     let mut output = String::from("# Formal design index\n");
     let footer = "\nIndex only: descriptions, relationships, artifacts, bindings and source require explicit retrieval.";
-    let mut statement = db.prepare(
-        "SELECT e.external_id, e.parent_external_id, e.element_type, e.name, COALESCE(rv.version,0)
-         FROM c4_elements e JOIN design_workspaces w ON w.id=e.workspace_id
-         LEFT JOIN resource_versions rv ON rv.project_id=w.project_id AND rv.resource_kind='design.element' AND rv.resource_id=e.external_id
-         WHERE w.project_id=?1 ORDER BY e.parent_external_id IS NOT NULL,
-         CASE e.element_type WHEN 'Software System' THEN 0 WHEN 'Container' THEN 1 ELSE 2 END, e.id LIMIT 32"
-    ).map_err(|e| e.to_string())?;
-    let rows = statement
-        .query_map(params![project_id], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, Option<String>>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, i64>(4)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?;
+    let rows = elements.into_iter().take(32);
     let mut included = 0;
     for row in rows {
-        let (id, parent, kind, name, version) = row.map_err(|e| e.to_string())?;
+        let e = row.value;
+        let (id, parent, kind, name, version) = (
+            e.external_id,
+            e.parent_external_id,
+            e.element_type,
+            e.name,
+            e.version,
+        );
         // JSON quoting preserves exact ids and prevents embedded newlines becoming index entries.
         let line = format!(
             "\n- {} {} {} parent={} v{}",
@@ -212,22 +213,21 @@ fn design_index(db: &Connection, project_id: i64) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::Connection;
     #[test]
     fn startup_contains_project_context_and_custom_instructions_without_builtin_manuals() {
         let mut db = Connection::open_in_memory().unwrap();
         crate::schema::migrate(&mut db).unwrap();
-        db.execute("INSERT INTO projects(name,slug) VALUES('P','p')", [])
-            .unwrap();
-        crate::state::ensure_project_state(&db).unwrap();
         let project = || ProjectSettings {
             id: "p".into(),
             name: "P".into(),
             folder: "unused".into(),
         };
+        crate::seed::seed_initial_data(&mut db, &project()).unwrap();
+        crate::fixed_hooks::ensure_fixed_hook_prompts(&db).unwrap();
         for intent in ["general", "design", "implementation"] {
             let result = build(
-                &db,
-                1,
+                crate::storage::sqlite::test_snapshot(&db, 1).as_ref(),
                 project(),
                 intent,
                 "run.start",
@@ -242,8 +242,7 @@ mod tests {
             assert!(!result.injection_prompt.contains("adashi_"));
         }
         let empty = build(
-            &db,
-            1,
+            crate::storage::sqlite::test_snapshot(&db, 1).as_ref(),
             project(),
             "general",
             "run.start",
@@ -261,8 +260,7 @@ mod tests {
         .unwrap();
         db.execute("INSERT INTO rules(project_id,name,enabled,intend,hook,prompt) VALUES(1,'Custom',1,'design','run.start','Project-specific lifecycle rule.')", []).unwrap();
         let result = build(
-            &db,
-            1,
+            crate::storage::sqlite::test_snapshot(&db, 1).as_ref(),
             project(),
             "design",
             "run.start",

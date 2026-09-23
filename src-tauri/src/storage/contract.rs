@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt};
+use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -6,73 +6,7 @@ use sha2::{Digest, Sha256};
 pub use crate::concurrency::ResourceConflict;
 use crate::rules::{NewRule, Rule};
 
-pub type StorageResult<T> = Result<T, StorageError>;
-
-#[derive(Debug)]
-pub enum StorageError {
-    InvalidConfiguration(String),
-    BackendUnavailable(String),
-    IncompatibleSchema { found: i64, supported: i64 },
-    Validation(String),
-    Conflict(Vec<ResourceConflict>),
-    OperationReused,
-    NotFound { kind: &'static str, id: i64 },
-    Backend(String),
-}
-
-impl StorageError {
-    pub(crate) fn backend(error: impl fmt::Display) -> Self {
-        Self::Backend(error.to_string())
-    }
-
-    pub fn code(&self) -> &'static str {
-        match self {
-            Self::InvalidConfiguration(_) => "storage.invalid_configuration",
-            Self::BackendUnavailable(_) => "storage.backend_unavailable",
-            Self::IncompatibleSchema { .. } => "storage.incompatible_schema",
-            Self::Validation(_) => "storage.validation",
-            Self::Conflict(_) => "resource.conflict",
-            Self::OperationReused => "storage.operation_reused",
-            Self::NotFound { .. } => "storage.not_found",
-            Self::Backend(_) => "storage.failure",
-        }
-    }
-}
-
-impl fmt::Display for StorageError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: ", self.code())?;
-        match self {
-            Self::InvalidConfiguration(message) | Self::Validation(message) | Self::Backend(message) => write!(f, "{message}"),
-            Self::BackendUnavailable(kind) => write!(f, "The '{kind}' backend is not available in this build; project storage was not opened"),
-            Self::IncompatibleSchema { found, supported } => write!(f, "Data schema {found} is newer than supported schema {supported}"),
-            Self::Conflict(conflicts) => write!(f, "{}", serde_json::to_string(conflicts).map_err(|_| fmt::Error)?),
-            Self::OperationReused => write!(f, "operationId was already used for a different request or receipt format"),
-            Self::NotFound { kind, id } => write!(f, "Unknown {kind} id: {id}"),
-        }
-    }
-}
-
-impl std::error::Error for StorageError {}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(transparent)]
-pub struct ChangeCursor(pub(super) String);
-
-impl ChangeCursor {
-    /// Adapters supply an opaque token; clients compare or persist it without
-    /// interpreting it as a resource version or mutation precondition.
-    pub fn from_token(token: impl Into<String>) -> Self {
-        Self(token.into())
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectIdentity {
-    pub id: String,
-    pub name: String,
-}
+pub use adashi_storage_api::{ChangeCursor, ProjectIdentity, StorageError, StorageResult};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -145,7 +79,7 @@ pub struct RuleMutationResult {
 /// Backend-neutral foundation. Domain operations are added here as task 14 extracts them.
 /// All methods finish their snapshot/transaction before returning; dropping the
 /// project handle releases its backend resources. No driver object escapes here.
-pub trait ProjectStorage {
+pub trait RuleStorage {
     fn rules_snapshot(&mut self) -> StorageResult<RuleSnapshot>;
     fn change_cursor(&mut self) -> StorageResult<ChangeCursor>;
     fn mutate_rules(&mut self, mutation: RuleMutation) -> StorageResult<RuleMutationResult>;

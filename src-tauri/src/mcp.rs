@@ -1,31 +1,40 @@
-use crate::concurrency::{self, MutationGuard, ResourceExpectation, ResourceIntent};
+use crate::concurrency::ResourceIntent;
 use crate::design::{
     self, DesignChange, DesignOverviewResult, DesignSaveResult, DesignScopeResult,
     DesignSearchResult, ElementDescriptionUpdate,
 };
 use crate::design_health;
 use crate::grep::{self, GrepParams};
-use crate::memory::{self, AppendMemoryNote, MemoryNote, ProjectMemory};
+use crate::memory::{AppendMemoryNote, MemoryNote, ProjectMemory};
 use crate::mockups::{self, MockupSummary, UiMockup};
 use crate::project::{open_project_store, resolve_project_from_settings};
-use crate::storage::{ProjectStorage, ProjectStore, StorageError};
 use crate::qa::{
     self, NewQaJob, QaDesignLinkInput, QaJob, QaJobQuery, QaJobSummary, QaRun, QaRunSummary,
     UpdateQaJob,
 };
-use crate::rules::{self, NewRule, Rule, UpdateRule};
+use crate::rules::{NewRule, Rule};
 use crate::settings::{self, AppSettings, ProjectSettings};
+#[cfg(test)]
 use crate::state as project_state;
+use crate::storage::api::{
+    BindingQuery, Change, ChangeOutcome, DesignSearchQuery, DesignWrite, IntentUpdate, MemoryWrite,
+    Mutation, QaWrite, ReadSnapshot, ResourceKey, RuleWrite, ScopeQuery, TaskQuery, TaskWrite,
+};
+use crate::storage::{ProjectStorage, ProjectStore, StorageError};
 use crate::tasks::{
     self, FinishTask, NewTask, Task, TaskDesignSpecificationLink, TaskDesignSpecificationLinkInput,
     UpdateTask,
 };
+#[cfg(test)]
+use crate::{concurrency, storage::RuleStorage};
+#[cfg(test)]
+use crate::{memory, rules};
 use rmcp::handler::server::tool::IntoCallToolResult;
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::{CallToolResult, ContentBlock, ErrorData};
 use rmcp::transport::stdio;
 use rmcp::{serve_server, tool, tool_router};
-use rusqlite::OptionalExtension;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 mod context;
@@ -60,14 +69,6 @@ impl AdashiMcpServer {
         settings::load_or_init(&self.settings_path).map_err(internal_error)
     }
 
-    fn open_project(
-        &self,
-        project_name: Option<&str>,
-    ) -> Result<(ProjectSettings, rusqlite::Connection), ErrorData> {
-        let (project, store) = self.open_project_storage(project_name)?;
-        Ok((project, store.into_legacy_sqlite()))
-    }
-
     fn open_project_storage(
         &self,
         project_name: Option<&str>,
@@ -86,11 +87,11 @@ impl AdashiMcpServer {
         &self,
         params: &GrepParams,
     ) -> Result<grep::GrepResult, String> {
-        let (_project, db) = self
-            .open_project(Some(params.project_name.as_str()))
-            .map_err(|error| error.to_string())?;
-        let project_row_id = project_row_id(&db)?;
-        grep::search(&db, project_row_id, params)
+        let (_project, mut store) = self
+            .open_project_storage(Some(&params.project_name))
+            .map_err(|e| e.to_string())?;
+        let snapshot = store.snapshot().map_err(|e| e.to_string())?;
+        snapshot.search(params).map_err(|e| e.to_string())
     }
 }
 
@@ -995,7 +996,11 @@ impl AdashiMcpServer {
         Parameters(params): Parameters<ProjectParams>,
     ) -> Result<Json<RuleListResult>, ErrorData> {
         let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
-        let rules = store.rules_snapshot().map_err(storage_error)?.rules;
+        let rules = store
+            .snapshot()
+            .map_err(storage_error)?
+            .rules()
+            .map_err(storage_error)?;
         Ok(Json(RuleListResult {
             project_id: project.id,
             project_name: project.name,
@@ -1007,11 +1012,10 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<RuleInjectionParams>,
     ) -> Result<Json<RuleInjectionResult>, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let db = store.snapshot().map_err(storage_error)?;
         context::build(
-            &db,
-            project_row_id,
+            db.as_ref(),
             project,
             &params.intend,
             &params.hook,
@@ -1038,19 +1042,12 @@ impl AdashiMcpServer {
         // The resolved filter travels in the cursor too, so a paged listing keeps the same view
         // it started with, default or explicit.
         let state_filter = tasks::default_state_filter(params.states.as_deref());
-        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
-        let tx = db.transaction().map_err(internal_error)?;
-        let project_row_id = project_row_id(&tx).map_err(tool_error)?;
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let db = store.snapshot().map_err(storage_error)?;
         // A default listing withholds closed work; state how much, so the omission is visible
         // rather than something the caller has to discover.
-        let closed_hidden = if params.states.is_none() {
-            tasks::count_closed_tasks(&tx, project_row_id).map_err(tool_error)?
-        } else {
-            0
-        };
-        let revision = project_state::load_project_revision(&tx, project_row_id)
-            .map_err(tool_error)?
-            .revision;
+
+        let revision = db.metadata().revision;
         let after_id = if let Some(encoded) = params.cursor {
             if encoded.len() > 4096 {
                 return Err(tool_error("tasks.invalid_cursor".into()));
@@ -1078,9 +1075,19 @@ impl AdashiMcpServer {
         } else {
             0
         };
-        let (mut tasks, filtered_total) =
-            tasks::load_task_summaries(&tx, project_row_id, &state_filter, after_id, limit + 1)
-                .map_err(tool_error)?;
+        let page = db
+            .task_page(&TaskQuery {
+                states: state_filter.clone(),
+                after_id: Some(after_id),
+                limit: limit as usize + 1,
+            })
+            .map_err(storage_error)?;
+        let (mut tasks, filtered_total) = (page.tasks, page.total);
+        let closed_hidden = if params.states.is_none() {
+            page.closed_count
+        } else {
+            0
+        };
         let has_more = tasks.len() > limit as usize;
         tasks.truncate(limit as usize);
         let next_cursor = if has_more {
@@ -1098,7 +1105,6 @@ impl AdashiMcpServer {
         } else {
             None
         };
-        tx.commit().map_err(internal_error)?;
         Ok(Json(TaskListResult {
             contract_version: 2,
             project_id: project.id,
@@ -1116,24 +1122,19 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<TaskIdParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let revision =
-            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
-        let task = tasks::load_task(&db, project_row_id, params.task_id).map_err(tool_error)?;
-        let mut design_specifications = load_task_design_specifications(
-            &db,
-            project_row_id,
-            &task,
-            params.include_design_scopes,
-        )
-        .map_err(tool_error)?;
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let db = store.snapshot().map_err(storage_error)?;
+        let revision = db.metadata();
+        let task = db.task(params.task_id).map_err(storage_error)?;
+        let mut design_specifications =
+            load_task_design_specifications(db.as_ref(), &task, params.include_design_scopes)
+                .map_err(tool_error)?;
         let mut previews = Vec::new();
         for specification in &mut design_specifications {
             let Some(mockup) = specification.mockup.as_ref() else {
                 continue;
             };
-            let png = mockups::preview_base64(&db, mockup, "accepted").map_err(tool_error)?;
+            let png = mockups::preview_base64_uncached(mockup, "accepted").map_err(tool_error)?;
             specification.mockup_preview = Some(TaskMockupPreview {
                 variant: "accepted".to_string(),
                 mime_type: "image/png".to_string(),
@@ -1143,7 +1144,8 @@ impl AdashiMcpServer {
         }
 
         let design_scope_hint = if params.include_design_scopes {
-            "Scopes are inlined for the links above because includeDesignScopes was set.".to_string()
+            "Scopes are inlined for the links above because includeDesignScopes was set."
+                .to_string()
         } else {
             format!(
                 "Link metadata only. Retrieve just the scopes this work needs with the adashi_design \
@@ -1171,10 +1173,10 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<GetMemoryParams>,
     ) -> Result<Json<MemoryReadResult>, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let mut memory = memory::load_memory(&db, project_row_id).map_err(tool_error)?;
-        let retained = memory::load_retained_notes(&db, project_row_id).map_err(tool_error)?;
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let db = store.snapshot().map_err(storage_error)?;
+        let mut memory = db.memory().map_err(storage_error)?;
+        let retained = db.retained_memory_notes().map_err(storage_error)?;
         let retained_notes = retained.len() as u32;
         let query = params.query.as_deref().map(str::to_lowercase);
         let note_id = params.note_id.as_deref().map(str::trim);
@@ -1191,8 +1193,7 @@ impl AdashiMcpServer {
             })
             .collect();
         let matched_notes = memory.notes.len() as u32;
-        let revision =
-            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
+        let revision = db.metadata();
 
         Ok(Json(MemoryReadResult {
             project_id: project.id,
@@ -1208,36 +1209,23 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<CreateRuleParams>,
     ) -> Result<Json<CreateRuleResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let operation_id = params.operation_id.trim().to_string();
-        let rule = if let Some(replayed) =
-            concurrency::load_operation::<Rule>(&db, project_row_id, &operation_id)
-                .map_err(tool_error)?
-        {
-            replayed
-        } else {
-            let tx = db.transaction().map_err(internal_error)?;
-            let rule_id = rules::create_rule(
-                &tx,
-                project_row_id,
-                NewRule {
-                    name: params.name,
-                    enabled: params.enabled,
-                    intend: params.intend,
-                    hook: params.hook,
-                    prompt: params.prompt,
-                },
-            )
-            .map_err(tool_error)?;
-            concurrency::bump_version(&tx, project_row_id, "rule", &rule_id.to_string())
-                .map_err(tool_error)?;
-            project_state::bump_project_revision(&tx, project_row_id).map_err(tool_error)?;
-            let rule = rules::load_rule(&tx, rule_id).map_err(tool_error)?;
-            concurrency::record_no_op(&tx, project_row_id, &operation_id, &rule)
-                .map_err(tool_error)?;
-            tx.commit().map_err(internal_error)?;
-            rule
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let result = store
+            .commit(Mutation {
+                operation_id: params.operation_id.clone(),
+                changes: vec![Change::Rule(RuleWrite::Create {
+                    input: NewRule {
+                        name: params.name,
+                        enabled: params.enabled,
+                        intend: params.intend,
+                        hook: params.hook,
+                        prompt: params.prompt,
+                    },
+                })],
+            })
+            .map_err(storage_error)?;
+        let Some(ChangeOutcome::Rule(Some(rule))) = result.outcomes.into_iter().next() else {
+            return Err(internal_error("Storage returned an unexpected outcome"));
         };
         Ok(Json(CreateRuleResult {
             project_id: project.id,
@@ -1249,58 +1237,30 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<UpdateRuleParams>,
     ) -> Result<Json<UpdateRuleResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let guard = single_resource_guard(
-            params.operation_id,
-            "rule",
-            params.rule_id.to_string(),
-            params.expected_version,
-        );
-        let rule = if let Some(replayed) =
-            concurrency::load_operation::<Rule>(&db, project_row_id, &guard.operation_id)
-                .map_err(tool_error)?
-        {
-            replayed
-        } else {
-            let tx = db.transaction().map_err(internal_error)?;
-            concurrency::validate_guard(&tx, project_row_id, &guard).map_err(tool_error)?;
-            let before = rules::load_rule(&tx, params.rule_id).map_err(tool_error)?;
-            rules::update_rule(
-                &tx,
-                UpdateRule {
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let result = store
+            .commit(Mutation {
+                operation_id: params.operation_id.clone(),
+                changes: vec![Change::Rule(RuleWrite::Update {
                     id: params.rule_id,
-                    name: params.name,
-                    enabled: params.enabled,
-                    intend: params.intend,
-                    hook: params.hook,
-                    prompt: params.prompt,
-                },
-            )
-            .map_err(tool_error)?;
-            let updated = rules::load_rule(&tx, params.rule_id).map_err(tool_error)?;
-            if same_value(&before, &updated).map_err(tool_error)? {
-                tx.rollback().map_err(internal_error)?;
-                concurrency::record_no_op(&db, project_row_id, &guard.operation_id, &before)
-                    .map_err(tool_error)?;
-                before
-            } else {
-                concurrency::bump_version(&tx, project_row_id, "rule", &params.rule_id.to_string())
-                    .map_err(tool_error)?;
-                project_state::bump_project_revision(&tx, project_row_id).map_err(tool_error)?;
-                let updated = rules::load_rule(&tx, params.rule_id).map_err(tool_error)?;
-                concurrency::record_no_op(&tx, project_row_id, &guard.operation_id, &updated)
-                    .map_err(tool_error)?;
-                tx.commit().map_err(internal_error)?;
-                updated
-            }
+                    expected_version: params.expected_version,
+                    input: NewRule {
+                        name: params.name,
+                        enabled: params.enabled,
+                        intend: params.intend,
+                        hook: params.hook,
+                        prompt: params.prompt,
+                    },
+                })],
+            })
+            .map_err(storage_error)?;
+        let Some(ChangeOutcome::Rule(Some(rule))) = result.outcomes.into_iter().next() else {
+            return Err(internal_error("Storage returned an unexpected outcome"));
         };
-        let revision =
-            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
         Ok(Json(UpdateRuleResult {
             project_id: project.id,
             updated_rule_id: rule.id,
-            revision: revision.revision,
+            revision: result.revision,
         }))
     }
 
@@ -1308,39 +1268,20 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DeleteRuleParams>,
     ) -> Result<Json<DeleteRuleResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let guard = single_resource_guard(
-            params.operation_id,
-            "rule",
-            params.rule_id.to_string(),
-            params.expected_version,
-        );
-        if concurrency::load_operation::<i64>(&db, project_row_id, &guard.operation_id)
-            .map_err(tool_error)?
-            .is_none()
-        {
-            let tx = db.transaction().map_err(internal_error)?;
-            concurrency::validate_guard(&tx, project_row_id, &guard).map_err(tool_error)?;
-            rules::delete_rule(&tx, params.rule_id).map_err(tool_error)?;
-            concurrency::tombstone_version(
-                &tx,
-                project_row_id,
-                "rule",
-                &params.rule_id.to_string(),
-            )
-            .map_err(tool_error)?;
-            project_state::bump_project_revision(&tx, project_row_id).map_err(tool_error)?;
-            concurrency::record_no_op(&tx, project_row_id, &guard.operation_id, &params.rule_id)
-                .map_err(tool_error)?;
-            tx.commit().map_err(internal_error)?;
-        }
-        let revision =
-            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let result = store
+            .commit(Mutation {
+                operation_id: params.operation_id.clone(),
+                changes: vec![Change::Rule(RuleWrite::Delete {
+                    id: params.rule_id,
+                    expected_version: params.expected_version,
+                })],
+            })
+            .map_err(storage_error)?;
         Ok(Json(DeleteRuleResult {
             project_id: project.id,
+            revision: result.revision,
             deleted_rule_id: params.rule_id,
-            revision: revision.revision,
         }))
     }
 
@@ -1348,45 +1289,27 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<CreateTaskParams>,
     ) -> Result<Json<TaskMutationResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let operation_id = params.operation_id.trim().to_string();
-        let task = if let Some(replayed) =
-            concurrency::load_operation::<Task>(&db, project_row_id, &operation_id)
-                .map_err(tool_error)?
-        {
-            replayed
-        } else {
-            let tx = db.transaction().map_err(internal_error)?;
-            let created = tasks::create_task(
-                &tx,
-                project_row_id,
-                NewTask {
-                    title: params.title,
-                    description: params.description,
-                    design_specification_links: params.design_specification_links,
-                },
-            )
-            .map_err(tool_error)?;
-            concurrency::bump_version(&tx, project_row_id, "task", &created.id.to_string())
-                .map_err(tool_error)?;
-            project_state::bump_project_revision(&tx, project_row_id).map_err(tool_error)?;
-            let created = tasks::load_task(&tx, project_row_id, created.id).map_err(tool_error)?;
-            concurrency::record_no_op(&tx, project_row_id, &operation_id, &created)
-                .map_err(tool_error)?;
-            tx.commit().map_err(internal_error)?;
-            created
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let result = store
+            .commit(Mutation {
+                operation_id: params.operation_id.clone(),
+                changes: vec![Change::Task(TaskWrite::Create {
+                    input: NewTask {
+                        title: params.title,
+                        description: params.description,
+                        design_specification_links: params.design_specification_links,
+                    },
+                })],
+            })
+            .map_err(storage_error)?;
+        let Some(ChangeOutcome::Task(Some(task))) = result.outcomes.into_iter().next() else {
+            return Err(internal_error("Storage returned an unexpected outcome"));
         };
-        let revision =
-            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
-        let design_specifications =
-            load_task_design_specifications(&db, project_row_id, &task, false)
-                .map_err(tool_error)?;
-
+        let design_specifications = task_link_branches(&task);
         Ok(Json(TaskMutationResult {
             project_id: project.id,
             project_name: project.name,
-            revision: revision.revision,
+            revision: result.revision,
             task,
             design_specifications,
         }))
@@ -1396,63 +1319,30 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<UpdateTaskParams>,
     ) -> Result<Json<TaskMutationResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let guard = single_resource_guard(
-            params.operation_id,
-            "task",
-            params.task_id.to_string(),
-            params.expected_version,
-        );
-        let task = if let Some(replayed) =
-            concurrency::load_operation::<Task>(&db, project_row_id, &guard.operation_id)
-                .map_err(tool_error)?
-        {
-            replayed
-        } else {
-            let tx = db.transaction().map_err(internal_error)?;
-            concurrency::validate_guard(&tx, project_row_id, &guard).map_err(tool_error)?;
-            let before =
-                tasks::load_task(&tx, project_row_id, params.task_id).map_err(tool_error)?;
-            let updated = tasks::update_task(
-                &tx,
-                project_row_id,
-                UpdateTask {
-                    task_id: params.task_id,
-                    title: params.title,
-                    description: params.description,
-                    state: params.state,
-                    design_specification_links: params.design_specification_links,
-                },
-            )
-            .map_err(tool_error)?;
-            if same_task_content(&before, &updated) {
-                tx.rollback().map_err(internal_error)?;
-                concurrency::record_no_op(&db, project_row_id, &guard.operation_id, &before)
-                    .map_err(tool_error)?;
-                before
-            } else {
-                concurrency::bump_version(&tx, project_row_id, "task", &params.task_id.to_string())
-                    .map_err(tool_error)?;
-                project_state::bump_project_revision(&tx, project_row_id).map_err(tool_error)?;
-                let updated =
-                    tasks::load_task(&tx, project_row_id, params.task_id).map_err(tool_error)?;
-                concurrency::record_no_op(&tx, project_row_id, &guard.operation_id, &updated)
-                    .map_err(tool_error)?;
-                tx.commit().map_err(internal_error)?;
-                updated
-            }
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let result = store
+            .commit(Mutation {
+                operation_id: params.operation_id.clone(),
+                changes: vec![Change::Task(TaskWrite::Update {
+                    expected_version: params.expected_version,
+                    input: UpdateTask {
+                        task_id: params.task_id,
+                        title: params.title,
+                        description: params.description,
+                        state: params.state,
+                        design_specification_links: params.design_specification_links,
+                    },
+                })],
+            })
+            .map_err(storage_error)?;
+        let Some(ChangeOutcome::Task(Some(task))) = result.outcomes.into_iter().next() else {
+            return Err(internal_error("Storage returned an unexpected outcome"));
         };
-        let revision =
-            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
-        let design_specifications =
-            load_task_design_specifications(&db, project_row_id, &task, false)
-                .map_err(tool_error)?;
-
+        let design_specifications = task_link_branches(&task);
         Ok(Json(TaskMutationResult {
             project_id: project.id,
             project_name: project.name,
-            revision: revision.revision,
+            revision: result.revision,
             task,
             design_specifications,
         }))
@@ -1462,62 +1352,29 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<FinishTaskParams>,
     ) -> Result<Json<TaskMutationResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let guard = single_resource_guard(
-            params.operation_id,
-            "task",
-            params.task_id.to_string(),
-            params.expected_version,
-        );
-        let task = if let Some(replayed) =
-            concurrency::load_operation::<Task>(&db, project_row_id, &guard.operation_id)
-                .map_err(tool_error)?
-        {
-            replayed
-        } else {
-            let tx = db.transaction().map_err(internal_error)?;
-            concurrency::validate_guard(&tx, project_row_id, &guard).map_err(tool_error)?;
-            let before =
-                tasks::load_task(&tx, project_row_id, params.task_id).map_err(tool_error)?;
-            let finished = tasks::finish_task(
-                &tx,
-                project_row_id,
-                FinishTask {
-                    task_id: params.task_id,
-                    completion_memo: params.completion_memo,
-                    created_files: params.created_files.unwrap_or_default(),
-                    changed_files: params.changed_files.unwrap_or_default(),
-                },
-            )
-            .map_err(tool_error)?;
-            if same_task_content(&before, &finished) {
-                tx.rollback().map_err(internal_error)?;
-                concurrency::record_no_op(&db, project_row_id, &guard.operation_id, &before)
-                    .map_err(tool_error)?;
-                before
-            } else {
-                concurrency::bump_version(&tx, project_row_id, "task", &params.task_id.to_string())
-                    .map_err(tool_error)?;
-                project_state::bump_project_revision(&tx, project_row_id).map_err(tool_error)?;
-                let finished =
-                    tasks::load_task(&tx, project_row_id, params.task_id).map_err(tool_error)?;
-                concurrency::record_no_op(&tx, project_row_id, &guard.operation_id, &finished)
-                    .map_err(tool_error)?;
-                tx.commit().map_err(internal_error)?;
-                finished
-            }
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let result = store
+            .commit(Mutation {
+                operation_id: params.operation_id.clone(),
+                changes: vec![Change::Task(TaskWrite::Finish {
+                    expected_version: params.expected_version,
+                    input: FinishTask {
+                        task_id: params.task_id,
+                        completion_memo: params.completion_memo,
+                        created_files: params.created_files.unwrap_or_default(),
+                        changed_files: params.changed_files.unwrap_or_default(),
+                    },
+                })],
+            })
+            .map_err(storage_error)?;
+        let Some(ChangeOutcome::Task(Some(task))) = result.outcomes.into_iter().next() else {
+            return Err(internal_error("Storage returned an unexpected outcome"));
         };
-        let revision =
-            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
-        let design_specifications =
-            load_task_design_specifications(&db, project_row_id, &task, false)
-                .map_err(tool_error)?;
-
+        let design_specifications = task_link_branches(&task);
         Ok(Json(TaskMutationResult {
             project_id: project.id,
             project_name: project.name,
-            revision: revision.revision,
+            revision: result.revision,
             task,
             design_specifications,
         }))
@@ -1529,53 +1386,24 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<CloseTaskParams>,
     ) -> Result<Json<TaskMutationResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let guard = single_resource_guard(
-            params.operation_id,
-            "task",
-            params.task_id.to_string(),
-            params.expected_version,
-        );
-        let task = if let Some(replayed) =
-            concurrency::load_operation::<Task>(&db, project_row_id, &guard.operation_id)
-                .map_err(tool_error)?
-        {
-            replayed
-        } else {
-            let tx = db.transaction().map_err(internal_error)?;
-            concurrency::validate_guard(&tx, project_row_id, &guard).map_err(tool_error)?;
-            let before =
-                tasks::load_task(&tx, project_row_id, params.task_id).map_err(tool_error)?;
-            let closed =
-                tasks::close_task(&tx, project_row_id, params.task_id).map_err(tool_error)?;
-            if same_task_content(&before, &closed) {
-                tx.rollback().map_err(internal_error)?;
-                concurrency::record_no_op(&db, project_row_id, &guard.operation_id, &before)
-                    .map_err(tool_error)?;
-                before
-            } else {
-                concurrency::bump_version(&tx, project_row_id, "task", &params.task_id.to_string())
-                    .map_err(tool_error)?;
-                project_state::bump_project_revision(&tx, project_row_id).map_err(tool_error)?;
-                let closed =
-                    tasks::load_task(&tx, project_row_id, params.task_id).map_err(tool_error)?;
-                concurrency::record_no_op(&tx, project_row_id, &guard.operation_id, &closed)
-                    .map_err(tool_error)?;
-                tx.commit().map_err(internal_error)?;
-                closed
-            }
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let result = store
+            .commit(Mutation {
+                operation_id: params.operation_id.clone(),
+                changes: vec![Change::Task(TaskWrite::Close {
+                    id: params.task_id,
+                    expected_version: params.expected_version,
+                })],
+            })
+            .map_err(storage_error)?;
+        let Some(ChangeOutcome::Task(Some(task))) = result.outcomes.into_iter().next() else {
+            return Err(internal_error("Storage returned an unexpected outcome"));
         };
-        let revision =
-            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
-        let design_specifications =
-            load_task_design_specifications(&db, project_row_id, &task, false)
-                .map_err(tool_error)?;
-
+        let design_specifications = task_link_branches(&task);
         Ok(Json(TaskMutationResult {
             project_id: project.id,
             project_name: project.name,
-            revision: revision.revision,
+            revision: result.revision,
             task,
             design_specifications,
         }))
@@ -1585,53 +1413,20 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DeleteTaskParams>,
     ) -> Result<Json<DeleteTaskResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let guard = single_resource_guard(
-            params.operation_id,
-            "task",
-            params.task_id.to_string(),
-            params.expected_version,
-        );
-        if concurrency::load_operation::<i64>(&db, project_row_id, &guard.operation_id)
-            .map_err(tool_error)?
-            .is_none()
-        {
-            let tx = db.transaction().map_err(internal_error)?;
-            concurrency::validate_guard(&tx, project_row_id, &guard).map_err(tool_error)?;
-            let dependent_jobs: i64 = tx
-                .query_row(
-                    "SELECT COUNT(*) FROM qa_job_task_links WHERE task_id=?1",
-                    [params.task_id],
-                    |row| row.get(0),
-                )
-                .map_err(internal_error)?;
-            if dependent_jobs > 0 {
-                return Err(tool_error(format!(
-                    "Task {} is linked from {dependent_jobs} QA job(s); remove or version those dependencies before deletion",
-                    params.task_id
-                )));
-            }
-            tasks::delete_task(&tx, project_row_id, params.task_id).map_err(tool_error)?;
-            concurrency::tombstone_version(
-                &tx,
-                project_row_id,
-                "task",
-                &params.task_id.to_string(),
-            )
-            .map_err(tool_error)?;
-            project_state::bump_project_revision(&tx, project_row_id).map_err(tool_error)?;
-            concurrency::record_no_op(&tx, project_row_id, &guard.operation_id, &params.task_id)
-                .map_err(tool_error)?;
-            tx.commit().map_err(internal_error)?;
-        }
-        let revision =
-            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
-
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let result = store
+            .commit(Mutation {
+                operation_id: params.operation_id.clone(),
+                changes: vec![Change::Task(TaskWrite::Delete {
+                    id: params.task_id,
+                    expected_version: params.expected_version,
+                })],
+            })
+            .map_err(storage_error)?;
         Ok(Json(DeleteTaskResult {
             project_id: project.id,
             project_name: project.name,
-            revision: revision.revision,
+            revision: result.revision,
             deleted_task_id: params.task_id,
         }))
     }
@@ -1646,12 +1441,9 @@ impl AdashiMcpServer {
                 "qa.invalid_limit: limit must be 1..={QA_JOB_LIST_MAX_LIMIT}"
             )));
         }
-        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
-        let tx = db.transaction().map_err(internal_error)?;
-        let project_row_id = project_row_id(&tx).map_err(tool_error)?;
-        let revision = project_state::load_project_revision(&tx, project_row_id)
-            .map_err(tool_error)?
-            .revision;
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let db = store.snapshot().map_err(storage_error)?;
+        let revision = db.metadata().revision;
         let after = if let Some(encoded) = params.cursor {
             if encoded.len() > 4096 {
                 return Err(tool_error("qa.invalid_cursor".into()));
@@ -1679,9 +1471,17 @@ impl AdashiMcpServer {
         } else {
             None
         };
-        let (mut jobs, filtered_total) =
-            qa::load_job_summaries(&tx, project_row_id, params.query.as_ref(), after, limit + 1)
-                .map_err(tool_error)?;
+        let all = db
+            .qa_job_summaries(&params.query.unwrap_or_default())
+            .map_err(storage_error)?;
+        let filtered_total = all.len() as i64;
+        let mut jobs = all
+            .into_iter()
+            .filter(|job| {
+                after.is_none_or(|pos| (qa::state_rank(&job.derived_state), job.number) > pos)
+            })
+            .take(limit as usize + 1)
+            .collect::<Vec<_>>();
         let has_more = jobs.len() > limit as usize;
         jobs.truncate(limit as usize);
         let next_cursor = if has_more {
@@ -1700,7 +1500,6 @@ impl AdashiMcpServer {
         } else {
             None
         };
-        tx.commit().map_err(internal_error)?;
 
         Ok(Json(QaJobListResult {
             contract_version: 1,
@@ -1718,11 +1517,10 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<QaJobIdParams>,
     ) -> Result<Json<QaJobResult>, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let revision =
-            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
-        let job = qa::load_job(&db, project_row_id, params.qa_job_id).map_err(tool_error)?;
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let db = store.snapshot().map_err(storage_error)?;
+        let revision = db.metadata();
+        let job = db.qa_job(params.qa_job_id).map_err(storage_error)?;
 
         Ok(Json(QaJobResult {
             project_id: project.id,
@@ -1736,11 +1534,10 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<QaRunIdParams>,
     ) -> Result<Json<QaRunResult>, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let revision =
-            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
-        let run = qa::load_run(&db, project_row_id, params.qa_run_id).map_err(tool_error)?;
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let db = store.snapshot().map_err(storage_error)?;
+        let revision = db.metadata();
+        let run = db.qa_run(params.qa_run_id).map_err(storage_error)?;
 
         Ok(Json(QaRunResult {
             project_id: project.id,
@@ -1754,49 +1551,34 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<CreateQaJobParams>,
     ) -> Result<Json<QaJobResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let operation_id = params.operation_id.trim().to_string();
-        let job = if let Some(replayed) =
-            concurrency::load_operation::<QaJob>(&db, project_row_id, &operation_id)
-                .map_err(tool_error)?
-        {
-            replayed
-        } else {
-            let tx = db.transaction().map_err(internal_error)?;
-            let created = qa::create_job(
-                &tx,
-                project_row_id,
-                NewQaJob {
-                    name: params.name,
-                    description: params.description,
-                    command: params.command,
-                    working_directory: params.working_directory,
-                    shell: params.shell,
-                    timeout_seconds: params.timeout_seconds,
-                    enabled: params.enabled,
-                    created_by: Some("codex".to_string()),
-                    design_specification_links: params.design_specification_links,
-                    task_ids: params.task_ids,
-                    tags: params.tags,
-                },
-            )
-            .map_err(tool_error)?;
-            concurrency::bump_version(&tx, project_row_id, "qa.job", &created.id.to_string())
-                .map_err(tool_error)?;
-            project_state::bump_project_revision(&tx, project_row_id).map_err(tool_error)?;
-            let created = qa::load_job(&tx, project_row_id, created.id).map_err(tool_error)?;
-            concurrency::record_no_op(&tx, project_row_id, &operation_id, &created)
-                .map_err(tool_error)?;
-            tx.commit().map_err(internal_error)?;
-            created
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let result = store
+            .commit(Mutation {
+                operation_id: params.operation_id.clone(),
+                changes: vec![Change::Qa(QaWrite::CreateJob {
+                    input: NewQaJob {
+                        name: params.name,
+                        description: params.description,
+                        command: params.command,
+                        working_directory: params.working_directory,
+                        shell: params.shell,
+                        timeout_seconds: params.timeout_seconds,
+                        enabled: params.enabled,
+                        created_by: Some("codex".to_string()),
+                        design_specification_links: params.design_specification_links,
+                        task_ids: params.task_ids,
+                        tags: params.tags,
+                    },
+                })],
+            })
+            .map_err(storage_error)?;
+        let Some(ChangeOutcome::QaJob(Some(job))) = result.outcomes.into_iter().next() else {
+            return Err(internal_error("Storage returned an unexpected outcome"));
         };
-        let revision =
-            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
         Ok(Json(QaJobResult {
             project_id: project.id,
             project_name: project.name,
-            revision: revision.revision,
+            revision: result.revision,
             job,
         }))
     }
@@ -1805,69 +1587,35 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<UpdateQaJobParams>,
     ) -> Result<Json<QaJobResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let guard = single_resource_guard(
-            params.operation_id,
-            "qa.job",
-            params.qa_job_id.to_string(),
-            params.expected_version,
-        );
-        let job = if let Some(replayed) =
-            concurrency::load_operation::<QaJob>(&db, project_row_id, &guard.operation_id)
-                .map_err(tool_error)?
-        {
-            replayed
-        } else {
-            let tx = db.transaction().map_err(internal_error)?;
-            concurrency::validate_guard(&tx, project_row_id, &guard).map_err(tool_error)?;
-            let before = qa::load_job(&tx, project_row_id, params.qa_job_id).map_err(tool_error)?;
-            let updated = qa::update_job(
-                &tx,
-                project_row_id,
-                UpdateQaJob {
-                    qa_job_id: params.qa_job_id,
-                    name: params.name,
-                    description: params.description,
-                    command: params.command,
-                    working_directory: params.working_directory,
-                    shell: params.shell,
-                    timeout_seconds: params.timeout_seconds,
-                    enabled: params.enabled,
-                    design_specification_links: params.design_specification_links,
-                    task_ids: params.task_ids,
-                    tags: params.tags,
-                },
-            )
-            .map_err(tool_error)?;
-            if same_qa_definition(&before, &updated) {
-                tx.rollback().map_err(internal_error)?;
-                concurrency::record_no_op(&db, project_row_id, &guard.operation_id, &before)
-                    .map_err(tool_error)?;
-                before
-            } else {
-                concurrency::bump_version(
-                    &tx,
-                    project_row_id,
-                    "qa.job",
-                    &params.qa_job_id.to_string(),
-                )
-                .map_err(tool_error)?;
-                project_state::bump_project_revision(&tx, project_row_id).map_err(tool_error)?;
-                let updated =
-                    qa::load_job(&tx, project_row_id, params.qa_job_id).map_err(tool_error)?;
-                concurrency::record_no_op(&tx, project_row_id, &guard.operation_id, &updated)
-                    .map_err(tool_error)?;
-                tx.commit().map_err(internal_error)?;
-                updated
-            }
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let result = store
+            .commit(Mutation {
+                operation_id: params.operation_id.clone(),
+                changes: vec![Change::Qa(QaWrite::UpdateJob {
+                    expected_version: params.expected_version,
+                    input: UpdateQaJob {
+                        qa_job_id: params.qa_job_id,
+                        name: params.name,
+                        description: params.description,
+                        command: params.command,
+                        working_directory: params.working_directory,
+                        shell: params.shell,
+                        timeout_seconds: params.timeout_seconds,
+                        enabled: params.enabled,
+                        design_specification_links: params.design_specification_links,
+                        task_ids: params.task_ids,
+                        tags: params.tags,
+                    },
+                })],
+            })
+            .map_err(storage_error)?;
+        let Some(ChangeOutcome::QaJob(Some(job))) = result.outcomes.into_iter().next() else {
+            return Err(internal_error("Storage returned an unexpected outcome"));
         };
-        let revision =
-            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
         Ok(Json(QaJobResult {
             project_id: project.id,
             project_name: project.name,
-            revision: revision.revision,
+            revision: result.revision,
             job,
         }))
     }
@@ -1876,39 +1624,20 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DeleteQaJobParams>,
     ) -> Result<Json<DeleteQaJobResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let guard = single_resource_guard(
-            params.operation_id,
-            "qa.job",
-            params.qa_job_id.to_string(),
-            params.expected_version,
-        );
-        if concurrency::load_operation::<i64>(&db, project_row_id, &guard.operation_id)
-            .map_err(tool_error)?
-            .is_none()
-        {
-            let tx = db.transaction().map_err(internal_error)?;
-            concurrency::validate_guard(&tx, project_row_id, &guard).map_err(tool_error)?;
-            qa::delete_job(&tx, project_row_id, params.qa_job_id).map_err(tool_error)?;
-            concurrency::tombstone_version(
-                &tx,
-                project_row_id,
-                "qa.job",
-                &params.qa_job_id.to_string(),
-            )
-            .map_err(tool_error)?;
-            project_state::bump_project_revision(&tx, project_row_id).map_err(tool_error)?;
-            concurrency::record_no_op(&tx, project_row_id, &guard.operation_id, &params.qa_job_id)
-                .map_err(tool_error)?;
-            tx.commit().map_err(internal_error)?;
-        }
-        let revision =
-            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let result = store
+            .commit(Mutation {
+                operation_id: params.operation_id.clone(),
+                changes: vec![Change::Qa(QaWrite::DeleteJob {
+                    id: params.qa_job_id,
+                    expected_version: params.expected_version,
+                })],
+            })
+            .map_err(storage_error)?;
         Ok(Json(DeleteQaJobResult {
             project_id: project.id,
             project_name: project.name,
-            revision: revision.revision,
+            revision: result.revision,
             deleted_qa_job_id: params.qa_job_id,
         }))
     }
@@ -1917,33 +1646,20 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<RunQaJobsParams>,
     ) -> Result<Json<QaRunResult>, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let run = if let Some(replayed) =
-            concurrency::load_operation::<QaRun>(&db, project_row_id, &params.operation_id)
-                .map_err(tool_error)?
-        {
-            replayed
-        } else {
-            let run = qa::run_jobs(
-                &db,
-                project_row_id,
-                &project.folder,
-                params.query,
-                params.trigger_source.as_deref().unwrap_or("mcp"),
-            )
-            .map_err(tool_error)?;
-            project_state::bump_project_revision(&db, project_row_id).map_err(tool_error)?;
-            concurrency::record_no_op(&db, project_row_id, &params.operation_id, &run)
-                .map_err(tool_error)?;
-            run
-        };
-        let revision =
-            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let run = crate::qa_runner::run(
+            &mut store,
+            &project.folder,
+            &params.operation_id,
+            params.query,
+            params.trigger_source.as_deref().unwrap_or("mcp"),
+        )
+        .map_err(storage_error)?;
+        let revision = store.snapshot().map_err(storage_error)?.metadata().revision;
         Ok(Json(QaRunResult {
             project_id: project.id,
             project_name: project.name,
-            revision: revision.revision,
+            revision,
             run,
         }))
     }
@@ -1952,11 +1668,12 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<ListQaRunsParams>,
     ) -> Result<Json<QaRunListResult>, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let revision =
-            project_state::load_project_revision(&db, project_row_id).map_err(tool_error)?;
-        let runs = qa::load_run_summaries(&db, project_row_id, params.limit).map_err(tool_error)?;
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let db = store.snapshot().map_err(storage_error)?;
+        let revision = db.metadata();
+        let runs = db
+            .qa_run_summaries(params.limit.unwrap_or(20).clamp(1, 100) as usize)
+            .map_err(storage_error)?;
 
         Ok(Json(QaRunListResult {
             project_id: project.id,
@@ -1970,22 +1687,24 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<UpdateMemoryParams>,
     ) -> Result<Json<MemoryResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let (memory, revision) = memory::compact_memory_review(
-            &mut db,
-            project_row_id,
-            params.expected_version,
-            &params.operation_id,
-            params.memory,
-            &params.superseded_note_ids,
-        )
-        .map_err(tool_error)?;
-
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let result = store
+            .commit(Mutation {
+                operation_id: params.operation_id.clone(),
+                changes: vec![Change::Memory(MemoryWrite::Compact {
+                    expected_version: params.expected_version,
+                    summary: params.memory,
+                    superseded_note_ids: params.superseded_note_ids,
+                })],
+            })
+            .map_err(storage_error)?;
+        let Some(ChangeOutcome::Memory(memory)) = result.outcomes.into_iter().next() else {
+            return Err(internal_error("Storage returned an unexpected outcome"));
+        };
         Ok(Json(MemoryResult {
             project_id: project.id,
             project_name: project.name,
-            revision,
+            revision: result.revision,
             memory,
         }))
     }
@@ -1994,21 +1713,23 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<UpdateMemoryRuleParams>,
     ) -> Result<Json<MemoryResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let (memory, revision) = memory::update_memory_rule(
-            &mut db,
-            project_row_id,
-            params.expected_version,
-            &params.operation_id,
-            params.rule,
-        )
-        .map_err(tool_error)?;
-
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let result = store
+            .commit(Mutation {
+                operation_id: params.operation_id.clone(),
+                changes: vec![Change::Memory(MemoryWrite::Protocol {
+                    expected_version: params.expected_version,
+                    rule: params.rule,
+                })],
+            })
+            .map_err(storage_error)?;
+        let Some(ChangeOutcome::Memory(memory)) = result.outcomes.into_iter().next() else {
+            return Err(internal_error("Storage returned an unexpected outcome"));
+        };
         Ok(Json(MemoryResult {
             project_id: project.id,
             project_name: project.name,
-            revision,
+            revision: result.revision,
             memory,
         }))
     }
@@ -2017,24 +1738,33 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<AppendMemoryNoteParams>,
     ) -> Result<Json<MemoryNoteResult>, ErrorData> {
-        let (project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let (note, revision) = memory::append_note(
-            &mut db,
-            project_row_id,
-            AppendMemoryNote {
-                note_id: params.note_id,
-                operation_id: params.operation_id,
-                run_id: params.run_id,
-                task_id: params.task_id,
-                body: params.body,
-            },
-        )
-        .map_err(tool_error)?;
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let result = store
+            .commit(Mutation {
+                operation_id: params.operation_id.clone(),
+                changes: vec![Change::Memory(MemoryWrite::Append {
+                    note: AppendMemoryNote {
+                        note_id: params.note_id.clone(),
+                        operation_id: params.operation_id.clone(),
+                        run_id: params.run_id,
+                        task_id: params.task_id,
+                        body: params.body,
+                    },
+                })],
+            })
+            .map_err(storage_error)?;
+        let Some(ChangeOutcome::Memory(memory)) = result.outcomes.into_iter().next() else {
+            return Err(internal_error("Storage returned an unexpected outcome"));
+        };
+        let note = memory
+            .notes
+            .into_iter()
+            .find(|note| note.note_id == params.note_id)
+            .ok_or_else(|| internal_error("Stored memory note is missing"))?;
         Ok(Json(MemoryNoteResult {
             project_id: project.id,
             project_name: project.name,
-            revision,
+            revision: result.revision,
             note,
         }))
     }
@@ -2043,17 +1773,30 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<PublishIntentParams>,
     ) -> Result<Json<ResourceIntentResult>, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let intent = concurrency::publish_intent(
-            &db,
-            project_row_id,
-            &params.agent_run_id,
-            &params.resource_kind,
-            &params.resource_id,
-            params.ttl_seconds,
-        )
-        .map_err(tool_error)?;
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let ttl = u32::try_from(params.ttl_seconds)
+            .map_err(|_| tool_error("ttlSeconds must be between 1 and 86400".into()))?;
+        if ttl == 0 {
+            return Err(tool_error("ttlSeconds must be between 1 and 86400".into()));
+        }
+        let intents = store
+            .publish_intents(&IntentUpdate {
+                agent_run_id: params.agent_run_id.clone(),
+                resources: vec![ResourceKey {
+                    kind: params.resource_kind.clone(),
+                    id: params.resource_id.clone(),
+                }],
+                ttl_seconds: ttl,
+            })
+            .map_err(storage_error)?;
+        let intent = intents
+            .into_iter()
+            .find(|v| {
+                v.agent_run_id == params.agent_run_id
+                    && v.resource_kind == params.resource_kind
+                    && v.resource_id == params.resource_id
+            })
+            .ok_or_else(|| internal_error("Published intent is missing"))?;
         Ok(Json(ResourceIntentResult {
             project_id: project.id,
             project_name: project.name,
@@ -2065,9 +1808,9 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<ProjectParams>,
     ) -> Result<Json<ResourceIntentListResult>, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let intents = concurrency::load_live_intents(&db, project_row_id).map_err(tool_error)?;
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let db = store.snapshot().map_err(storage_error)?;
+        let intents = db.live_intents().map_err(storage_error)?;
         Ok(Json(ResourceIntentListResult {
             project_id: project.id,
             project_name: project.name,
@@ -2079,10 +1822,12 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DesignOverviewParams>,
     ) -> Result<Json<DesignOverviewResult>, ErrorData> {
-        let (_project, db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let overview =
-            design::load_overview(&db, project_row_id, params.max_depth).map_err(tool_error)?;
+        let (_project, mut store) =
+            self.open_project_storage(Some(params.project_name.as_str()))?;
+        let db = store.snapshot().map_err(storage_error)?;
+        let overview = db
+            .design_overview(params.max_depth)
+            .map_err(storage_error)?;
         Ok(Json(overview))
     }
 
@@ -2090,22 +1835,21 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DesignScopeParams>,
     ) -> Result<Json<Value>, ErrorData> {
-        let (_project, db) = self.open_project(Some(params.project_name.as_str()))?;
-        let db = db
-            .unchecked_transaction()
-            .map_err(|error| tool_error(error.to_string()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let scope = design::load_scope(
-            &db,
-            project_row_id,
-            &params.element_id,
-            params.include_ancestors.unwrap_or(true),
-            params.children_depth,
-            params.include_source.unwrap_or(false),
-        )
-        .map_err(tool_error)?;
+        let (_project, mut store) =
+            self.open_project_storage(Some(params.project_name.as_str()))?;
+        let db = store.snapshot().map_err(storage_error)?;
+        let mut scope = db
+            .design_scope(&ScopeQuery {
+                element_id: params.element_id,
+                include_ancestors: params.include_ancestors.unwrap_or(true),
+                children_depth: params.children_depth,
+            })
+            .map_err(storage_error)?;
+        if !params.include_source.unwrap_or(false) {
+            scope.structurizr_dsl = None;
+        }
         Ok(Json(
-            design::documents::with_documents(&db, project_row_id, scope).map_err(tool_error)?,
+            crate::storage::documents::with_documents(db.as_ref(), scope).map_err(tool_error)?,
         ))
     }
 
@@ -2113,16 +1857,16 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DesignSearchParams>,
     ) -> Result<Json<DesignSearchResult>, ErrorData> {
-        let (_project, db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let result = design::search(
-            &db,
-            project_row_id,
-            &params.query,
-            &params.kinds.unwrap_or_default(),
-            params.limit.unwrap_or(20),
-        )
-        .map_err(tool_error)?;
+        let (_project, mut store) =
+            self.open_project_storage(Some(params.project_name.as_str()))?;
+        let db = store.snapshot().map_err(storage_error)?;
+        let result = db
+            .design_search(&DesignSearchQuery {
+                query: params.query,
+                kinds: params.kinds.unwrap_or_default(),
+                limit: params.limit.unwrap_or(20),
+            })
+            .map_err(storage_error)?;
         Ok(Json(result))
     }
 
@@ -2130,14 +1874,12 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DesignByIdsParams>,
     ) -> Result<Json<Value>, ErrorData> {
-        let (_project, db) = self.open_project(Some(params.project_name.as_str()))?;
-        let db = db
-            .unchecked_transaction()
-            .map_err(|error| tool_error(error.to_string()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let result = design::load_by_ids(&db, project_row_id, &params.ids).map_err(tool_error)?;
+        let (_project, mut store) =
+            self.open_project_storage(Some(params.project_name.as_str()))?;
+        let db = store.snapshot().map_err(storage_error)?;
+        let result = db.design_by_ids(&params.ids).map_err(storage_error)?;
         Ok(Json(
-            design::documents::with_documents(&db, project_row_id, result).map_err(tool_error)?,
+            crate::storage::documents::with_documents(db.as_ref(), result).map_err(tool_error)?,
         ))
     }
 
@@ -2145,20 +1887,17 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DesignBindingsParams>,
     ) -> Result<Json<Value>, ErrorData> {
-        let (_project, db) = self.open_project(Some(params.project_name.as_str()))?;
-        let db = db
-            .unchecked_transaction()
-            .map_err(|error| tool_error(error.to_string()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let result = design::load_by_bindings(
-            &db,
-            project_row_id,
-            &params.files.unwrap_or_default(),
-            &params.symbols.unwrap_or_default(),
-        )
-        .map_err(tool_error)?;
+        let (_project, mut store) =
+            self.open_project_storage(Some(params.project_name.as_str()))?;
+        let db = store.snapshot().map_err(storage_error)?;
+        let result = db
+            .design_bindings(&BindingQuery {
+                files: params.files.unwrap_or_default(),
+                symbols: params.symbols.unwrap_or_default(),
+            })
+            .map_err(storage_error)?;
         Ok(Json(
-            design::documents::with_documents(&db, project_row_id, result).map_err(tool_error)?,
+            crate::storage::documents::with_documents(db.as_ref(), result).map_err(tool_error)?,
         ))
     }
 
@@ -2166,39 +1905,47 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<DesignSaveParams>,
     ) -> Result<Json<DesignSaveResult>, ErrorData> {
-        let (_project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let result = design::save_changes(
-            &mut db,
-            project_row_id,
-            &design::documents::DocumentGuard {
-                operation_id: params.operation_id,
+        let (_project, mut store) =
+            self.open_project_storage(Some(params.project_name.as_str()))?;
+        let result = match store.commit(Mutation {
+            operation_id: params.operation_id,
+            changes: vec![Change::Design(DesignWrite::Save {
+                change_intent: params.change_intent,
+                changes: params.changes,
                 read_tokens: params.read_tokens,
-            },
-            &params.change_intent,
-            &params.changes,
-        )
-        .map_err(tool_error)?;
-        Ok(Json(result))
+            })],
+        }) {
+            Ok(result) => result,
+            Err(StorageError::DesignRejected(result)) => return Ok(Json(result)),
+            Err(error) => return Err(storage_error(error)),
+        };
+        let Some(ChangeOutcome::Design(saved)) = result.outcomes.into_iter().next() else {
+            return Err(internal_error("Storage returned an unexpected outcome"));
+        };
+        Ok(Json(saved))
     }
 
     fn design_set_element_descriptions(
         &self,
         Parameters(params): Parameters<SetElementDescriptionsParams>,
     ) -> Result<Json<DesignSaveResult>, ErrorData> {
-        let (_project, mut db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let result = design::set_element_descriptions(
-            &mut db,
-            project_row_id,
-            &design::documents::DocumentGuard {
-                operation_id: params.operation_id,
+        let (_project, mut store) =
+            self.open_project_storage(Some(params.project_name.as_str()))?;
+        let result = match store.commit(Mutation {
+            operation_id: params.operation_id,
+            changes: vec![Change::Design(DesignWrite::Describe {
+                updates: params.updates,
                 read_tokens: params.read_tokens,
-            },
-            &params.updates,
-        )
-        .map_err(tool_error)?;
-        Ok(Json(result))
+            })],
+        }) {
+            Ok(result) => result,
+            Err(StorageError::DesignRejected(result)) => return Ok(Json(result)),
+            Err(error) => return Err(storage_error(error)),
+        };
+        let Some(ChangeOutcome::Design(saved)) = result.outcomes.into_iter().next() else {
+            return Err(internal_error("Storage returned an unexpected outcome"));
+        };
+        Ok(Json(saved))
     }
 
     /// Design-to-code correspondence. Reads the project's source files, so it reports what the
@@ -2207,9 +1954,9 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<ProjectParams>,
     ) -> Result<Json<design_health::DesignHealthResult>, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        design_health::scan_and_record(&db, project_row_id, std::path::Path::new(&project.folder))
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let db = store.snapshot().map_err(storage_error)?;
+        design_health::scan_snapshot(db.as_ref(), std::path::Path::new(&project.folder))
             .map(Json)
             .map_err(tool_error)
     }
@@ -2218,12 +1965,10 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<ProjectParams>,
     ) -> Result<Json<MockupPendingResult>, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let revision = project_state::load_project_revision(&db, project_row_id)
-            .map_err(tool_error)?
-            .revision;
-        let mockups = mockups::load_pending(&db, project_row_id).map_err(tool_error)?;
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let db = store.snapshot().map_err(storage_error)?;
+        let revision = db.metadata().revision;
+        let mockups = db.mockups(true).map_err(storage_error)?;
         Ok(Json(MockupPendingResult {
             project_id: project.id,
             project_name: project.name,
@@ -2236,19 +1981,18 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<MockupContextParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        let (project, db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        let revision = project_state::load_project_revision(&db, project_row_id)
-            .map_err(tool_error)?
-            .revision;
-        let mockup = mockups::load_mockup(&db, project_row_id, params.external_id.trim())
-            .map_err(tool_error)?;
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        let db = store.snapshot().map_err(storage_error)?;
+        let revision = db.metadata().revision;
+        let mockup = db
+            .mockup(params.external_id.trim())
+            .map_err(storage_error)?;
         let preview_variant = if mockup.working_svg.is_some() {
             "working"
         } else {
             "accepted"
         };
-        let png = mockups::preview_base64(&db, &mockup, preview_variant).map_err(tool_error)?;
+        let png = mockups::preview_base64_uncached(&mockup, preview_variant).map_err(tool_error)?;
         let structured = json!({
             "projectId": project.id,
             "projectName": project.name,
@@ -2317,13 +2061,10 @@ impl AdashiMcpServer {
             }
             DesignOperation::GetDocuments => {
                 let ids = required(params.ids, "ids")?;
-                let (_project, db) = self.open_project(Some(params.project_name.as_str()))?;
-                let tx = db
-                    .unchecked_transaction()
-                    .map_err(|error| tool_error(error.to_string()))?;
-                let project_row_id = project_row_id(&tx).map_err(tool_error)?;
-                let documents = design::documents::load_documents(&tx, project_row_id, &ids)
-                    .map_err(tool_error)?;
+                let (_project, mut store) =
+                    self.open_project_storage(Some(params.project_name.as_str()))?;
+                let snapshot = store.snapshot().map_err(storage_error)?;
+                let documents = snapshot.design_documents(&ids).map_err(storage_error)?;
                 Ok(CallToolResult::structured(json!({"documents":documents})))
             }
             DesignOperation::Search => {
@@ -2390,11 +2131,10 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<GrepParams>,
     ) -> Result<Json<grep::GrepResult>, ErrorData> {
-        let (_project, db) = self.open_project(Some(params.project_name.as_str()))?;
-        let project_row_id = project_row_id(&db).map_err(tool_error)?;
-        grep::search(&db, project_row_id, &params)
-            .map(Json)
-            .map_err(tool_error)
+        let (_project, mut store) =
+            self.open_project_storage(Some(params.project_name.as_str()))?;
+        let db = store.snapshot().map_err(storage_error)?;
+        db.search(&params).map(Json).map_err(storage_error)
     }
 
     #[tool(
@@ -2839,77 +2579,7 @@ pub fn run_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
     })
 }
 
-fn single_resource_guard(
-    operation_id: String,
-    resource_kind: &str,
-    resource_id: String,
-    expected_version: i64,
-) -> MutationGuard {
-    MutationGuard {
-        operation_id,
-        read_set: Vec::new(),
-        write_set: vec![ResourceExpectation {
-            resource_kind: resource_kind.to_string(),
-            resource_id,
-            expected_version,
-        }],
-    }
-}
-
-fn same_task_content(left: &Task, right: &Task) -> bool {
-    left.title == right.title
-        && left.description == right.description
-        && left.state == right.state
-        && left.completion_memo == right.completion_memo
-        && left.created_files == right.created_files
-        && left.changed_files == right.changed_files
-        && left.confirmation_commit_id == right.confirmation_commit_id
-        && left.design_specification_links.len() == right.design_specification_links.len()
-        && left
-            .design_specification_links
-            .iter()
-            .zip(&right.design_specification_links)
-            .all(|(a, b)| {
-                a.target_type == b.target_type && a.design_external_id == b.design_external_id
-            })
-}
-
-fn same_qa_definition(left: &QaJob, right: &QaJob) -> bool {
-    left.name == right.name
-        && left.description == right.description
-        && left.command == right.command
-        && left.working_directory == right.working_directory
-        && left.shell == right.shell
-        && left.timeout_seconds == right.timeout_seconds
-        && left.enabled == right.enabled
-        && left.design_specification_links.len() == right.design_specification_links.len()
-        && left
-            .design_specification_links
-            .iter()
-            .zip(&right.design_specification_links)
-            .all(|(a, b)| {
-                a.target_type == b.target_type && a.design_external_id == b.design_external_id
-            })
-        && left
-            .task_links
-            .iter()
-            .map(|link| link.task_id)
-            .collect::<Vec<_>>()
-            == right
-                .task_links
-                .iter()
-                .map(|link| link.task_id)
-                .collect::<Vec<_>>()
-        && left.tags == right.tags
-}
-
-fn same_value<T: Serialize>(left: &T, right: &T) -> Result<bool, String> {
-    Ok(
-        serde_json::to_value(left).map_err(|error| error.to_string())?
-            == serde_json::to_value(right).map_err(|error| error.to_string())?,
-    )
-}
-
+#[cfg(test)]
 fn project_row_id(db: &rusqlite::Connection) -> Result<i64, String> {
     db.query_row("SELECT id FROM projects ORDER BY id LIMIT 1", [], |row| {
         row.get(0)
@@ -2924,78 +2594,70 @@ fn project_row_id(db: &rusqlite::Connection) -> Result<i64, String> {
 /// usually needs one or two of them. With scopes off the branches still name what is linked, and
 /// the caller retrieves the detail it needs with the design get_scope operation or by asking for
 /// the scopes explicitly.
+fn task_link_branches(task: &Task) -> Vec<TaskDesignSpecificationBranch> {
+    task.design_specification_links
+        .iter()
+        .map(|link| TaskDesignSpecificationBranch {
+            link: link.clone(),
+            scope: None,
+            mockup: None,
+            mockup_preview: None,
+            note: None,
+        })
+        .collect()
+}
+
 fn load_task_design_specifications(
-    db: &rusqlite::Connection,
-    project_row_id: i64,
+    db: &dyn ReadSnapshot,
     task: &Task,
     include_scopes: bool,
 ) -> Result<Vec<TaskDesignSpecificationBranch>, String> {
+    if !include_scopes {
+        return Ok(task_link_branches(task));
+    }
     task.design_specification_links
         .iter()
         .map(|link| {
-            if !include_scopes {
-                return Ok(TaskDesignSpecificationBranch {
-                    link: link.clone(),
-                    scope: None,
-                    mockup: None,
-                    mockup_preview: None,
-                    note: None,
-                });
-            }
-
             let mockup = if link.target_type == "mockup" {
-                Some(mockups::load_mockup(
-                    db,
-                    project_row_id,
-                    link.design_external_id.as_str(),
-                )?)
+                Some(
+                    db.mockup(&link.design_external_id)
+                        .map_err(|e| e.to_string())?,
+                )
             } else {
                 None
             };
-            let root_id = match link.target_type.as_str() {
+            let root = match link.target_type.as_str() {
                 "element" => Some(link.design_external_id.clone()),
                 "uml" => db
-                    .query_row(
-                        "SELECT attached_to_external_id
-                         FROM diagrams
-                         WHERE key = ?1
-                         LIMIT 1",
-                        rusqlite::params![link.design_external_id],
-                        |row| row.get::<_, Option<String>>(0),
-                    )
-                    .map_err(|err| err.to_string())?,
-                "relationship" => None,
-                "mockup" => match mockup.as_ref() {
-                    Some(mockup) => Some(mockup.manifest.attached_to_external_id.clone()),
-                    None => db
-                        .query_row(
-                            "SELECT attached_to_external_id FROM ui_mockups WHERE external_id=?1 LIMIT 1",
-                            rusqlite::params![link.design_external_id],
-                            |row| row.get::<_, String>(0),
-                        )
-                        .optional()
-                        .map_err(|err| err.to_string())?,
-                },
+                    .design_by_ids(&[link.design_external_id.clone()])
+                    .map_err(|e| e.to_string())?
+                    .diagrams
+                    .into_iter()
+                    .next()
+                    .and_then(|v| v.attached_to_external_id),
+                "mockup" => mockup
+                    .as_ref()
+                    .map(|m| m.manifest.attached_to_external_id.clone()),
                 _ => None,
             };
-
-            let scope = match root_id {
-                Some(root_id) => Some(design::load_scope(
-                    db,
-                    project_row_id,
-                    &root_id,
-                    true,
-                    Some(2),
-                    false,
-                )?),
-                None => None,
-            };
-            let note = if scope.is_some() {
-                None
+            let scope = if let Some(element_id) = root {
+                let mut scope = db
+                    .design_scope(&ScopeQuery {
+                        element_id,
+                        include_ancestors: true,
+                        children_depth: Some(2),
+                    })
+                    .map_err(|e| e.to_string())?;
+                scope.structurizr_dsl = None;
+                Some(scope)
             } else {
-                Some("This link does not resolve to an element-rooted design branch.".to_string())
+                None
             };
-
+            let note = if scope.is_none() {
+                Some("This link does not resolve to an element-rooted design branch.".into())
+            } else {
+                None
+            };
             Ok(TaskDesignSpecificationBranch {
                 link: link.clone(),
                 scope,
@@ -3044,9 +2706,26 @@ fn required_with_help<T>(
 fn storage_error(error: StorageError) -> ErrorData {
     match error {
         StorageError::Backend(_) => internal_error(error),
-        StorageError::Conflict(conflicts) => tool_error(
-            json!({"code": "resource.conflict", "conflicts": conflicts}).to_string(),
-        ),
+        StorageError::Conflict(conflicts) => {
+            tool_error(json!({"code": "resource.conflict", "conflicts": conflicts}).to_string())
+        }
+        StorageError::Documents(conflicts) => {
+            let stale = conflicts
+                .iter()
+                .any(|c| c.code == crate::storage::api::DocumentConflictCode::OutOfDate);
+            let mut value = json!({"code":if stale {"out_of_date"} else {"read_required"},"stored":false,
+                "message":if stale {"The design document changed since you read it. Nothing was saved."} else {"Read every existing document before changing or deleting it. Nothing was saved."},
+                "request":"Merge intended edits into each returned currentDocument and retry with its readToken and a new operationId. Do not only replace the token on an old payload."});
+            if conflicts.len() == 1 {
+                let item = &conflicts[0];
+                value["documentId"] = json!(item.document_id);
+                value["currentDocument"] = item.current_document.clone();
+                value["readToken"] = json!(item.read_token);
+            } else {
+                value["conflicts"] = json!(conflicts);
+            }
+            tool_error(value.to_string())
+        }
         _ => tool_error(error.to_string()),
     }
 }
@@ -3074,15 +2753,22 @@ mod tests {
     fn mcp_resolves_project_backend_without_rewriting_settings_or_falling_back() {
         let root = tempfile::tempdir().unwrap();
         let project = ProjectSettings {
-            id: "storage-selection".into(), name: "Storage selection".into(),
+            id: "storage-selection".into(),
+            name: "Storage selection".into(),
             folder: root.path().join("project").to_string_lossy().into_owned(),
         };
         let settings_path = root.path().join("settings.json");
-        settings::save(&settings_path, &AppSettings {
-            window: WindowSettings::default(), projects: vec![project.clone()],
-            last_active_project_id: Some(project.id.clone()), rule_templates: vec![],
-            architecture_projection: Default::default(),
-        }).unwrap();
+        settings::save(
+            &settings_path,
+            &AppSettings {
+                window: WindowSettings::default(),
+                projects: vec![project.clone()],
+                last_active_project_id: Some(project.id.clone()),
+                rule_templates: vec![],
+                architecture_projection: Default::default(),
+            },
+        )
+        .unwrap();
         let before = std::fs::read(&settings_path).unwrap();
         let server = AdashiMcpServer::new(settings_path.clone());
         let (_, mut store) = server.open_project_storage(Some(&project.id)).unwrap();
@@ -3090,10 +2776,19 @@ mod tests {
         drop(store);
         let db_path = settings::project_database_path(&project);
         let db_before = std::fs::read(&db_path).unwrap();
-        std::fs::write(settings::project_data_dir(&project).join("storage.json"),
-            r#"{"schemaVersion":1,"backend":{"kind":"text"}}"#).unwrap();
-        let error = server.open_project(Some(&project.id)).unwrap_err();
-        assert!(error.message.contains("storage.backend_unavailable"), "{error}");
+        std::fs::write(
+            settings::project_data_dir(&project).join("storage.json"),
+            r#"{"schemaVersion":1,"backend":{"kind":"text"}}"#,
+        )
+        .unwrap();
+        let error = server
+            .open_project_storage(Some(&project.id))
+            .err()
+            .unwrap();
+        assert!(
+            error.message.contains("storage.backend_unavailable"),
+            "{error}"
+        );
         assert_eq!(std::fs::read(&db_path).unwrap(), db_before);
         assert_eq!(std::fs::read(&settings_path).unwrap(), before);
     }
@@ -3240,9 +2935,18 @@ mod tests {
             ))
             .expect_err("append without a body must fail");
         let message = error.message.to_string();
-        assert!(message.contains("'body'"), "error must name the field: {message}");
-        assert!(message.contains("'append'"), "error must name the operation: {message}");
-        assert!(message.contains("1000 characters"), "error must state the real limit: {message}");
+        assert!(
+            message.contains("'body'"),
+            "error must name the field: {message}"
+        );
+        assert!(
+            message.contains("'append'"),
+            "error must name the operation: {message}"
+        );
+        assert!(
+            message.contains("1000 characters"),
+            "error must state the real limit: {message}"
+        );
 
         // A client that treats an optional field as nullable sends an explicit null. The append
         // must stay usable, so runId falls back to the operationId rather than failing the call.
@@ -3286,8 +2990,10 @@ mod tests {
                     panic!("append must survive a null runId: {}", error.message)
                 });
         }
-        let (_project, db) = server.open_project(Some("append-run-id-test")).unwrap();
-        let notes = memory::load_retained_notes(&db, project_row_id(&db).unwrap()).unwrap();
+        let (_project, mut db) = server
+            .open_project_storage(Some("append-run-id-test"))
+            .unwrap();
+        let notes = db.snapshot().unwrap().retained_memory_notes().unwrap();
         let note = notes
             .iter()
             .find(|note| note.note_id == "note")
@@ -3316,7 +3022,10 @@ mod tests {
             .to_string(),
         );
         assert_eq!(conflict.message.to_string(), "Adashi MCP request failed");
-        assert_eq!(conflict.data.as_ref().unwrap()["code"], json!("resource.conflict"));
+        assert_eq!(
+            conflict.data.as_ref().unwrap()["code"],
+            json!("resource.conflict")
+        );
     }
 
     #[test]
@@ -3417,7 +3126,11 @@ mod tests {
         assert_eq!(jobs["jobs"][0]["latestRun"]["durationMs"], json!(42));
         assert!(jobs["jobs"][0].get("runHistory").is_none());
         assert!(jobs["jobs"][0].get("command").is_none());
-        assert!(jobs["jobs"][0].get("latestRun").unwrap().get("output").is_none());
+        assert!(jobs["jobs"][0]
+            .get("latestRun")
+            .unwrap()
+            .get("output")
+            .is_none());
         assert!(
             jobs_bytes.len() < 2_000,
             "bounded job listing must stay small, was {} bytes",
@@ -3718,7 +3431,10 @@ mod tests {
             .unwrap()
             .0;
         assert_eq!(explicit.tasks.len(), 1);
-        assert_eq!(explicit.closed_hidden, 0, "an explicit filter hides nothing");
+        assert_eq!(
+            explicit.closed_hidden, 0,
+            "an explicit filter hides nothing"
+        );
 
         // A task read stays small: the linked branch is named, not inlined.
         let lean = server
@@ -3731,7 +3447,8 @@ mod tests {
         let lean_json = serde_json::to_value(lean.structured_content.as_ref().unwrap()).unwrap();
         assert_eq!(lean_json["designSpecifications"][0]["scope"], json!(null));
         assert!(
-            lean_json["designScopesIncluded"].is_null() || lean_json.get("designScopeHint").is_some(),
+            lean_json["designScopesIncluded"].is_null()
+                || lean_json.get("designScopeHint").is_some(),
             "the read must say how to get the scopes"
         );
         let lean_bytes = serde_json::to_string(&lean_json).unwrap().len();
@@ -3755,7 +3472,8 @@ mod tests {
 
     /// A `memory:noteId` locator must resolve to exactly the addressed note.
     #[test]
-    fn memory_get_resolves_an_exact_note_id() {        let suffix = SystemTime::now()
+    fn memory_get_resolves_an_exact_note_id() {
+        let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
@@ -3821,7 +3539,10 @@ mod tests {
         assert_eq!(addressed.retained_notes, 3, "retention count is unchanged");
         assert_eq!(addressed.memory.notes.len(), 1);
         assert_eq!(addressed.memory.notes[0].note_id, "note-2");
-        assert_eq!(addressed.memory.notes[0].body, "body of note-2 sharing the word revision");
+        assert_eq!(
+            addressed.memory.notes[0].body,
+            "body of note-2 sharing the word revision"
+        );
 
         assert_eq!(read(Some("missing")).matched_notes, 0);
         assert_eq!(read(None).matched_notes, 3);

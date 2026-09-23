@@ -122,6 +122,13 @@
 
         window.clearTimeout(fitTimer);
         fitTimer = window.setTimeout(function () {
+          const host = document.getElementById("diagram");
+          // Cached workspace views stay mounted while hidden. Fitting a zero
+          // size viewport produces an invalid SVG transform; ResizeObserver
+          // requests a fresh fit when this view becomes visible again.
+          if (!host.clientWidth || !host.clientHeight) {
+            return;
+          }
           currentDiagram.resize();
           currentDiagram.zoomFitContent();
         }, 40);

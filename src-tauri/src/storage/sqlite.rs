@@ -1,227 +1,46 @@
 use std::{fs, time::Duration};
 
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
-use serde::{Deserialize, Serialize};
+use rusqlite::{params, Connection, TransactionBehavior};
 
-use super::contract::{self, PreparedRuleMutation};
-use super::{
-    ChangeCursor, ProjectIdentity, RuleChange, RuleMutationResult, RuleOutcome, RuleSnapshot,
-    StorageError, StorageResult,
-};
+use super::{ChangeCursor, ProjectIdentity, StorageError, StorageResult};
+#[cfg(test)]
+use crate::settings;
 use crate::settings::ProjectSettings;
-use crate::{concurrency, fixed_hooks, rules, schema, seed, settings, state};
+pub(crate) mod concurrency;
+pub(crate) mod design;
+pub(crate) mod fixed_hooks;
+pub(crate) mod health;
+pub(crate) mod memory;
+pub(crate) mod mockups;
+pub(crate) mod prompt_hygiene;
+pub(crate) mod qa;
+pub(crate) mod rules;
+pub(crate) mod schema;
+pub(crate) mod seed;
+pub(crate) mod state;
+pub(crate) mod tasks;
+
+mod mutations;
+mod references;
+mod snapshot;
+#[cfg(test)]
+mod tests;
+use adashi_storage_api::{
+    check_versions, ChangeNotification, ChangeOutcome, CommitResult, IntentUpdate, OpenMode,
+    OpenRequest, PreparedMutation, ReadSnapshot, ResourceKey, StorageBackend, StorageFactory,
+};
+
+pub struct SqliteFactory;
+
+/// Internal driver failures are deliberately opaque across the adapter boundary.
+pub(crate) fn failure(_: impl std::fmt::Display) -> String {
+    "storage.sqlite_failure".into()
+}
 
 pub(super) struct SqliteStorage {
-    db: Connection,
+    db: Option<Connection>,
     project_id: i64,
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct RuleReceipt {
-    format: String,
-    fingerprint: String,
-    result: RuleMutationResult,
-}
-
-const RULE_RECEIPT_FORMAT: &str = "adashi.storage.rules.v1";
-
-impl SqliteStorage {
-    pub(super) fn open(project: &ProjectSettings, computer_id: &str) -> StorageResult<Self> {
-        fs::create_dir_all(settings::project_data_dir(project)).map_err(StorageError::backend)?;
-        let mut db = Connection::open(settings::project_database_path(project))
-            .map_err(StorageError::backend)?;
-        db.busy_timeout(Duration::from_secs(5))
-            .map_err(StorageError::backend)?;
-        let version = db
-            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
-            .map_err(StorageError::backend)?;
-        if version > schema::SCHEMA_VERSION {
-            return Err(StorageError::IncompatibleSchema {
-                found: version,
-                supported: schema::SCHEMA_VERSION,
-            });
-        }
-        schema::migrate(&mut db).map_err(StorageError::backend)?;
-        seed::seed_initial_data(&mut db, project).map_err(StorageError::backend)?;
-        fixed_hooks::ensure_fixed_hook_prompts(&db).map_err(StorageError::backend)?;
-        // Preserve the current initialization and per-computer mapping contract.
-        db.execute_batch(include_str!("../concurrency_schema.sql"))
-            .map_err(StorageError::backend)?;
-        db.execute(
-            "INSERT INTO project_computers(project_id, computer_id, repository_path)
-             SELECT id, ?1, ?2 FROM projects ORDER BY id LIMIT 1
-             ON CONFLICT(project_id, computer_id) DO UPDATE
-             SET repository_path = excluded.repository_path
-             WHERE project_computers.repository_path != excluded.repository_path",
-            params![computer_id, project.folder],
-        )
-        .map_err(StorageError::backend)?;
-        let ids = db
-            .prepare("SELECT id FROM projects ORDER BY id")
-            .map_err(StorageError::backend)?
-            .query_map([], |row| row.get::<_, i64>(0))
-            .map_err(StorageError::backend)?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(StorageError::backend)?;
-        let [project_id] = ids.as_slice() else {
-            return Err(StorageError::backend(
-                "A project database must contain exactly one project",
-            ));
-        };
-        Ok(Self {
-            db,
-            project_id: *project_id,
-        })
-    }
-
-    pub(super) fn into_connection(self) -> Connection {
-        self.db
-    }
-
-    pub(super) fn rules_snapshot(&mut self) -> StorageResult<RuleSnapshot> {
-        let tx = self.db.transaction().map_err(StorageError::backend)?;
-        let project = tx
-            .query_row(
-                "SELECT slug, name FROM projects WHERE id=?1",
-                [self.project_id],
-                |row| {
-                    Ok(ProjectIdentity {
-                        id: row.get(0)?,
-                        name: row.get(1)?,
-                    })
-                },
-            )
-            .map_err(StorageError::backend)?;
-        let cursor = cursor(&tx, self.project_id)?;
-        let rules = rules::load_rules(&tx).map_err(StorageError::backend)?;
-        tx.commit().map_err(StorageError::backend)?;
-        Ok(RuleSnapshot {
-            project,
-            cursor,
-            rules,
-        })
-    }
-
-    pub(super) fn change_cursor(&mut self) -> StorageResult<ChangeCursor> {
-        cursor(&self.db, self.project_id)
-    }
-
-    pub(super) fn mutate_rules(
-        &mut self,
-        prepared: PreparedRuleMutation,
-    ) -> StorageResult<RuleMutationResult> {
-        let PreparedRuleMutation {
-            mutation,
-            fingerprint,
-        } = prepared;
-        // Serialize only the physical SQLite write transaction, not a project-wide
-        // optimistic edit lock. Every expectation is still resource-scoped.
-        let tx = self
-            .db
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(StorageError::backend)?;
-        let receipt = tx.query_row(
-            "SELECT result_json FROM mutation_operations WHERE project_id=?1 AND operation_id=?2",
-            params![self.project_id, mutation.operation_id], |row| row.get::<_, String>(0),
-        ).optional().map_err(StorageError::backend)?;
-        if let Some(receipt) = receipt {
-            let receipt: RuleReceipt =
-                serde_json::from_str(&receipt).map_err(|_| StorageError::OperationReused)?;
-            if receipt.format != RULE_RECEIPT_FORMAT || receipt.fingerprint != fingerprint {
-                return Err(StorageError::OperationReused);
-            }
-            tx.commit().map_err(StorageError::backend)?;
-            return Ok(receipt.result);
-        }
-
-        let mut expectations = Vec::new();
-        for change in &mutation.changes {
-            if let Some((id, expected)) = change.expectation() {
-                let current =
-                    concurrency::load_version(&tx, self.project_id, "rule", &id.to_string())
-                        .map_err(StorageError::backend)?;
-                expectations.push((id, expected, current));
-            }
-        }
-        contract::check_expectations(expectations.into_iter())?;
-
-        let mut outcomes = Vec::new();
-        let mut changed = false;
-        for change in mutation.changes {
-            match change {
-                RuleChange::Create { rule } => {
-                    let id = rules::create_rule(&tx, self.project_id, rule)
-                        .map_err(StorageError::backend)?;
-                    concurrency::bump_version(&tx, self.project_id, "rule", &id.to_string())
-                        .map_err(StorageError::backend)?;
-                    outcomes.push(RuleOutcome::Saved {
-                        rule: rules::load_rule(&tx, id).map_err(StorageError::backend)?,
-                    });
-                    changed = true;
-                }
-                RuleChange::Update { id, rule, .. } => {
-                    require_rule(&tx, self.project_id, id)?;
-                    let current = rules::load_rule(&tx, id).map_err(StorageError::backend)?;
-                    if !contract::same_rule(&current, &rule) {
-                        rules::update_rule(
-                            &tx,
-                            rules::UpdateRule {
-                                id,
-                                name: rule.name,
-                                enabled: rule.enabled,
-                                intend: rule.intend,
-                                hook: rule.hook,
-                                prompt: rule.prompt,
-                            },
-                        )
-                        .map_err(StorageError::backend)?;
-                        concurrency::bump_version(&tx, self.project_id, "rule", &id.to_string())
-                            .map_err(StorageError::backend)?;
-                        changed = true;
-                    }
-                    outcomes.push(RuleOutcome::Saved {
-                        rule: rules::load_rule(&tx, id).map_err(StorageError::backend)?,
-                    });
-                }
-                RuleChange::Delete { id, .. } => {
-                    require_rule(&tx, self.project_id, id)?;
-                    rules::delete_rule(&tx, id).map_err(StorageError::backend)?;
-                    let version = concurrency::tombstone_version(
-                        &tx,
-                        self.project_id,
-                        "rule",
-                        &id.to_string(),
-                    )
-                    .map_err(StorageError::backend)?
-                    .version;
-                    outcomes.push(RuleOutcome::Deleted { id, version });
-                    changed = true;
-                }
-            }
-        }
-        if changed {
-            state::bump_project_revision(&tx, self.project_id).map_err(StorageError::backend)?;
-        }
-        let result = RuleMutationResult {
-            cursor: cursor(&tx, self.project_id)?,
-            outcomes,
-        };
-        let receipt = RuleReceipt {
-            format: RULE_RECEIPT_FORMAT.into(),
-            fingerprint,
-            result: result.clone(),
-        };
-        concurrency::record_no_op(&tx, self.project_id, &mutation.operation_id, &receipt)
-            .map_err(StorageError::backend)?;
-        tx.commit().map_err(StorageError::backend)?;
-        Ok(result)
-    }
-}
-
-fn cursor(db: &Connection, project_id: i64) -> StorageResult<ChangeCursor> {
-    let revision = state::load_project_revision(db, project_id).map_err(StorageError::backend)?;
-    Ok(ChangeCursor(format!("sqlite:{}", revision.revision)))
+    read_only: bool,
 }
 
 fn require_rule(db: &Connection, project_id: i64, id: i64) -> StorageResult<()> {
@@ -237,4 +56,308 @@ fn require_rule(db: &Connection, project_id: i64, id: i64) -> StorageResult<()> 
     } else {
         Err(StorageError::NotFound { kind: "rule", id })
     }
+}
+
+impl StorageFactory for SqliteFactory {
+    fn open(&self, request: &OpenRequest) -> StorageResult<Box<dyn StorageBackend>> {
+        Ok(Box::new(SqliteStorage::open_request(request)?))
+    }
+}
+
+impl SqliteStorage {
+    pub(super) fn open_request(request: &OpenRequest) -> StorageResult<Self> {
+        use rusqlite::OpenFlags;
+        let initialize = matches!(request.mode, OpenMode::InitializeOrMigrate);
+        let read_only = matches!(request.mode, OpenMode::ReadOnly);
+        if initialize {
+            let parent = std::path::Path::new(&request.location)
+                .parent()
+                .ok_or_else(|| {
+                    StorageError::InvalidConfiguration(
+                        "SQLite location needs a parent directory".into(),
+                    )
+                })?;
+            fs::create_dir_all(parent).map_err(StorageError::backend)?;
+        }
+        let flags = if read_only {
+            OpenFlags::SQLITE_OPEN_READ_ONLY
+        } else if initialize {
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE
+        } else {
+            OpenFlags::SQLITE_OPEN_READ_WRITE
+        };
+        let mut db =
+            Connection::open_with_flags(&request.location, flags).map_err(StorageError::backend)?;
+        db.busy_timeout(Duration::from_secs(5))
+            .map_err(StorageError::backend)?;
+        db.pragma_update(None, "foreign_keys", true)
+            .map_err(StorageError::backend)?;
+        let version: i64 = db
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .map_err(StorageError::backend)?;
+        if version > schema::SCHEMA_VERSION {
+            return Err(StorageError::IncompatibleSchema {
+                found: version,
+                supported: schema::SCHEMA_VERSION,
+            });
+        }
+        if initialize {
+            schema::migrate(&mut db).map_err(StorageError::backend)?;
+            seed::seed_initial_data(
+                &mut db,
+                &ProjectSettings {
+                    id: request.registered_identity.id.clone(),
+                    name: request.registered_identity.name.clone(),
+                    folder: request.checkout_path.clone(),
+                },
+            )
+            .map_err(StorageError::backend)?;
+            let initialized = version != schema::SCHEMA_VERSION || db.total_changes() > 0;
+            if initialized {
+                let project: i64 = db
+                    .query_row("SELECT id FROM projects", [], |r| r.get(0))
+                    .map_err(StorageError::backend)?;
+                memory::ensure_project_memory(&db, project).map_err(StorageError::backend)?;
+                fixed_hooks::ensure_fixed_hook_prompts(&db).map_err(StorageError::backend)?;
+                db.execute_batch(include_str!("../concurrency_schema.sql"))
+                    .map_err(StorageError::backend)?;
+            }
+            let registered: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM project_computers WHERE computer_id=?1 AND repository_path=?2)",params![request.computer_id,request.checkout_path],|row|row.get(0)).map_err(StorageError::backend)?;
+            // Already initialized, registered opens perform no writes or write transactions.
+            if !registered {
+                let tx = db
+                    .transaction_with_behavior(TransactionBehavior::Immediate)
+                    .map_err(StorageError::backend)?;
+                let changed = tx.execute("INSERT INTO project_computers(project_id,computer_id,repository_path) SELECT id,?1,?2 FROM projects WHERE true ON CONFLICT(project_id,computer_id) DO UPDATE SET repository_path=excluded.repository_path WHERE project_computers.repository_path IS NOT excluded.repository_path",params![request.computer_id,request.checkout_path]).map_err(StorageError::backend)?;
+                let project: i64 = tx
+                    .query_row("SELECT id FROM projects", [], |r| r.get(0))
+                    .map_err(StorageError::backend)?;
+                if changed > 0 {
+                    concurrency::bump_version(&tx, project, "computer", &request.computer_id)
+                        .map_err(StorageError::backend)?;
+                    if !initialized {
+                        state::bump_project_revision(&tx, project)
+                            .map_err(StorageError::backend)?;
+                    }
+                }
+                tx.commit().map_err(StorageError::backend)?;
+            }
+            // A pinned reader and a writer must coexist. This lifecycle step is
+            // explicit; read-only/read-write opens never change journal mode.
+            let journal: String = db
+                .pragma_query_value(None, "journal_mode", |r| r.get(0))
+                .map_err(StorageError::backend)?;
+            if journal != "wal" {
+                db.pragma_update(None, "journal_mode", "WAL")
+                    .map_err(StorageError::backend)?;
+            }
+        } else if version != schema::SCHEMA_VERSION {
+            return Err(StorageError::Unavailable(
+                "Project requires explicit storage initialization or migration".into(),
+            ));
+        }
+        let ids = db
+            .prepare("SELECT id FROM projects ORDER BY id")
+            .map_err(StorageError::backend)?
+            .query_map([], |r| r.get::<_, i64>(0))
+            .map_err(StorageError::backend)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(StorageError::backend)?;
+        let [project_id] = ids.as_slice() else {
+            return Err(StorageError::InvalidConfiguration(
+                "SQLite project storage must contain exactly one project".into(),
+            ));
+        };
+        if read_only {
+            db.pragma_update(None, "query_only", true)
+                .map_err(StorageError::backend)?;
+        }
+        Ok(Self {
+            db: Some(db),
+            project_id: *project_id,
+            read_only,
+        })
+    }
+}
+
+impl StorageBackend for SqliteStorage {
+    fn snapshot(&mut self) -> StorageResult<Box<dyn ReadSnapshot + '_>> {
+        let tx = self
+            .db
+            .as_mut()
+            .ok_or(StorageError::Closed)?
+            .transaction()
+            .map_err(StorageError::backend)?;
+        let metadata = snapshot::metadata(&tx, self.project_id)?;
+        Ok(Box::new(snapshot::Snapshot { tx, metadata }))
+    }
+    fn commit(&mut self, prepared: PreparedMutation) -> StorageResult<CommitResult> {
+        let db = self.db.as_mut().ok_or(StorageError::Closed)?;
+        if self.read_only {
+            return Err(StorageError::AccessDenied);
+        }
+        let mut tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(StorageError::backend)?;
+        let operation = &prepared.mutation().operation_id;
+        if let Some(result) =
+            prepared.replay(snapshot::receipt(&tx, self.project_id, operation)?.as_ref())?
+        {
+            return Ok(result);
+        }
+        let before = snapshot::all_versions(&tx, self.project_id)?;
+        check_versions(&prepared.expected_versions(), &before)?;
+        let mut outcomes = Vec::new();
+        for change in &prepared.mutation().changes {
+            outcomes.push(mutations::apply(
+                &mut tx,
+                self.project_id,
+                operation,
+                change,
+            )?);
+        }
+        references::validate(&tx, self.project_id)?;
+        let versions = snapshot::all_versions(&tx, self.project_id)?
+            .into_iter()
+            .filter(|v| {
+                !before.iter().any(|old| {
+                    old.resource_kind == v.resource_kind
+                        && old.resource_id == v.resource_id
+                        && old.version == v.version
+                })
+            })
+            .collect::<Vec<_>>();
+        let changed = !versions.is_empty();
+        if changed {
+            state::bump_project_revision(&tx, self.project_id).map_err(StorageError::backend)?;
+        }
+        let metadata = snapshot::metadata(&tx, self.project_id)?;
+        let mut read_tokens = Vec::new();
+        for outcome in &mut outcomes {
+            if let ChangeOutcome::Design(value) = outcome {
+                value.revision = metadata.revision;
+                let ids = value
+                    .read_tokens
+                    .iter()
+                    .map(|v| v.document_id.clone())
+                    .collect::<Vec<_>>();
+                value.read_tokens = design::documents::load_documents(&tx, self.project_id, &ids)
+                    .map_err(mutations::domain_error)?
+                    .into_iter()
+                    .map(|doc| adashi_storage_api::documents::DocumentReadToken {
+                        document_id: doc.document_id,
+                        read_token: doc.read_token,
+                    })
+                    .collect();
+                read_tokens.extend(value.read_tokens.clone());
+            }
+        }
+        let result = CommitResult {
+            cursor: metadata.cursor,
+            revision: metadata.revision,
+            changed,
+            outcomes,
+            versions,
+            read_tokens,
+        };
+        concurrency::record_no_op(
+            &tx,
+            self.project_id,
+            operation,
+            &prepared.receipt(result.clone()),
+        )
+        .map_err(StorageError::backend)?;
+        tx.commit().map_err(StorageError::backend)?;
+        Ok(result)
+    }
+    fn poll_changes(&mut self, after: &ChangeCursor) -> StorageResult<ChangeNotification> {
+        let db = self.db.as_ref().ok_or(StorageError::Closed)?;
+        let metadata = snapshot::metadata(db, self.project_id)?;
+        let cursor = metadata.cursor;
+        if *after == cursor {
+            return Ok(ChangeNotification::Unchanged { cursor });
+        }
+        let value = serde_json::to_value(after).map_err(StorageError::backend)?;
+        let prefix = format!("sqlite:{}:", metadata.identity.id);
+        let known = value
+            .as_str()
+            .and_then(|s| s.strip_prefix(&prefix))
+            .and_then(|s| s.parse::<i64>().ok())
+            .is_some_and(|r| r >= 0 && r <= metadata.revision);
+        Ok(if known {
+            ChangeNotification::Changed { cursor }
+        } else {
+            ChangeNotification::Reset { cursor }
+        })
+    }
+    fn publish_intents(
+        &mut self,
+        update: &IntentUpdate,
+    ) -> StorageResult<Vec<adashi_storage_api::coordination::ResourceIntent>> {
+        let db = self.db.as_mut().ok_or(StorageError::Closed)?;
+        if self.read_only {
+            return Err(StorageError::AccessDenied);
+        }
+        adashi_storage_api::validate_intent(update)?;
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(StorageError::backend)?;
+        for key in &update.resources {
+            if update.ttl_seconds == 0 {
+                tx.execute("DELETE FROM resource_intents WHERE project_id=?1 AND agent_run_id=?2 AND resource_kind=?3 AND resource_id=?4",params![self.project_id,update.agent_run_id,key.kind,key.id]).map_err(StorageError::backend)?;
+            } else {
+                concurrency::publish_intent(
+                    &tx,
+                    self.project_id,
+                    &update.agent_run_id,
+                    &key.kind,
+                    &key.id,
+                    i64::from(update.ttl_seconds),
+                )
+                .map_err(StorageError::backend)?;
+            }
+        }
+        let result =
+            concurrency::load_live_intents(&tx, self.project_id).map_err(StorageError::backend)?;
+        tx.commit().map_err(StorageError::backend)?;
+        Ok(result)
+    }
+    fn close(&mut self) -> StorageResult<()> {
+        if let Some(db) = self.db.take() {
+            if let Err((db, error)) = db.close() {
+                self.db = Some(db);
+                return Err(StorageError::backend(error));
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn open_test_database(
+    project: &ProjectSettings,
+    computer_id: &str,
+) -> StorageResult<Connection> {
+    let (descriptor, _) = super::config::resolve(project)?;
+    descriptor.require_available()?;
+    let mut store = SqliteStorage::open_request(&OpenRequest {
+        location: settings::project_database_path(project)
+            .to_string_lossy()
+            .into_owned(),
+        registered_identity: ProjectIdentity {
+            id: project.id.clone(),
+            name: project.name.clone(),
+        },
+        computer_id: computer_id.into(),
+        checkout_path: project.folder.clone(),
+        mode: OpenMode::InitializeOrMigrate,
+    })?;
+    store.db.take().ok_or(StorageError::Closed)
+}
+
+#[cfg(test)]
+pub(crate) fn test_snapshot(db: &Connection, project_id: i64) -> Box<dyn ReadSnapshot + '_> {
+    let tx = db.unchecked_transaction().unwrap();
+    let metadata = snapshot::metadata(&tx, project_id).unwrap();
+    Box::new(snapshot::Snapshot { tx, metadata })
 }

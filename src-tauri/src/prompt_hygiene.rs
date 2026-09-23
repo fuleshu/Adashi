@@ -34,10 +34,18 @@ const REMOVED_TOOL_REFERENCES: &[(&str, &str, &str)] = &[
         "adashi_design",
         "set_element_descriptions",
     ),
-    ("adashi_design_get_overview", "adashi_design", "get_overview"),
+    (
+        "adashi_design_get_overview",
+        "adashi_design",
+        "get_overview",
+    ),
     ("adashi_design_get_scope", "adashi_design", "get_scope"),
     ("adashi_design_get_by_ids", "adashi_design", "get_by_ids"),
-    ("adashi_design_get_bindings", "adashi_design", "get_bindings"),
+    (
+        "adashi_design_get_bindings",
+        "adashi_design",
+        "get_bindings",
+    ),
     ("adashi_design_search", "adashi_design", "search"),
     (
         "adashi_mockup_list_pending_revisions",
@@ -75,7 +83,11 @@ const REMOVED_TOOL_REFERENCES: &[(&str, &str, &str)] = &[
     ("adashi_append_memory_note", "adashi_memory", "append"),
     ("adashi_update_memory", "adashi_memory", "update"),
     ("adashi_update_memory_rule", "adashi_memory", "update_rule"),
-    ("adashi_publish_resource_intent", "adashi_intents", "publish"),
+    (
+        "adashi_publish_resource_intent",
+        "adashi_intents",
+        "publish",
+    ),
     ("adashi_list_resource_intents", "adashi_intents", "list"),
 ];
 
@@ -182,69 +194,8 @@ pub(crate) fn unknown_tool_references(text: &str) -> Vec<String> {
 ///
 /// Returns the number of prompts rewritten. Versions are bumped so caches keyed on version
 /// or contentVersion observe the change, and the project revision moves once.
-pub fn repair_stored_prompts(db: &rusqlite::Connection, project_id: i64) -> Result<usize, String> {
-    let mut repairs: Vec<(i64, String)> = Vec::new();
-
-    {
-        let mut statement = db
-            .prepare("SELECT id, prompt FROM rules WHERE project_id = ?1")
-            .map_err(|error| error.to_string())?;
-        let rows = statement
-            .query_map([project_id], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-            })
-            .map_err(|error| error.to_string())?;
-        for row in rows {
-            let (id, prompt) = row.map_err(|error| error.to_string())?;
-            if let Some(rewritten) = rewrite_removed_tool_references(&prompt) {
-                repairs.push((id, rewritten));
-            }
-        }
-    }
-
-    let mut fixed_hook_repairs: Vec<(String, String)> = Vec::new();
-    {
-        let mut statement = db
-            .prepare("SELECT key, prompt FROM fixed_hook_prompts WHERE project_id = ?1")
-            .map_err(|error| error.to_string())?;
-        let rows = statement
-            .query_map([project_id], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .map_err(|error| error.to_string())?;
-        for row in rows {
-            let (key, prompt) = row.map_err(|error| error.to_string())?;
-            if let Some(rewritten) = rewrite_removed_tool_references(&prompt) {
-                fixed_hook_repairs.push((key, rewritten));
-            }
-        }
-    }
-
-    if repairs.is_empty() && fixed_hook_repairs.is_empty() {
-        return Ok(0);
-    }
-
-    for (id, rewritten) in &repairs {
-        db.execute(
-            "UPDATE rules SET prompt = ?1 WHERE id = ?2",
-            rusqlite::params![rewritten, id],
-        )
-        .map_err(|error| error.to_string())?;
-        crate::concurrency::bump_version(db, project_id, "rule", &id.to_string())?;
-    }
-    for (key, rewritten) in &fixed_hook_repairs {
-        db.execute(
-            "UPDATE fixed_hook_prompts SET prompt = ?1, updated_at = CURRENT_TIMESTAMP
-             WHERE project_id = ?2 AND key = ?3",
-            rusqlite::params![rewritten, project_id, key],
-        )
-        .map_err(|error| error.to_string())?;
-        crate::concurrency::bump_version(db, project_id, "fixed-hook", key)?;
-    }
-
-    crate::state::bump_project_revision(db, project_id)?;
-    Ok(repairs.len() + fixed_hook_repairs.len())
-}
+#[cfg(test)]
+use crate::storage::sqlite::prompt_hygiene::repair_stored_prompts;
 
 #[cfg(test)]
 mod tests {
@@ -299,7 +250,8 @@ mod tests {
 
     #[test]
     fn malformed_spans_from_the_earlier_release_are_repaired() {
-        let stored = "Retrieval such as `the `adashi_design` operation `search`` and transactional \
+        let stored =
+            "Retrieval such as `the `adashi_design` operation `search`` and transactional \
                      `the `adashi_design` operation `save`` calls, plus a bare \
                      the `adashi_memory` operation `update` mention.";
         let repaired = rewrite_removed_tool_references(stored).unwrap();
@@ -440,7 +392,10 @@ mod tests {
             )
             .unwrap();
         println!("\n--- repaired design hook (excerpt) ---");
-        for line in repaired_prompt.lines().filter(|line| line.contains("adashi_design")) {
+        for line in repaired_prompt
+            .lines()
+            .filter(|line| line.contains("adashi_design"))
+        {
             println!("{line}");
         }
 

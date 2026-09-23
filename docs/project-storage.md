@@ -1,9 +1,16 @@
 # Project storage contract
 
-Status: task 12 design and task 13 foundation implemented.
-Task 13 supplies the core and SQLite bridge. Task 14 completes domain extraction;
-tasks 16–19 deliver text storage; tasks 20–23 deliver server SQL. A declared backend
-is not usable until its implementation and conformance checks exist.
+Status: tasks 12 (design), 13 (foundation), 24 (complete API) and 14 (SQLite adapter) implemented.
+The compiled, backend-neutral API is in
+[adashi-storage-api](../src-tauri/storage-api/src/api.rs); the exact operation map
+and SQLite migration checklist are in [storage-api-migration.md](storage-api-migration.md).
+
+The execution order is **12 → 13 → 24 → 14 → 15 → 16 → 17 → 18 → 19 →
+20 → 21 → 22 → 23**. Task 14 implements SQLite against the full API and migrates
+production callers. Tasks 16–19 deliver text storage; tasks 20–23 deliver server
+SQL. ProjectStore now implements the full ProjectStorage interface through the
+complete SQLite backend. The earlier RuleStorage subset exists only in historical
+tests; the production connection bridge is removed.
 
 ## Ownership and configuration
 
@@ -78,33 +85,39 @@ connection profiles/secret references. SQLite's current `project_computers` mapp
 is preserved during compatibility work; text/server migrations move machine-local
 locations out of shared canonical content without losing local registrations.
 
-PNG previews, design-health checks, search indexes and other reproducible caches
+PNG previews, reproducible design-health scan results, search indexes and other reproducible caches
 are disposable. Active processes, connection pools, in-flight jobs and expiring
 local advisory intents are runtime state. No cache or machine path belongs in the
-Git canonical record set. QA run **evidence** and user drafts are not disposable.
+Git canonical record set. QA run **evidence**, health waivers and user drafts are not disposable.
 Define their sharing/provenance explicitly in task 16. SQL user authorization and
 the trust policy for executing shared QA commands are task 20 requirements.
 
 ## Shared API and transaction contract
 
-The public `adashi_lib::storage` core owns a `ProjectStore` handle and a backend-neutral `ProjectStorage`
-interface. Domain requests/results use Rust structs/enums. No SQL, table name,
-driver row, backend transaction or `rusqlite::Connection` appears in that interface.
-Each backend implements consistent snapshots, atomic mutations, durable retry
-receipts and change detection. The factory supports only implemented backends.
+The standalone adashi-storage-api crate owns ProjectStorage (the client API),
+StorageBackend (the complete adapter contract), StorageClient (the shared facade)
+and ReadSnapshot (a consistent view across all project domains). The application's
+storage module reexports these traits. Domain DTOs were extracted and reexported
+from their old modules, preserving existing desktop/MCP serialization.
 
-The domain API grows by typed operations, not an arbitrary JSON document bucket:
-design document save, mockup actions, task lifecycle actions, QA definitions and
-evidence, memory actions, rules and fixed prompts. Existing domain validators are
-reused/extracted; neither client nor backend invents different lifecycle rules.
-Unmigrated domains remain on an explicit compatibility bridge until task 14.
+The API declares typed design, mockup, task, QA evidence, memory, rules, fixed
+prompt, coordination, legacy-content and health-waiver operations. Shared helpers
+implement input preparation, canonical request fingerprints, version checks,
+document-token conflicts, final-reference checks and receipt replay. Backend
+implementations must run stateful domain validation and these checks inside their
+atomic write unit. No driver, connection, SQL row or transport runtime occurs in
+the standalone crate's dependency tree.
 
-Task 13 delivers a concrete rules slice plus project identity/change snapshots to
-exercise the abstraction end to end. Its `RuleChange` batch and `RuleSnapshot` are
-the first typed domain operations, not a replacement schema for other domains.
-The SQLite bridge opens exactly the existing database through the same resolver.
-It does not use implicit dereferencing, an in-memory mirror or a second persistent
-store. Its explicit connection escape hatch is temporary and removed in task 14.
+The complete source contract and operation map are documented in
+[the implementation guide](storage-api-migration.md). ProjectStore selects the
+configured adapter and delegates to StorageClient. SqliteFactory implements the
+full backend and snapshot contracts. Desktop, MCP and the shared QA runner use
+that same boundary; production code cannot extract a database connection.
+
+SQL, row hydration, stateful domain validation, seeding and schema migration live
+under src-tauri/src/storage/sqlite/. Root domain modules contain shared DTO
+reexports and pure helpers. Raw connection helpers outside the backend compile
+only in historical tests.
 
 Every mutation follows this contract:
 
@@ -131,12 +144,10 @@ and matching token from one snapshot. Numerical versions cannot prove equality o
 independent Git histories; task 16 must add branch-safe content identity without
 weakening the public design-token contract. Advisory intents never act as locks.
 
-Receipts use the existing `mutation_operations` store for SQLite, not a parallel
-history. The initial typed rules slice stores a versioned receipt envelope with a
-request fingerprint and original typed result in `result_json`; it rejects IDs
-already used by a legacy receipt rather than guessing its request. Legacy handlers
-continue to replay their own receipt shapes during the transition. Task 14 unifies
-domain dispatch and receipt compatibility before removing the bridge.
+Receipts use the existing mutation_operations table. All new writes persist a
+V1 fingerprint and typed result atomically. Historical receipts remain readable
+as Legacy; reusing their IDs is rejected because they cannot prove request
+equality. No history is deleted or silently interpreted as a new receipt.
 
 A snapshot returns identity, requested domain values/resource versions and its
 change cursor from one logical read. Dropping the read/transaction releases its
@@ -193,21 +204,30 @@ interfaces. SQLite runs these now; future adapters run the same cases without SQ
 test assumptions. Keep byte-level and native-client tests separately as
 backend/client integration checks.
 
-## Task 14 extraction checklist
+## Task 24 interface validation
 
-After task 13, the following are intentionally still SQLite callers:
-`desktop.rs` dashboard/domain handlers and helpers; `mcp.rs` domain handlers other
-than the rule-list read, which already uses a typed snapshot;
-`mcp/context.rs`; `design.rs` and `design/`; `mockups.rs`; `tasks.rs`; `qa.rs`;
-`memory.rs`; `rules.rs`; `fixed_hooks.rs`; `concurrency.rs`; `state.rs`; `grep.rs`;
-`design_health.rs`; `projection.rs`; `prompt_hygiene.rs`; seeding/schema code.
+The standalone crate passes its contract cases without SQLite or Tauri. It covers
+all typed read groups, cross-domain snapshots/publication, version and document
+conflicts, reference checks, replay and legacy-receipt rejection, rollback/no-op
+behavior, advisory intents and independent handle lifetime. Its backend is a
+scripted test double with fixture domain responses, not a new production backend.
 
-Move each domain's operations/transaction ownership behind the typed API, reusing
-its existing validators. Extract client-side transaction code into shared services.
-Keep backend SQL/schema/row decoding in the SQLite implementation. Port task/QA
-background opens and projection reads too. Remove the compatibility connection
-escape hatch only after every production caller has moved. This inventory is a
-required handoff, not a claim that task 13 makes every domain backend-neutral.
+## Task 14 SQLite implementation and caller migration
+
+The complete SQLite adapter and caller migration are implemented. All production
+storage calls from desktop, MCP, lifecycle context, search, projections, mockups,
+health and QA use ProjectStorage or ReadSnapshot. Atomic commit owns guards,
+domain validation, resource versions, receipts and one content revision per batch.
+The raw connection escape hatch is removed.
+
+Schema 14 seeds previously unversioned QA evidence, computer, memory-note and
+legacy resources. Initialized, registered opens do not write. Explicit read-only
+mode neither migrates nor registers a computer. Initialization enables WAL for
+consistent readers during concurrent writes.
+
+Task 15 owns the expanded compatibility suite and native desktop/MCP evidence.
+Intentional API changes and operational behavior are recorded in
+[the implementation guide](storage-api-migration.md).
 
 ## Foundation validation (2026-09-23)
 
