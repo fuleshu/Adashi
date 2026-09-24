@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Stores many-to-many links from QA jobs to project tasks and supplies QA attachment evidence for task workflows through",
+    "destination_external_id": "store-taskqa-dummy",
+    "external_id": "rel-qa-store-task",
+    "id": 60,
+    "source_external_id": "store-qa",
+    "tags": "QA,Tasks",
+    "technology": "Task links",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "6bdc97c6-1a57-81e2-a641-0d0f57af6041",
+  "schemaVersion": 1
+}

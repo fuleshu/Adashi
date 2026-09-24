@@ -50,7 +50,7 @@ impl ProjectStore {
         let (descriptor, _) = config::resolve(project)?;
         descriptor.require_available()?;
         let _lock = migration::lock(project)?;
-        migration::recover(project)?;
+        migration::recover_for_read(project)?;
         let (descriptor, descriptor_source) = config::resolve(project)?;
         descriptor.require_available()?;
         let location = if matches!(descriptor.backend, BackendSelection::Text {}) {
@@ -118,7 +118,7 @@ impl ProjectStore {
 impl ProjectStorage for ProjectStore {
     fn snapshot(&mut self) -> StorageResult<Box<dyn api::ReadSnapshot + '_>> {
         let _lock = migration::lock(&self.registration)?;
-        migration::recover(&self.registration)?;
+        migration::recover_for_read(&self.registration)?;
         self.ensure_current()?;
         self.client.snapshot()
     }

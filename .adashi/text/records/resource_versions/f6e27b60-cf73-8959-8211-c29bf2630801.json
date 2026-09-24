@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "9|file|src-tauri/src/settings.rs",
+    "resource_kind": "design.binding",
+    "updated_at": "2026-07-31 15:51:44",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "f6e27b60-cf73-8959-8211-c29bf2630801",
+  "schemaVersion": 1
+}

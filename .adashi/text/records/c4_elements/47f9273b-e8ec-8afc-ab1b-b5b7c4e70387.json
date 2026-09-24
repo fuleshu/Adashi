@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Shared Rust and Tauri boundary for mockup commands and MCP reuse. Validates and sanitizes SVG, enforces stable element ids and safe resource rules, persists accepted SVG, recoverable working drafts, edit operations, vector annotations, and AI proposals, generates deterministic PNG previews from the same viewport and font contract, handles request, accept, reject, discard, and delete operations, and bumps project revision after mutations.",
+    "element_type": "Component",
+    "external_id": "desktop-mockup-runtime",
+    "id": 74,
+    "name": "UI Mockup Runtime",
+    "parent_external_id": "3",
+    "tags": "Element,Component,Runtime,UI Mockup",
+    "technology": "Rust, Tauri commands, SQLite, SVG rasterization",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "47f9273b-e8ec-8afc-ab1b-b5b7c4e70387",
+  "schemaVersion": 1
+}

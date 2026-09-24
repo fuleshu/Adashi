@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Creates, updates, deletes, queries, and reads QA job definitions and run evidence in",
+    "destination_external_id": "store-qa",
+    "external_id": "rel-mcp-qa-store",
+    "id": 57,
+    "source_external_id": "mcp-qa-api",
+    "tags": "QA,MCP",
+    "technology": "SQLite access",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "51826ba6-178d-8a79-99c4-69d726800961",
+  "schemaVersion": 1
+}

@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Loads settings, picks a folder, creates the first project, selects the new active project, and closes the app on cancel through",
+    "destination_external_id": "desktop-dashboard-api",
+    "external_id": "rel-first-project-onboarding-dashboard-api",
+    "id": 68,
+    "source_external_id": "ui-first-project-onboarding",
+    "tags": "Relationship,Onboarding",
+    "technology": "Tauri IPC",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "edc78364-29b3-836a-b5f2-7888d020c33e",
+  "schemaVersion": 1
+}

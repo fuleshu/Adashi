@@ -1,0 +1,42 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[\"src/VersionedField.tsx\",\"src-tauri/src/storage/text/validation.rs\",\"src-tauri/src/storage/text/records.rs\",\"src-tauri/src/storage/text/engine.rs\",\"src-tauri/src/storage/text/local.rs\",\"src-tauri/src/storage/text/mod.rs\",\"src-tauri/src/storage/text/journal.rs\",\"src-tauri/src/storage/text/transfer.rs\",\"src-tauri/src/storage/text/tests.rs\",\"src-tauri/storage-api/src/api.rs\",\"docs/storage-text-format.md\",\"docs/storage-migration.md\",\"docs/project-storage.md\",\"docs/storage-api-migration.md\"]",
+    "completed_at": "2026-09-24 08:27:59",
+    "completion_memo": "Completed the independent-clone Git collaboration gate and removed Git-tracked application request history as directed. Text format version 2 exports project content only; request retry results use the existing ignored .adashi/local/state.json and do not transfer across clean clones. Fresh no-op requests and retries preserve tracked bytes and mtimes. Version 1 reads remain passive; its next successful write atomically removes legacy request files and upgrades the marker, with recovery and external-edit protection. SQLite/text migration preserves local retry results on the same checkout without recreating tracked request history. Also fixed ambiguous task/QA link ordering after merges and native draft reload blur autosaving discarded content. Verification: 205 application Rust tests passed, 5 pre-existing ignored; 15 real Git/MCP scenarios and 5 native Tauri/WebView2 scenarios passed. Frontend build and versioned-draft regression passed. Final binaries rebuilt; targeted upgrade/migration tests passed after final cleanup. Git evidence: target/git-collaboration/5998fe38-f0be-4bb9-88e1-36ce12de6613/evidence.json. Native evidence and screenshots: target/git-collaboration/5998fe38-f0be-4bb9-88e1-36ce12de6613/native-evidence.json. Everyday workflow and documented limits: docs/storage-git-collaboration.md. Formal storage-text design updated. No acceptance decision remains pending. Source changes remain uncommitted.",
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-09-23 10:00:04",
+    "created_files": "[\"scripts/check_git_collaboration.py\",\"scripts/check_native_git.mjs\",\"scripts/git_collaboration/common.py\",\"scripts/git_collaboration/conflicts.py\",\"scripts/git_collaboration/merges.py\",\"scripts/git_collaboration/recovery.py\",\"scripts/git_collaboration/native_helpers.mjs\",\"scripts/git_collaboration/AGENTS.md\",\"docs/storage-git-collaboration.md\",\"src-tauri/src/storage/text/tests/upgrade.rs\"]",
+    "description": {
+      "lines": [
+        "Execution order: step 09 of 13. Depends on Adashi task ID 18. Complete this prerequisite before starting.\n",
+        "\n",
+        "Phase: Git-friendly text storage completion gate.\n",
+        "\n",
+        "Use real Git repositories and at least two independent clones to prove collaboration:\n",
+        "- Merge simultaneous additions, including task/QA creation, and verify stable IDs, display-number behavior and references.\n",
+        "- Merge disjoint resource edits with no unnecessary conflicts; test same-resource disjoint fields according to the documented format.\n",
+        "- Exercise overlapping edits, delete/edit and delete/reference conflicts, reordered lists, multiline artifacts, unresolved markers and semantically invalid but syntactically clean merges.\n",
+        "- Verify branch switching, pull, merge and recovery with the app open, including stale desktop drafts and MCP readTokens.\n",
+        "- Test two local processes, interrupted writes, clean-clone reconstruction and SQLite/text round-trip migration.\n",
+        "- Confirm repeated reads and no-op writes leave tracked bytes unchanged; caches, machine paths and secrets are absent from tracked storage.\n",
+        "\n",
+        "Acceptance: automated Git scenarios and native desktop/MCP evidence demonstrate both users' valid work survives, true conflicts are visible and recoverable, and neither client silently overwrites merged data. Document the everyday commit/pull/merge workflow and practical limits.\n",
+        "\n",
+        "Resolved implementation direction 2026-09-24: Application request history is excluded from Git-tracked text storage. Retry results remain in the existing ignored local state, with no cross-clone replay guarantee. Format version 2 preserves tracked bytes and mtimes for fresh no-op requests and retries. Version 1 remains read-only compatible and removes legacy tracked request records on its next successful write. The one-time format upgrade is documented; ordinary version 2 no-op requests leave Git clean."
+      ]
+    },
+    "id": 19,
+    "number": 16,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "finished",
+    "title": "Storage 09/13 — Verify Git collaboration with independent clones",
+    "updated_at": "2026-09-24 08:27:59"
+  },
+  "deleted": false,
+  "identity": "fba1f16a-c455-8270-9783-f3e65f821b3b",
+  "schemaVersion": 1
+}

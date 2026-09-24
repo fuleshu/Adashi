@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "desktop-prompt-hygiene",
+    "resource_kind": "design.element",
+    "updated_at": "2026-09-11 17:42:12",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "166c0f9c-904c-8473-8cc8-20a1cef8047d",
+  "schemaVersion": 1
+}

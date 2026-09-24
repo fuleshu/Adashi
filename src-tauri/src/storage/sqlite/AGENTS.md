@@ -1,10 +1,10 @@
 <!-- adashi:architecture:begin -->
-<!-- adashi:generated revision=367 -->
+<!-- adashi:generated revision=476204540909476 -->
 # Architecture — `src-tauri/src/storage/sqlite` (generated)
 Generated from the Adashi design model; do not edit, change the model.
 These responsibilities are already owned here: extend them, do not duplicate.
 
-- **Storage Migration Service** (Component) — Implemented task 18 for SQLite/text; task 22 extends to server SQL. MigrationAdapter/Sourc…
+- **Storage Migration Service** (Component) — Implemented SQLite/text migration; task 22 extends to server SQL. MigrationAdapter/SourceS…
 - **SQLite Storage Adapter** (Component) — Implements every StorageFactory, StorageBackend and ReadSnapshot operation over the existi…
 
 Boundaries crossing this folder:

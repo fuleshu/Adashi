@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Owns the driver-independent adashi-storage-api crate: ProjectStorage, StorageBackend, StorageClient, StorageFactory and consistent ReadSnapshot methods across every domain. Shared typed mutations/results, canonical document tokens, version/reference checks and durable fingerprinted receipts are used by desktop and MCP. ProjectStore selects and delegates to the complete SQLite adapter; no production connection escapes. LocalDerivedCache separates disposable health/preview data; waivers and legacy content remain canonical. QA reservation, atomic claim and evidence commits surround external process execution. Desktop narrow design edits preserve hierarchy/endpoints within the guarded transaction. Operation map and intentional API changes: docs/storage-api-migration.md.",
+    "element_type": "Component",
+    "external_id": "storage-core",
+    "id": 159,
+    "name": "Shared Storage Core",
+    "parent_external_id": "3",
+    "tags": "Element,Component,Storage",
+    "technology": "Rust storage contract",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "3187f0ab-cff2-89a1-97e6-cf4502fc968b",
+  "schemaVersion": 1
+}

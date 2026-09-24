@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Reads overviews, scopes, search hits, ids, typed UML artifact inventory, and code bindings from",
+    "destination_external_id": "store-design-workspace",
+    "external_id": "34",
+    "id": 33,
+    "source_external_id": "mcp-design-retrieval",
+    "tags": "Relationship",
+    "technology": "SQL",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "e6a04dfb-ebc2-8420-af09-81e863c5b3dd",
+  "schemaVersion": 1
+}

@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Posts selected and opened diagram entity ids to",
+    "destination_external_id": "ui-design-browser",
+    "external_id": "38",
+    "id": 37,
+    "source_external_id": "renderer-selection-bridge",
+    "tags": "Relationship",
+    "technology": "postMessage",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "2a74015a-0242-8869-a6ff-beca7ce04085",
+  "schemaVersion": 1
+}

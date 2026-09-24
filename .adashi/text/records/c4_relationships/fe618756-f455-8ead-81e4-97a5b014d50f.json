@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Resolves configured projects and database locations from",
+    "destination_external_id": "9",
+    "external_id": "19",
+    "id": 18,
+    "source_external_id": "5",
+    "tags": "Relationship",
+    "technology": "JSON file",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "fe618756-f455-8ead-81e4-97a5b014d50f",
+  "schemaVersion": 1
+}

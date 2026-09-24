@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Stores many-to-many links from QA jobs to formal design elements or UML artifacts identified by design external id in",
+    "destination_external_id": "store-design-workspace",
+    "external_id": "rel-qa-store-design",
+    "id": 59,
+    "source_external_id": "store-qa",
+    "tags": "QA,Design",
+    "technology": "Design specification links",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "9d9ed04d-faaf-89d4-ac46-bb49b1716e26",
+  "schemaVersion": 1
+}

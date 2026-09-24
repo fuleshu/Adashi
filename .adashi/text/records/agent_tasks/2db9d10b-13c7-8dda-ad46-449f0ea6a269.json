@@ -1,0 +1,58 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[\"src/main.tsx\",\"src/styles.css\"]",
+    "completed_at": "2026-07-18 16:01:15",
+    "completion_memo": "Implemented the deliberately small layered SVG editor on top of Task 8's foundation. The Design Browser now supports direct selection and multi-selection, pointer drag and resize, keyboard movement, direct/contextual text and appearance edits, six stable-id primitives, duplicate/delete, group/ungroup, four z-order commands, bounded undo/redo, a separate red-pencil vector annotation layer with eraser and callouts, deterministic ordered edit records, debounced recoverable draft persistence, manual save, and Request AI revision chaining. Pending/proposed comparison and user-controlled resume/discard/accept/reject remain integrated. Verification passed: npx tsc --noEmit; npm run build; cargo fmt --check; cargo test (30 passed); git diff --check; focused browser model and visual QA (10/10 assertions).",
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-07-18 14:35:26",
+    "created_files": "[\"src/MockupEditor.tsx\",\"src/mockupEditorModel.ts\"]",
+    "description": {
+      "lines": [
+        "Dependency:\n",
+        "Start after Task Id 8 has delivered the mockup schema, runtime, persistence, renderer, lifecycle commands, and Design Browser workspace contract.\n",
+        "\n",
+        "Objective:\n",
+        "Implement the deliberately simple layered and grouped SVG editor agreed for Adashi. The editor must let a user make obvious visual suggestions and red-pencil annotations without learning a composition system, responsive constraints, or a prototyping tool. Every edit operates on a recoverable working draft and never mutates the accepted formal SVG directly.\n",
+        "\n",
+        "Required scope:\n",
+        "1. Build a selectable SVG canvas that renders the artifact at its explicit viewport, preserves layered group structure, and works with stable data-adashi-id, data-role, and data-label metadata.\n",
+        "2. Support selecting individual elements and groups, dragging them, resizing them with simple handles, and preserving group-relative geometry.\n",
+        "3. Support inline label editing and minimal contextual editing for position, dimensions, fill, stroke, opacity, and text where applicable. Do not introduce a full style or design-token system.\n",
+        "4. Provide a small add palette containing panel, text, button, field, image placeholder, and divider primitives. Newly added elements must receive stable ids and safe default metadata.\n",
+        "5. Support edit, delete, duplicate, group, ungroup, bring forward, send backward, bring to front, and send to back operations.\n",
+        "6. Implement undo and redo across all structural, geometry, text, appearance, grouping, ordering, and annotation operations. Persist recoverable draft checkpoints through the foundation runtime so closing or switching views does not lose work.\n",
+        "7. Add a Snipping Tool style red pencil that feels freehand to the user but stores vector SVG paths in a dedicated annotation layer. Add an eraser for annotation strokes and an optional short text callout tool. Annotations are revision instructions and must not become accepted UI elements.\n",
+        "8. Automatically record ordered edit operations with target ids and payloads for move, resize, rename, appearance change, add, delete, duplicate, group, ungroup, ordering, and annotation changes.\n",
+        "9. Expose clear dirty, saved-draft, pending-agent, and proposed states. Connect the editor to Save draft, Request AI revision, resume editing, discard draft, before and after comparison, accept, and reject flows supplied by Task Id 8.\n",
+        "10. Preserve rejected user drafts, edit logs, and annotations exactly. Clear draft evidence only after explicit acceptance or explicit discard.\n",
+        "11. Add accessible keyboard and pointer behavior for selection, delete, duplicate, undo, redo, movement, grouping, ordering, pencil, eraser, and callout actions without turning the surface into a general vector graphics editor.\n",
+        "12. Add unit tests for geometry and operation history, React interaction tests for every editor command, persistence and reopen tests, annotation-layer tests, visual regression snapshots, and real Tauri/WebView runtime QA for drag, resize, text editing, grouping, undo and redo, pencil, eraser, request revision, rejection, and acceptance.\n",
+        "\n",
+        "Acceptance criteria:\n",
+        "- A non-technical user can open an AI-generated mockup and change its composition using direct selection, drag, resize, inline labels, a six-item primitive palette, grouping, ordering, and simple contextual properties.\n",
+        "- Red pencil, eraser, and optional callouts behave like visual annotations while remaining separate vector revision evidence.\n",
+        "- Every element and group retains a stable id and every user action produces deterministic working SVG plus an ordered edit record.\n",
+        "- Undo and redo remain correct across mixed element, group, style, and annotation edits and survive draft persistence where applicable.\n",
+        "- Closing, project switching, MCP refresh, rejected AI proposals, and resumed editing never lose the user's working draft.\n",
+        "- Request AI revision produces the exact working SVG, edit log, annotations, and matching rendered PNG through the foundation contract.\n",
+        "- The editor remains intentionally static: one mockup represents one screen, state, and viewport.\n",
+        "\n",
+        "Explicitly out of scope:\n",
+        "Responsive constraints, flex or grid composition semantics, interaction graphs, clickable prototypes, application navigation simulation, arbitrary vector illustration tools, freeform CSS, design-system management, and implementation code generation."
+      ]
+    },
+    "id": 9,
+    "number": 7,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "closed",
+    "title": "Implement the layered SVG UI mockup editor and annotation tools",
+    "updated_at": "2026-09-23 17:31:45"
+  },
+  "deleted": false,
+  "identity": "2db9d10b-13c7-8dda-ad46-449f0ea6a269",
+  "schemaVersion": 1
+}

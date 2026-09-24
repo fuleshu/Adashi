@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Edits memory, lifecycle rules, and protocol prompts through",
+    "destination_external_id": "desktop-dashboard-api",
+    "external_id": "27",
+    "id": 26,
+    "source_external_id": "ui-memory-rules",
+    "tags": "Relationship",
+    "technology": "Tauri IPC",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "deb43f34-6d1b-8da6-8140-475c8bd6a7a6",
+  "schemaVersion": 1
+}

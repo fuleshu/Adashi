@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Semantic and source-of-truth design tables for Structurizr DSL and JSON, C4 rows, typed Mermaid UML artifacts, code bindings, and the common design-target index used by UI mockups. Internal resource versions permit disjoint changes to commit while overlapping updates or destructive dependency changes fail precisely. Implemented contract: expose a deterministic canonical editable snapshot for each independently editable design document and its server-computed hash readToken. Tokens cover the editable document content rather than unrelated project changes or derived presentation state. Comparison of the submitted token, validation of current references and dependencies, and persistence occur atomically. On mismatch no attempted changes are stored; return the complete current document and its matching token from one consistent snapshot. The project cursor remains a notification mechanism rather than a document precondition.",
+    "element_type": "Component",
+    "external_id": "store-design-workspace",
+    "id": 31,
+    "name": "Formal Design Workspace Store",
+    "parent_external_id": "6",
+    "tags": "Element,Component",
+    "technology": "design_workspaces, diagrams, c4_elements, c4_relationships, design_bindings, version columns, canonical document hashing",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "4ce8f235-278a-8f04-885d-e11a007f6738",
+  "schemaVersion": 1
+}

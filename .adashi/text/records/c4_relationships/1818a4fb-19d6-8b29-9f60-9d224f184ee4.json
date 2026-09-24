@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Uses shared typed storage and transitional SQLite bridge",
+    "destination_external_id": "storage-core",
+    "external_id": "storage-desktop-core",
+    "id": 126,
+    "source_external_id": "3",
+    "tags": "",
+    "technology": "Shared typed Rust API",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "1818a4fb-19d6-8b29-9f60-9d224f184ee4",
+  "schemaVersion": 1
+}

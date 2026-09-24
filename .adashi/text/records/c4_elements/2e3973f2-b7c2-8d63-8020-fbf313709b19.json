@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Project-local persistence for attached static UI mockups. Stores artifact metadata, accepted layered SVG with accepted revision, recoverable working SVG with its own working revision and accepted base revision, ordered edit operations, separate vector annotations, proposals, and lifecycle status. Target-scoped versions prevent same-mockup overwrites without blocking other mockups. PNG previews remain deterministic derived evidence keyed by source revision.",
+    "element_type": "Component",
+    "external_id": "store-ui-mockups",
+    "id": 76,
+    "name": "UI Mockup Store",
+    "parent_external_id": "6",
+    "tags": "Element,Component,Store,UI Mockup",
+    "technology": "ui_mockups, working and accepted versions, proposals, derived preview cache",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "2e3973f2-b7c2-8d63-8020-fbf313709b19",
+  "schemaVersion": 1
+}

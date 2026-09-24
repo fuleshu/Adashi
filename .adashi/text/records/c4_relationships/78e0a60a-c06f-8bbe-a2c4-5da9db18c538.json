@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Persists immutable QA run groups, per-job output, exit codes, timestamps, durations, trigger source, and command snapshots in",
+    "destination_external_id": "store-qa",
+    "external_id": "rel-qa-runtime-store",
+    "id": 58,
+    "source_external_id": "desktop-qa-runtime",
+    "tags": "QA",
+    "technology": "SQLite transaction writes",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "78e0a60a-c06f-8bbe-a2c4-5da9db18c538",
+  "schemaVersion": 1
+}

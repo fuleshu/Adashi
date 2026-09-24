@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Rewrites stored rule prompts that name removed MCP tools in",
+    "destination_external_id": "store-rules",
+    "external_id": "rel-prompt-hygiene-store-rules",
+    "id": 121,
+    "source_external_id": "desktop-prompt-hygiene",
+    "tags": "",
+    "technology": "",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "457ad87c-7689-8c62-9c13-4fb5d232fee9",
+  "schemaVersion": 1
+}

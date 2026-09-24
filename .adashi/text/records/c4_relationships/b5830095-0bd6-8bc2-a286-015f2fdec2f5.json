@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Bumps the notification-only project change cursor after successful mockup commits through",
+    "destination_external_id": "8",
+    "external_id": "rel-mockup-runtime-revision",
+    "id": 82,
+    "source_external_id": "desktop-mockup-runtime",
+    "tags": "Relationship,UI Mockup,Design Decision",
+    "technology": "SQL",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "b5830095-0bd6-8bc2-a286-015f2fdec2f5",
+  "schemaVersion": 1
+}

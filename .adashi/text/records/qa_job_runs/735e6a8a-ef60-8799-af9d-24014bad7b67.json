@@ -1,0 +1,27 @@
+{
+  "collection": "qa_job_runs",
+  "data": {
+    "command_snapshot": "{\"command\":\"cargo build --manifest-path src-tauri/Cargo.toml --bin adashi-mcp; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; $exe = Join-Path (Get-Location) 'src-tauri\\\\target\\\\debug\\\\adashi-mcp.exe'; $psi = [System.Diagnostics.ProcessStartInfo]::new($exe); $psi.WorkingDirectory = (Get-Location).Path; $psi.UseShellExecute = $false; $psi.RedirectStandardInput = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true; $p = [System.Diagnostics.Process]::Start($psi); $p.StandardInput.AutoFlush = $true; $p.StandardInput.WriteLine('{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":1,\\\"method\\\":\\\"initialize\\\",\\\"params\\\":{\\\"protocolVersion\\\":\\\"2024-11-05\\\",\\\"capabilities\\\":{},\\\"clientInfo\\\":{\\\"name\\\":\\\"adashi-qa\\\",\\\"version\\\":\\\"1\\\"}}}'); Start-Sleep -Seconds 2; if (!$p.HasExited) { $p.Kill() }; $out = $p.StandardOutput.ReadToEnd(); $err = $p.StandardError.ReadToEnd(); if ($out -notmatch 'protocolVersion' -or $out -notmatch '\\\"tools\\\"') { Write-Output $out; Write-Error (\\\"MCP initialize smoke failed. stderr: \\\" + $err); exit 1 }; Write-Output 'MCP stdio initialize smoke passed';\",\"designSpecificationLinks\":[{\"designExternalId\":\"5\",\"id\":6,\"qaJobId\":5,\"sortOrder\":0,\"targetType\":\"element\",\"title\":\"Adashi MCP Server\"},{\"designExternalId\":\"mcp-qa-api\",\"id\":7,\"qaJobId\":5,\"sortOrder\":1,\"targetType\":\"element\",\"title\":\"QA MCP API\"},{\"designExternalId\":\"QAMCPSequence\",\"id\":8,\"qaJobId\":5,\"sortOrder\":2,\"targetType\":\"uml\",\"title\":\"QA MCP Query and Run Sequence\"}],\"enabled\":true,\"name\":\"MCP stdio initialize smoke\",\"shell\":\"powershell\",\"tags\":[\"mcp\",\"smoke\",\"stdio\"],\"taskLinks\":[],\"timeoutSeconds\":90,\"workingDirectory\":\"\"}",
+    "duration_ms": 2628,
+    "exit_code": 0,
+    "finished_at": "2026-07-08 11:41:04",
+    "id": 7,
+    "output": {
+      "lines": [
+        "MCP stdio initialize smoke passed\r\n",
+        "ized + debuginfo] target(s) in 0.28s\n"
+      ]
+    },
+    "qa_job_id": {
+      "ref": "32f3a09e-b3ea-8673-a802-33701dd4b4d3"
+    },
+    "qa_run_id": {
+      "ref": "8e0c60f0-bf58-8874-b7a2-f4734856d104"
+    },
+    "started_at": "2026-07-08 11:41:01",
+    "status": "passed"
+  },
+  "deleted": false,
+  "identity": "735e6a8a-ef60-8799-af9d-24014bad7b67",
+  "schemaVersion": 1
+}

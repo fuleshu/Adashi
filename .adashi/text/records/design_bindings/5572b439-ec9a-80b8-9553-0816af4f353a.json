@@ -1,0 +1,17 @@
+{
+  "collection": "design_bindings",
+  "data": {
+    "created_at": "2026-07-07 09:35:11",
+    "design_external_id": "desktop-direct-design-edit",
+    "id": 4,
+    "target": "update_design_element",
+    "target_type": "symbol",
+    "updated_at": "2026-07-07 09:35:11",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "5572b439-ec9a-80b8-9553-0816af4f353a",
+  "schemaVersion": 1
+}

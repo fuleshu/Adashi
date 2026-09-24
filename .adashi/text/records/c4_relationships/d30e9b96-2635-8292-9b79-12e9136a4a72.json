@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Creates, edits, deletes, filters, confirms, and design-links tasks through",
+    "destination_external_id": "desktop-dashboard-api",
+    "external_id": "task-view-dashboard-api",
+    "id": 46,
+    "source_external_id": "ui-taskqa-placeholder",
+    "tags": "Relationship",
+    "technology": "Tauri IPC",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "d30e9b96-2635-8292-9b79-12e9136a4a72",
+  "schemaVersion": 1
+}

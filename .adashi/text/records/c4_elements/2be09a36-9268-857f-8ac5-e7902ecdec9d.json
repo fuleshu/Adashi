@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Project-local SQLite persistence for versioned reusable QA job definitions, links to design specifications and tasks, tags, immutable execution groups, and append-only per-job evidence. Job-definition versions protect overlapping edits; uniquely identified evidence appends do not serialize unrelated runs. Current state is derived from latest evidence plus staleness.",
+    "element_type": "Component",
+    "external_id": "store-qa",
+    "id": 61,
+    "name": "QA Store and Run Evidence",
+    "parent_external_id": "6",
+    "tags": "Store,QA,Tasks",
+    "technology": "SQLite, per-job versions, immutable run evidence",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "2be09a36-9268-857f-8ac5-e7902ecdec9d",
+  "schemaVersion": 1
+}

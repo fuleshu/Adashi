@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Merges refreshed dashboard payloads without resetting view state through",
+    "destination_external_id": "3",
+    "external_id": "17",
+    "id": 8,
+    "source_external_id": "4",
+    "tags": "Relationship,Design Decision",
+    "technology": "Tauri IPC, React state",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "63d23210-5f46-803c-a719-0ad2d6ec1a2a",
+  "schemaVersion": 1
+}

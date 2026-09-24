@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-09-23 10:20:20",
+    "design_external_id": "storage-server-sql",
+    "id": 93,
+    "sort_order": 0,
+    "target_type": "element",
+    "task_id": {
+      "ref": "f502a2c8-4a0f-8719-9e2b-112887249b1c"
+    }
+  },
+  "deleted": false,
+  "identity": "cee4a3a1-f831-8a10-8ede-06d8546d3877",
+  "schemaVersion": 1
+}

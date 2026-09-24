@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Saves recoverable working SVG, ordered edit operations, annotation paths, undo checkpoints, and draft lifecycle changes through",
+    "destination_external_id": "desktop-mockup-runtime",
+    "external_id": "rel-mockup-editor-runtime",
+    "id": 78,
+    "source_external_id": "ui-mockup-editor",
+    "tags": "Relationship,UI Mockup",
+    "technology": "Tauri IPC",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "aa84b1fe-74f1-8142-8a69-498eff290331",
+  "schemaVersion": 1
+}

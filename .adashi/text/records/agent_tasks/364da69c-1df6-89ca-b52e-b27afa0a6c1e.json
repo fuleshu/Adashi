@@ -1,0 +1,40 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[]",
+    "completed_at": null,
+    "completion_memo": "",
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-09-23 10:00:05",
+    "created_files": "[]",
+    "description": {
+      "lines": [
+        "Execution order: step 13 of 13. Depends on Adashi task ID 22. Complete this prerequisite before starting.\n",
+        "\n",
+        "Phase: final multi-user and backend parity gate.\n",
+        "\n",
+        "Validate the completed roadmap using the same conformance suite for SQLite, text and server SQL:\n",
+        "- Cover every persisted domain, lifecycle transitions, references, snapshots, expectedVersion/readTokens, idempotency, schema upgrades, change notifications and read-only behavior.\n",
+        "- Test two users/processes with desktop and MCP: independent edits, conflicting updates/deletes, simultaneous creation, reconnects, service restarts and lost responses after commit.\n",
+        "- Verify authentication/authorization failures, project isolation, migration during active sessions, secret handling and backup/restore.\n",
+        "- Exercise all supported backend conversion directions with representative full projects, including drafts/proposals, history and QA evidence.\n",
+        "- Complete native desktop and real MCP end-to-end workflows for each backend, including refresh without discarding unsaved work.\n",
+        "- Update user documentation and formal architecture to match the implemented backend choices, setup, Git workflow and multi-user limitations.\n",
+        "\n",
+        "Acceptance: recorded automated and native evidence shows that all three per-project backends work through the same adapter in desktop and MCP. Existing SQLite projects remain supported, Git collaboration retains valid edits, and server SQL provides reliable concurrent multi-user access."
+      ]
+    },
+    "id": 23,
+    "number": 20,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "todo",
+    "title": "Storage 13/13 — Verify multi-user SQL and parity across all storage backends",
+    "updated_at": "2026-09-23 13:27:33"
+  },
+  "deleted": false,
+  "identity": "364da69c-1df6-89ca-b52e-b27afa0a6c1e",
+  "schemaVersion": 1
+}

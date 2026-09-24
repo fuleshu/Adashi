@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Loads all linked design specification branches for task read responses from",
+    "destination_external_id": "store-design-workspace",
+    "external_id": "task-api-design-scope-read",
+    "id": 45,
+    "source_external_id": "mcp-task-api",
+    "tags": "Relationship,Design Specification Links",
+    "technology": "SQL, C4/UML scope retrieval",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "8b0e9e78-dcc1-8d1b-8fb8-0745c5fa2193",
+  "schemaVersion": 1
+}

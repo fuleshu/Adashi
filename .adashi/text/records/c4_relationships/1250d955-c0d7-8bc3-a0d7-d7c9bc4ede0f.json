@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Opens locally attached static UI mockup artifacts in",
+    "destination_external_id": "ui-mockup-workspace",
+    "external_id": "rel-design-browser-mockup-workspace",
+    "id": 74,
+    "source_external_id": "ui-design-browser",
+    "tags": "Relationship,UI Mockup",
+    "technology": "React navigation state",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "1250d955-c0d7-8bc3-a0d7-d7c9bc4ede0f",
+  "schemaVersion": 1
+}

@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "rel-mcp-qa-store",
+    "resource_kind": "design.relationship",
+    "updated_at": "2026-07-31 15:51:44",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "139c3c26-2a86-895f-a61e-f9d170e54354",
+  "schemaVersion": 1
+}

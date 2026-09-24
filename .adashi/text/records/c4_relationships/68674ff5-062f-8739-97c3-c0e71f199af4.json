@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Rewrites stored fixed-hook prompts that name removed MCP tools in",
+    "destination_external_id": "store-fixed-hook-prompts",
+    "external_id": "rel-prompt-hygiene-fixed-hooks",
+    "id": 122,
+    "source_external_id": "desktop-prompt-hygiene",
+    "tags": "",
+    "technology": "",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "68674ff5-062f-8739-97c3-c0e71f199af4",
+  "schemaVersion": 1
+}

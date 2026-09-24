@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Validates resource-scoped preconditions and records idempotency and advisory intent facts in",
+    "destination_external_id": "store-resource-coordination",
+    "external_id": "rel-concurrency-api-coordination-store",
+    "id": 109,
+    "source_external_id": "mcp-concurrency-api",
+    "tags": "Relationship,Concurrency,Design Decision",
+    "technology": "SQL transaction",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "90b0cdeb-0b3b-89c9-9268-b85202ee085d",
+  "schemaVersion": 1
+}

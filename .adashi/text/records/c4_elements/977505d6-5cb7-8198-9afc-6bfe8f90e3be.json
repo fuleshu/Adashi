@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Deliberately small direct-manipulation editor for layered and grouped SVG mockups. Supports selection, group selection, drag, resize, inline label editing, add, edit, delete, duplicate, group, ungroup, front and back ordering, a small primitive palette, undo and redo, and Snipping Tool style red-pencil annotations with eraser and optional text callouts. It does not provide responsive constraints, application interactions, prototyping, or code generation.",
+    "element_type": "Component",
+    "external_id": "ui-mockup-editor",
+    "id": 72,
+    "name": "Layered SVG Mockup Editor",
+    "parent_external_id": "4",
+    "tags": "Element,Component,UI Mockup,Editor",
+    "technology": "React, TypeScript, SVG DOM, Pointer Events",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "977505d6-5cb7-8198-9afc-6bfe8f90e3be",
+  "schemaVersion": 1
+}

@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "desktop-direct-design-edit|symbol|update_design_element",
+    "resource_kind": "design.binding",
+    "updated_at": "2026-07-31 15:51:44",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "5adb8a27-4b59-81dd-a81a-d2279ae3e1f4",
+  "schemaVersion": 1
+}

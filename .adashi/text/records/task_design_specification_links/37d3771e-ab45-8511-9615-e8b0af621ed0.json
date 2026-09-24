@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-07-09 08:35:37",
+    "design_external_id": "store-project-registry",
+    "id": 33,
+    "sort_order": 5,
+    "target_type": "element",
+    "task_id": {
+      "ref": "931ad0ae-4cd8-8f6c-9cc5-b0f41a02d3d8"
+    }
+  },
+  "deleted": false,
+  "identity": "37d3771e-ab45-8511-9615-e8b0af621ed0",
+  "schemaVersion": 1
+}

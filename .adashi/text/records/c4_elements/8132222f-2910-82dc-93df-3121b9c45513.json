@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Rust/Tauri command surface that opens project databases, assembles dashboard snapshots, exposes revision polling, and hosts shared validation and persistence code reused by the MCP server.",
+    "element_type": "Container",
+    "external_id": "3",
+    "id": 3,
+    "name": "Tauri Desktop Runtime",
+    "parent_external_id": "2",
+    "tags": "Element,Container",
+    "technology": "Rust, Tauri, rusqlite",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "8132222f-2910-82dc-93df-3121b9c45513",
+  "schemaVersion": 1
+}

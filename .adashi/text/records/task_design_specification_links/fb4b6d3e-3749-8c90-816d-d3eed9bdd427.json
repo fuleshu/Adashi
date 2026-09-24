@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-07-08 15:38:07",
+    "design_external_id": "DependencyViewProjectionWorkflow",
+    "id": 19,
+    "sort_order": 1,
+    "target_type": "uml",
+    "task_id": {
+      "ref": "cb38a97b-bd88-81b9-9b70-567daa533ede"
+    }
+  },
+  "deleted": false,
+  "identity": "fb4b6d3e-3749-8c90-816d-d3eed9bdd427",
+  "schemaVersion": 1
+}

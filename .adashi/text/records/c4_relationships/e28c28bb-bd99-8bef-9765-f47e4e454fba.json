@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Displays attached typed UML artifacts through",
+    "destination_external_id": "renderer-mermaid",
+    "external_id": "37",
+    "id": 36,
+    "source_external_id": "ui-design-browser",
+    "tags": "Relationship",
+    "technology": "Mermaid source",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "e28c28bb-bd99-8bef-9765-f47e4e454fba",
+  "schemaVersion": 1
+}

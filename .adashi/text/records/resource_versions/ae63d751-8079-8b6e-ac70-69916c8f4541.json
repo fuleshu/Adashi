@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "storage-migration",
+    "resource_kind": "design.element",
+    "updated_at": "2026-09-24 15:16:35",
+    "version": 3
+  },
+  "deleted": false,
+  "identity": "ae63d751-8079-8b6e-ac70-69916c8f4541",
+  "schemaVersion": 1
+}

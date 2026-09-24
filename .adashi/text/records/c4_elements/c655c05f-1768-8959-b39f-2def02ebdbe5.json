@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Transactional validation and persistence boundary for formal C4 elements, relationships, Mermaid UML artifacts, code bindings, UI mockups, and AI-proposed mockup revisions. Implemented contract: an existing independently editable design document is updated or deleted using its stable document identity and the opaque readToken returned with the complete document; updates also supply the proposed content. Adashi computes the token as a hash of the canonical editable document, derives dependency checks internally, and atomically compares the token, validates syntax and current references, and commits. Agents do not construct guard readSet or writeSet parameters. A mismatch returns an MCP tool error with code out_of_date, stored false, the document identity, full currentDocument and its fresh readToken from one consistent snapshot, and an explicit request to merge the intended changes into currentDocument and retry with that token. No part of the attempted write is saved and the project cursor is unchanged. The agent must merge, not merely replace the token on its old payload; every retry is checked again. A successful write returns the new readToken. Creates require an absent identity and no previous token. Multi-document writes check all affected document tokens and commit all or nothing. Independent documents do not share a project-wide token. Idempotent retries, generated-artifact protection, semantic no-op handling, structural dependency checks, correct formal syntax, and mockup acceptance boundaries remain required. The MCP save request uses operationId, changeIntent, changes, and readTokens pairs of documentId/readToken for existing targets; set_element_descriptions uses operationId, readTokens, and updates. Missing existing-target tokens return read_required with the current document. Single conflicts expose documentId/currentDocument/readToken directly; multiple conflicts use a conflicts array without duplicating complete bodies. Saved request fingerprints reject operationId reuse with changed arguments.",
+    "element_type": "Component",
+    "external_id": "mcp-design-save",
+    "id": 28,
+    "name": "Transactional Design Save API",
+    "parent_external_id": "5",
+    "tags": "Element,Component",
+    "technology": "MCP tools, typed JSON Schema, SQL transaction, document read tokens",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "c655c05f-1768-8959-b39f-2def02ebdbe5",
+  "schemaVersion": 1
+}

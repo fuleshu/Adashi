@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-07-08 17:46:48",
+    "design_external_id": "RuleTemplateDomainModel",
+    "id": 26,
+    "sort_order": 4,
+    "target_type": "uml",
+    "task_id": {
+      "ref": "55d53130-3516-81bf-adeb-df5a4ff89f6f"
+    }
+  },
+  "deleted": false,
+  "identity": "f641c96e-6c4f-8dd5-8d10-bde99ae33fa3",
+  "schemaVersion": 1
+}

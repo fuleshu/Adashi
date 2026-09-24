@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Version-2 contract: docs/storage-text-format.md. UTF-8/LF sorted JSON per immutable UUID project record, preserved integer API aliases and independently allocated new aliases/numbers, UUID foreign-key references, exact multiline chunks, explicit ordering and deletion tombstones. Preserve authoritative schema-14 project domains and QA evidence. Application request history is excluded from Git: retry results, machine paths, intents and execution ownership remain in ignored checkout-local state shared by desktop/MCP. Reads, fresh no-op requests and retries leave tracked bytes and mtimes unchanged; fresh clones have no request history or cross-clone replay guarantee. Version-1 projects remain read-only byte-stable; the next successful content write upgrades the format and removes legacy request files with recoverable journal deletion, retaining local retry results. Conversions emit version 2 and preserve local retry results within the same checkout. Reuse domain validators through a disposable in-memory SQLite projection. SHA-256 resource fingerprints reject stale content despite equal branch counters. Shared local OS lock, before/after journal and atomic replacement protect cooperating clients and interrupted writes; unexpected external edits block recovery. No Git commands or automatic conflict resolution. Full structural/semantic validation rejects markers, invalid references, collisions, duplicate task/QA link positions and unsafe artifacts. O(project size) materialization; external Git writes must remain idle during publication; directory durability is platform dependent. Task 19 verifies real independent-clone Git scenarios and native WebView2/MCP pull, branch, conflict, no-op and migration flows. Native conflict reload preserves drafts without autosaving discarded edits. Evidence and practical limits: docs/storage-git-collaboration.md.",
+    "element_type": "Component",
+    "external_id": "storage-text",
+    "id": 162,
+    "name": "Git Text Storage Adapter",
+    "parent_external_id": "6",
+    "tags": "Element,Component,Storage",
+    "technology": "Rust; canonical JSON records; disposable in-memory relational projection",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "4731779d-6eb7-8551-8b80-bf5b821f423d",
+  "schemaVersion": 1
+}

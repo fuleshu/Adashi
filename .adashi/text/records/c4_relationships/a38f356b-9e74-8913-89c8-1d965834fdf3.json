@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Loads and saves global app settings in",
+    "destination_external_id": "9",
+    "external_id": "18",
+    "id": 17,
+    "source_external_id": "3",
+    "tags": "Relationship",
+    "technology": "JSON file",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "a38f356b-9e74-8913-89c8-1d965834fdf3",
+  "schemaVersion": 1
+}

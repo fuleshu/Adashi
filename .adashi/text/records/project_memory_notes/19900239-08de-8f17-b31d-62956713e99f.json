@@ -1,0 +1,18 @@
+{
+  "collection": "project_memory_notes",
+  "data": {
+    "body": "MCP capability tools publish ONE flat schema, so per-operation requirements exist only in the tool description and at call time. On 2026-09-14 an adashi_memory append was rejected for a missing runId although the arguments contained it, and identical arguments succeeded later: the failure is non-deterministic from the caller side and silently loses handover notes. Fixed in src-tauri/src/mcp.rs: append accepts a null or omitted runId and stores operationId as provenance; missing-field errors name the operation and the value to pass; plain domain reasons now travel in the top-level error message while typed conflict JSON keeps its data shape; adashi_memory and adashi_rules descriptions list each operation requirements; agents_template.md documents the append call. Three regression tests and 149 lib tests pass. Deploy: rebuild and restart the MCP server (installed Program Files copy or a running target/release build) and add the append paragraph to each rendered agents.md.",
+    "created_at": "2026-09-14 14:35:52",
+    "id": 8,
+    "note_id": "handover-mcp-required-field-errors-20260914",
+    "operation_id": "handover-mcp-required-field-errors-20260914-a",
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "run_id": "run.mcp-required-field-errors-20260914",
+    "task_id": null
+  },
+  "deleted": false,
+  "identity": "19900239-08de-8f17-b31d-62956713e99f",
+  "schemaVersion": 1
+}

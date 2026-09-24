@@ -1,0 +1,17 @@
+{
+  "collection": "design_bindings",
+  "data": {
+    "created_at": "2026-09-23 18:47:57",
+    "design_external_id": "storage-config",
+    "id": 131,
+    "target": "src/StorageSettings.css",
+    "target_type": "file",
+    "updated_at": "2026-09-23 18:47:57",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "ff082a15-a1cf-814b-87bd-6283bf504634",
+  "schemaVersion": 1
+}

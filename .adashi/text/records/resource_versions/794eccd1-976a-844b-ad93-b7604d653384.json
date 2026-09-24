@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "store-taskqa-dummy|file|src-tauri/src/tasks.rs",
+    "resource_kind": "design.binding",
+    "updated_at": "2026-07-31 15:51:44",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "794eccd1-976a-844b-ad93-b7604d653384",
+  "schemaVersion": 1
+}

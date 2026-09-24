@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Persists validated initial mockups and AI-proposed revisions without bypassing user acceptance in",
+    "destination_external_id": "store-ui-mockups",
+    "external_id": "rel-design-save-mockup-store",
+    "id": 87,
+    "source_external_id": "mcp-design-save",
+    "tags": "Relationship,Design Save,UI Mockup",
+    "technology": "SQL transaction",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "71f881e2-5b8a-84b8-869e-89f15e0d3135",
+  "schemaVersion": 1
+}

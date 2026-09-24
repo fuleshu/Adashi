@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "windows-installer-appdata-investigation-20260731",
+    "resource_kind": "memory.note",
+    "updated_at": "2026-09-23 17:24:14",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "1d7b98cb-87eb-8d3d-b9db-1a5337438c7a",
+  "schemaVersion": 1
+}

@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Uses formal C4 elements, relationships, UML artifact metadata, and current branch selection from",
+    "destination_external_id": "desktop-dashboard-api",
+    "external_id": "rel-dependency-view-dashboard-payload",
+    "id": 62,
+    "source_external_id": "ui-dependency-view",
+    "tags": "Relationship,Dependency View",
+    "technology": "Tauri IPC dashboard payload",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "09c99caa-79ba-8ad8-81ce-5f93270950e8",
+  "schemaVersion": 1
+}

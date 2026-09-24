@@ -1,0 +1,17 @@
+{
+  "collection": "design_bindings",
+  "data": {
+    "created_at": "2026-09-24 15:16:35",
+    "design_external_id": "storage-migration",
+    "id": 3781143974,
+    "target": "src-tauri/src/storage/migration/recovery_tests.rs",
+    "target_type": "file",
+    "updated_at": "2026-09-24 15:16:35",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "f172db5e-3c28-4eef-b5cf-dd26096ba0b0",
+  "schemaVersion": 1
+}

@@ -1,0 +1,23 @@
+{
+  "collection": "qa_jobs",
+  "data": {
+    "command": "cargo build --manifest-path src-tauri/Cargo.toml --bin adashi-mcp",
+    "created_at": "2026-07-08 11:40:42",
+    "created_by": "codex",
+    "description": "Builds the standalone stdio MCP server binary so client-owned MCP launches cannot drift behind library changes.",
+    "enabled": 1,
+    "id": 4,
+    "name": "MCP binary build",
+    "number": 4,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "shell": "powershell",
+    "timeout_seconds": 180,
+    "updated_at": "2026-07-08 11:40:42",
+    "working_directory": ""
+  },
+  "deleted": false,
+  "identity": "5a0110d7-932d-8620-b150-7b362bcb7ff6",
+  "schemaVersion": 1
+}

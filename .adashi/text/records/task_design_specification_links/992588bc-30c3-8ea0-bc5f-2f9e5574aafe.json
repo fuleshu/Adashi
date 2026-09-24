@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-07-08 15:38:07",
+    "design_external_id": "ui-dependency-view",
+    "id": 18,
+    "sort_order": 0,
+    "target_type": "element",
+    "task_id": {
+      "ref": "cb38a97b-bd88-81b9-9b70-567daa533ede"
+    }
+  },
+  "deleted": false,
+  "identity": "992588bc-30c3-8ea0-bc5f-2f9e5574aafe",
+  "schemaVersion": 1
+}

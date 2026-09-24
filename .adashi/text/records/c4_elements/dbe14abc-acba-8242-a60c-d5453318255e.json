@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Project memory has independent retention and startup budgets. Lifecycle startup supplies the complete protocol and at most 2,000 Unicode characters of current summary; oversized summaries are omitted whole with an explicit retrieval instruction, and historical notes are never injected. Explicit get_memory returns the summary/protocol and bounded retained history filtered by literal case-insensitive query, exact runId and taskId; includeSuperseded retrieves resolved notes with their summary version. Only an authorized coordinator replaces the canonical summary and atomically resolves exact reviewed supersededNoteIds under expectedVersion; concurrent appended notes remain active. New notes are complete important handovers of at most 1,000 characters; routine logs are excluded. Retention and replay semantics remain bounded and versioned.",
+    "element_type": "Component",
+    "external_id": "mcp-memory-api",
+    "id": 25,
+    "name": "Project Memory API",
+    "parent_external_id": "5",
+    "tags": "Element,Component",
+    "technology": "MCP tools, SQL, append-only notes, versioned compaction",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "dbe14abc-acba-8242-a60c-d5453318255e",
+  "schemaVersion": 1
+}

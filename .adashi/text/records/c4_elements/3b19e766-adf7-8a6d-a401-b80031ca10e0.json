@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "User-level JSON settings outside project databases for window geometry, known projects, and active project selection. Missing or empty settings are a recoverable onboarding state and must not create a synthetic default project. Backend choice belongs to the portable project descriptor, not a duplicate setting here. Local registrations, checkout paths, window state, templates and future connection profile/secret references remain user-specific. Successful reads must not rewrite this file; invalid input must not overwrite the user's project registrations.",
+    "element_type": "Container",
+    "external_id": "9",
+    "id": 16,
+    "name": "App Settings Store",
+    "parent_external_id": "2",
+    "tags": "Element,Container,Database",
+    "technology": "%LOCALAPPDATA%/Adashi/settings.json",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "3b19e766-adf7-8a6d-a401-b80031ca10e0",
+  "schemaVersion": 1
+}

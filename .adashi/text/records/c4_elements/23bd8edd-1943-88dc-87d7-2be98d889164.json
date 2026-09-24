@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Project-local coordination facts for asynchronous agents. Mutable domain records carry monotonically increasing resource versions, while auxiliary rows hold operation idempotency keys and expiring advisory resource intents. A successful transaction increments only touched resource versions and then the project change cursor. Intent ownership never grants write authority and never replaces version checks.",
+    "element_type": "Component",
+    "external_id": "store-resource-coordination",
+    "id": 125,
+    "name": "Resource Version and Intent Store",
+    "parent_external_id": "6",
+    "tags": "Element,Component,Store,Concurrency",
+    "technology": "SQLite per-row versions, idempotency records, expiring intent rows",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "23bd8edd-1943-88dc-87d7-2be98d889164",
+  "schemaVersion": 1
+}

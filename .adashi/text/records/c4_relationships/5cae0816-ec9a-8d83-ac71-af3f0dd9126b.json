@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "References multiple ordered C4 or UML design specification scopes per task in",
+    "destination_external_id": "store-design-workspace",
+    "external_id": "task-store-design-link",
+    "id": 48,
+    "source_external_id": "store-taskqa-dummy",
+    "tags": "Relationship,Design Specification Links",
+    "technology": "external design ids",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "5cae0816-ec9a-8d83-ac71-af3f0dd9126b",
+  "schemaVersion": 1
+}

@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "storage-text|file|src-tauri/src/storage/text/tests/upgrade.rs",
+    "resource_kind": "design.binding",
+    "updated_at": "2026-09-24 08:25:10",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "30076641-2fbd-8d18-9760-6ecfe7749c7d",
+  "schemaVersion": 1
+}

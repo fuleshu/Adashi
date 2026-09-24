@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Design Browser extension for first-class static UI mockup artifacts attached locally to user-facing C4 elements. It shows accepted, working, pending-agent, and proposed versions, renders before and after previews, lets the user request AI revision, and keeps accept or reject under user control. Mockups specify one screen, state, and viewport while Flow, Sequence, and State artifacts remain authoritative for behavior.",
+    "element_type": "Component",
+    "external_id": "ui-mockup-workspace",
+    "id": 71,
+    "name": "UI Mockup Workspace",
+    "parent_external_id": "4",
+    "tags": "Element,Component,UI Mockup,Design Browser",
+    "technology": "React, TypeScript, Tauri IPC",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "76b01ed4-aa91-8b50-b464-2209ca15ee5c",
+  "schemaVersion": 1
+}

@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "DesignBrowserNavigation",
+    "resource_kind": "design.uml",
+    "updated_at": "2026-07-31 15:51:44",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "634035a6-f6ab-839c-8fbd-9ad524d21235",
+  "schemaVersion": 1
+}

@@ -1,0 +1,58 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[\"agents.md\",\"docs/AGENTS.md\",\"docs/project-storage.md\",\"scripts/AGENTS.md\",\"src-tauri/Cargo.lock\",\"src-tauri/Cargo.toml\",\"src-tauri/src/AGENTS.md\",\"src-tauri/src/concurrency.rs\",\"src-tauri/src/design.rs\",\"src-tauri/src/design/AGENTS.md\",\"src-tauri/src/design/documents.rs\",\"src-tauri/src/design_health.rs\",\"src-tauri/src/fixed_hooks.rs\",\"src-tauri/src/grep.rs\",\"src-tauri/src/mcp.rs\",\"src-tauri/src/mcp/AGENTS.md\",\"src-tauri/src/memory.rs\",\"src-tauri/src/mockups.rs\",\"src-tauri/src/qa.rs\",\"src-tauri/src/rules.rs\",\"src-tauri/src/storage/AGENTS.md\",\"src-tauri/src/storage/conformance.rs\",\"src-tauri/src/storage/contract.rs\",\"src-tauri/src/storage/mod.rs\",\"src-tauri/src/storage/sqlite.rs\",\"src-tauri/src/tasks.rs\",\"src/AGENTS.md\"]",
+    "completed_at": "2026-09-23 14:03:31",
+    "completion_memo": {
+      "lines": [
+        "Implemented the complete backend-neutral storage API in the standalone adashi-storage-api crate. api.rs declares ProjectStorage for clients, StorageBackend for full adapters, StorageFactory lifecycle, StorageClient and all ReadSnapshot domain reads. changes.rs defines typed atomic writes/results across design, mockups, task lifecycle/ordered links, QA definitions/runs/evidence, memory/protocol/resolutions, optional rules/fixed prompts, computer mappings, legacy content and health waivers. Shared machinery prepares/fingerprints requests, checks versions/canonical document tokens/final references, distinguishes failures and resolves durable receipts. LocalDerivedCache separates regenerable health/preview data.\n",
+        "\n",
+        "Extracted and reexported existing domain models and pure task/rule/token validation, preserving current desktop/MCP JSON contracts. Renamed the old three-method ProjectStorage subset to RuleStorage so the transitional production ProjectStore does not claim to implement the full backend contract. Production SQLite adaptation and replacing its direct callers remain task 14.\n",
+        "\n",
+        "Added docs/storage-api-migration.md with the complete operation map, audited direct SQLite call owners, stateful validation/transaction obligations, background QA stages and task 14 checklist. Updated docs/project-storage.md, the formal storage-core specification/structure diagram, source bindings and task 14's saved handoff.\n",
+        "\n",
+        "Validation: standalone crate 10 contract tests passed using a scripted non-SQLite backend implementing every required read/backend method; it proves typed interface independence and shared protocol behavior, not production SQLite semantics for unmigrated domains. cargo tree confirms no SQLite/Tauri/MCP dependency. Clippy all targets with warnings denied passed. Existing application tests: 179 passed, 5 pre-existing manual tests ignored. Desktop and MCP binaries built; MCP also built with --no-default-features. Real MCP read-only regression: 42 calls preserved DB SHA-256, bytes, mtime and revision. git diff --check passed. Task 14 remains todo."
+      ]
+    },
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-09-23 13:26:43",
+    "created_files": "[\"docs/storage-api-migration.md\",\"src-tauri/storage-api/AGENTS.md\",\"src-tauri/storage-api/Cargo.lock\",\"src-tauri/storage-api/Cargo.toml\",\"src-tauri/storage-api/src/AGENTS.md\",\"src-tauri/storage-api/src/api.rs\",\"src-tauri/storage-api/src/cache.rs\",\"src-tauri/storage-api/src/changes.rs\",\"src-tauri/storage-api/src/coordination.rs\",\"src-tauri/storage-api/src/design.rs\",\"src-tauri/storage-api/src/documents.rs\",\"src-tauri/storage-api/src/error.rs\",\"src-tauri/storage-api/src/fixed_hooks.rs\",\"src-tauri/storage-api/src/health.rs\",\"src-tauri/storage-api/src/lib.rs\",\"src-tauri/storage-api/src/memory.rs\",\"src-tauri/storage-api/src/mockups.rs\",\"src-tauri/storage-api/src/qa.rs\",\"src-tauri/storage-api/src/rules.rs\",\"src-tauri/storage-api/src/search.rs\",\"src-tauri/storage-api/src/tasks.rs\",\"src-tauri/storage-api/src/validation.rs\",\"src-tauri/storage-api/tests/AGENTS.md\",\"src-tauri/storage-api/tests/contract.rs\",\"src-tauri/storage-api/tests/support/AGENTS.md\",\"src-tauri/storage-api/tests/support/mod.rs\"]",
+    "description": {
+      "lines": [
+        "Execution order: step 03 of 13, after Adashi task ID 13 and before Adashi task ID 14. This is a required prerequisite for adapting SQLite and migrating its callers.\n",
+        "\n",
+        "Goal: implement the complete backend-neutral storage API in Rust. Task 13 produced backend selection, a compatibility bridge and a small rules API; it did not provide the full interface the SQLite task needs.\n",
+        "\n",
+        "Scope:\n",
+        "- Inventory every production SQLite read/write in desktop, MCP, shared domain code, background QA and project initialization. Map each operation to an explicit typed API member; record any intentionally local or derived operation separately.\n",
+        "- Define and implement the actual interface declarations and shared request/result types for project identity/schema lifecycle, design/C4/UML/documents/bindings, mockup drafts/annotations/proposals, tasks and ordered links, QA jobs/runs/evidence, memory/protocol/notes, optional rules and fixed prompts, resource coordination/receipts/intents, search, snapshots and change notifications. Preserve legacy project content still used by the dashboard.\n",
+        "- Extend/refactor the existing ProjectStorage contract, using cohesive domain traits where useful. Define the backend implementation contract separately from the selecting ProjectStore facade, so SQLite, text and SQL adapters implement the same complete API.\n",
+        "- Define consistent snapshots across domains, atomic changes and reference checks, expectedVersion and canonical design readToken behavior, precise conflicts/current snapshots, idempotent operation receipts, lifecycle/resource ownership and error semantics. Shared DTOs and validation must not expose SQL, rusqlite, database rows or backend connections.\n",
+        "- Extract backend-neutral model/validation types where needed. Retain current integer IDs and transport contracts until the explicit identity migration design.\n",
+        "- Prove the full contract can be implemented by a test double without SQLite and consumed using the data needed by both desktop and MCP. Add interface-level contract cases and compile-time coverage for all domain groups.\n",
+        "- Keep the existing application functional through its explicitly temporary bridge until task 14. Partial implementations must not claim to implement the full backend contract. Do not add production panic/todo/unimplemented defaults for missing operations; a partial rules interface may become a domain subtrait during the transition.\n",
+        "- Update the formal design, code bindings, docs/project-storage.md and the operation-to-interface migration checklist handed to task 14.\n",
+        "\n",
+        "Acceptance:\n",
+        "1. A complete, compiled backend-neutral API exists in source, not just prose or a rules-only proof.\n",
+        "2. Every current persistence use case is mapped to an API member, and all persistent domains have typed contracts.\n",
+        "3. A non-SQLite test implementation verifies that the contract has no SQLite dependency.\n",
+        "4. Task 14 receives a defined interface to implement and a caller-migration checklist; it is no longer responsible for inventing or completing the interface.\n",
+        "\n",
+        "Boundary: this task creates the complete interface and shared contract machinery. Task 14 implements SQLite against it and replaces production direct-SQL callers. Text and server SQL adapters remain later phases."
+      ]
+    },
+    "id": 24,
+    "number": 21,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "finished",
+    "title": "Storage 03/13 — Implement the complete backend-neutral storage API",
+    "updated_at": "2026-09-23 14:03:31"
+  },
+  "deleted": false,
+  "identity": "16ccd26c-a101-883a-9a4b-c863b61d4d0d",
+  "schemaVersion": 1
+}

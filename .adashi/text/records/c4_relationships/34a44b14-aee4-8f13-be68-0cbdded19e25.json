@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Reads resource versions and precise conflict state for incremental UI refresh from",
+    "destination_external_id": "store-resource-coordination",
+    "external_id": "rel-dashboard-api-resource-coordination",
+    "id": 116,
+    "source_external_id": "desktop-dashboard-api",
+    "tags": "Relationship,Concurrency,UI",
+    "technology": "SQL",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "34a44b14-aee4-8f13-be68-0cbdded19e25",
+  "schemaVersion": 1
+}

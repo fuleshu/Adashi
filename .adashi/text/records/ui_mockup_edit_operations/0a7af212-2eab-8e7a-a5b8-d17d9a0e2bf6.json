@@ -1,0 +1,17 @@
+{
+  "collection": "ui_mockup_edit_operations",
+  "data": {
+    "created_at": "2026-07-20 14:54:37",
+    "id": 3783,
+    "kind": "move",
+    "mockup_id": {
+      "ref": "33c00bed-edfb-8dbb-babe-937a3cdc2f6b"
+    },
+    "payload_json": "{\"targetIds\":[\"task-eight-item\"],\"dx\":2.381501503461692,\"dy\":3.9691289966924046}",
+    "sequence": 0,
+    "target_element_id": "task-eight-item"
+  },
+  "deleted": false,
+  "identity": "0a7af212-2eab-8e7a-a5b8-d17d9a0e2bf6",
+  "schemaVersion": 1
+}

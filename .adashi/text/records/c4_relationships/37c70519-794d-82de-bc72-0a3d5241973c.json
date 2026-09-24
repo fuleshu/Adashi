@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Resolves local registration and future credential profiles without changing shared identity",
+    "destination_external_id": "9",
+    "external_id": "storage-local-profile",
+    "id": 135,
+    "source_external_id": "storage-core",
+    "tags": "",
+    "technology": "Shared typed Rust API",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "37c70519-794d-82de-bc72-0a3d5241973c",
+  "schemaVersion": 1
+}

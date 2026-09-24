@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "mcp-memory-api|symbol|adashi_update_memory",
+    "resource_kind": "design.binding",
+    "updated_at": "2026-07-31 15:51:44",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "45e9652e-c937-8463-81f8-aa25907bd8e6",
+  "schemaVersion": 1
+}

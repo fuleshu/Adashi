@@ -1,0 +1,17 @@
+{
+  "collection": "design_bindings",
+  "data": {
+    "created_at": "2026-09-23 10:38:23",
+    "design_external_id": "storage-core",
+    "id": 71,
+    "target": "scripts/check_storage_core.py",
+    "target_type": "file",
+    "updated_at": "2026-09-23 10:38:23",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "c1cf3e74-ec38-8746-a27c-3da8b297f6c4",
+  "schemaVersion": 1
+}

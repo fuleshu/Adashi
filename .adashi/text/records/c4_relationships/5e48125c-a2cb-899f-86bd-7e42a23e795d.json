@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Updates semantic C4 rows and regenerated Structurizr source in",
+    "destination_external_id": "store-design-workspace",
+    "external_id": "25",
+    "id": 24,
+    "source_external_id": "desktop-direct-design-edit",
+    "tags": "Relationship",
+    "technology": "SQL, JSON, DSL",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "5e48125c-a2cb-899f-86bd-7e42a23e795d",
+  "schemaVersion": 1
+}

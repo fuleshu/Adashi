@@ -1,0 +1,16 @@
+{
+  "collection": "qa_job_design_links",
+  "data": {
+    "created_at": "2026-07-08 11:40:46",
+    "design_external_id": "QAMCPSequence",
+    "id": 8,
+    "qa_job_id": {
+      "ref": "32f3a09e-b3ea-8673-a802-33701dd4b4d3"
+    },
+    "sort_order": 2,
+    "target_type": "uml"
+  },
+  "deleted": false,
+  "identity": "8b917da2-ea60-874a-a9d1-c5773f1e89ca",
+  "schemaVersion": 1
+}

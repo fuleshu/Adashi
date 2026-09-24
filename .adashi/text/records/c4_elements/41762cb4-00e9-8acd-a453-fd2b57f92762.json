@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Coding agent that reads Adashi memory, rules, tasks, QA, and formal design context through MCP.",
+    "element_type": "Person",
+    "external_id": "1",
+    "id": 1,
+    "name": "Codex",
+    "parent_external_id": null,
+    "tags": "Element,Person",
+    "technology": "",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "41762cb4-00e9-8acd-a453-fd2b57f92762",
+  "schemaVersion": 1
+}

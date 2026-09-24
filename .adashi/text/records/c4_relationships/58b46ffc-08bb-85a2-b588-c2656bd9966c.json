@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Edits the fixed design hook prompt settings through",
+    "destination_external_id": "desktop-dashboard-api",
+    "external_id": "settings-edits-fixed-hook-prompts",
+    "id": 43,
+    "source_external_id": "ui-settings",
+    "tags": "Relationship,Design Decision",
+    "technology": "Tauri IPC",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "58b46ffc-08bb-85a2-b588-c2656bd9966c",
+  "schemaVersion": 1
+}

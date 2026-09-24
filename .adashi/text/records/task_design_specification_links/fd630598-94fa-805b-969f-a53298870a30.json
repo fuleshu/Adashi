@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-07-08 15:38:07",
+    "design_external_id": "renderer-structurizr",
+    "id": 21,
+    "sort_order": 3,
+    "target_type": "element",
+    "task_id": {
+      "ref": "cb38a97b-bd88-81b9-9b70-567daa533ede"
+    }
+  },
+  "deleted": false,
+  "identity": "fd630598-94fa-805b-969f-a53298870a30",
+  "schemaVersion": 1
+}

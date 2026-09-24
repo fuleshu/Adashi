@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Reads pending status, accepted and working SVG, manifests, edit logs, annotations, and proposal metadata from",
+    "destination_external_id": "store-ui-mockups",
+    "external_id": "rel-mcp-mockup-store",
+    "id": 85,
+    "source_external_id": "mcp-mockup-api",
+    "tags": "Relationship,MCP,UI Mockup",
+    "technology": "SQLite access",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "fbebf940-0f12-8d70-a9b0-7d8df42292e9",
+  "schemaVersion": 1
+}

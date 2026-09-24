@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "MCPLiveUpdateDecision|symbol|ProjectRevision",
+    "resource_kind": "design.binding",
+    "updated_at": "2026-07-31 15:51:44",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "6376fe2b-cba6-8564-ab4a-930087b47c15",
+  "schemaVersion": 1
+}

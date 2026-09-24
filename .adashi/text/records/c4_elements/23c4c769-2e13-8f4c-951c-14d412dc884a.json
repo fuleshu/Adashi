@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Optional portable .adashi/storage.json, schemaVersion 1, closed backend enum sqlite/text/serverSql; serverSql uses connectionProfile and namespace. Missing descriptor means legacy SQLite. Optional generation UUID identifies a verified activation, scopes newly issued cursors and invalidates old handles. Missing data for an activated selection fails without seeding. Invalid/future/unavailable selections fail before initialization with no fallback; reads never materialize defaults. Project Settings uses the migration service to preview, verify and safely activate a selection shared by desktop and MCP; app settings contain registrations, not another backend choice.",
+    "element_type": "Component",
+    "external_id": "storage-config",
+    "id": 160,
+    "name": "Project Storage Descriptor",
+    "parent_external_id": "6",
+    "tags": "Element,Component,Storage",
+    "technology": "Rust storage contract",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "23c4c769-2e13-8f4c-951c-14d412dc884a",
+  "schemaVersion": 1
+}

@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Adds fixed memory protocol and current project memory context to run.start injections from",
+    "destination_external_id": "store-memory",
+    "external_id": "31",
+    "id": 30,
+    "source_external_id": "mcp-lifecycle-rules",
+    "tags": "Relationship,Generated Hook Context",
+    "technology": "SQL",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "24fee2b8-c164-8c88-a326-618717568c03",
+  "schemaVersion": 1
+}

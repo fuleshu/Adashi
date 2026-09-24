@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "ui-design-browser",
+    "resource_kind": "design.element",
+    "updated_at": "2026-07-31 15:51:44",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "cf1fe427-5d89-8fc1-b988-d6f3ce311228",
+  "schemaVersion": 1
+}

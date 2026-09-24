@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Project list, active project switching, project add/remove controls, and two fixed design hook prompt editors for design authoring and implementation guidance.",
+    "element_type": "Component",
+    "external_id": "ui-settings",
+    "id": 22,
+    "name": "Project Settings View",
+    "parent_external_id": "4",
+    "tags": "Element,Component",
+    "technology": "React, Tauri IPC",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "602e7f3c-8d42-82d2-9cc4-af9cecdc3164",
+  "schemaVersion": 1
+}

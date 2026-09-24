@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Creates, edits, deletes, filters, and runs QA jobs through",
+    "destination_external_id": "desktop-qa-runtime",
+    "external_id": "rel-ui-qa-runtime",
+    "id": 54,
+    "source_external_id": "ui-qa-workspace",
+    "tags": "QA",
+    "technology": "Tauri commands",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "43bf10a3-0ef6-880f-aa0a-cde666e82b3e",
+  "schemaVersion": 1
+}

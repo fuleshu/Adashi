@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-07-31 08:49:31",
+    "design_external_id": "mcp-memory-api",
+    "id": 75,
+    "sort_order": 13,
+    "target_type": "element",
+    "task_id": {
+      "ref": "206a48e3-659b-8deb-9d82-216db4fd2ff1"
+    }
+  },
+  "deleted": false,
+  "identity": "dabea9fd-cf4c-81d5-935b-861560fedef0",
+  "schemaVersion": 1
+}

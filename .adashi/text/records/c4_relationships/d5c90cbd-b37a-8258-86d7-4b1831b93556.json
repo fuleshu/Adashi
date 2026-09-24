@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Reads Settings-managed fixed hook prompt bodies for design authoring and implementation guidance from",
+    "destination_external_id": "store-fixed-hook-prompts",
+    "external_id": "lifecycle-fixed-hook-prompts-store",
+    "id": 42,
+    "source_external_id": "mcp-lifecycle-rules",
+    "tags": "Relationship,Generated Hook Context,Design Decision",
+    "technology": "SQL",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "d5c90cbd-b37a-8258-86d7-4b1831b93556",
+  "schemaVersion": 1
+}

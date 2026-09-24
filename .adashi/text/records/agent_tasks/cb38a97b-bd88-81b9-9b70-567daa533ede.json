@@ -1,0 +1,38 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[\"src/main.tsx\",\"src/styles.css\"]",
+    "completed_at": "2026-07-08 16:02:39",
+    "completion_memo": "Implemented Dependency View mode for the Design Browser. Added a Branch/Dependency segmented control for C4 views, deterministic branch-neighborhood projection from C4 elements and relationships, incoming/core/outgoing layout roles, capped relationship inclusion for dense branches, generated dependency projection source details, and Structurizr view-level relationship records so arrows and labels render reliably. Preserved existing branch C4 and UML artifact behavior. Verified with cargo fmt, cargo check --manifest-path src-tauri\\Cargo.toml, cargo test --manifest-path src-tauri\\Cargo.toml, npm run build outside the sandbox after the known esbuild EPERM, git diff --check, and a local Structurizr smoke render of the Adashi MCP branch showing external store/runtime dependencies and relationship labels.",
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-07-08 15:38:07",
+    "created_files": "[]",
+    "description": {
+      "lines": [
+        "Implement the relation-aware Dependency View mode from the formal design.\n",
+        "\n",
+        "Acceptance criteria:\n",
+        "- Add a Design Browser view mode/control for switching from the current branch C4 projection to Dependency View.\n",
+        "- Build a deterministic branch-neighborhood projection from formal C4 elements and relationships: selected branch children plus immediate incoming/outgoing dependency endpoints outside the branch.\n",
+        "- Keep the formal C4/UML model as source of truth; do not introduce freehand diagram edits or AI-invented layout state.\n",
+        "- Rank/layer nodes by containment and dependency direction so the diagram is readable and stable.\n",
+        "- Show key relationship labels and technology/protocol text while keeping full detail available through the inspector/source panels.\n",
+        "- Limit or group low-priority/noisy edges so dense branches do not collapse into unreadable spaghetti.\n",
+        "- Preserve existing branch-scoped browser behavior and typed UML artifact tabs.\n",
+        "- Verify with Rust checks/tests where relevant, frontend build, and a visual/manual check of a branch with real relationships such as the MCP server or Design Browser branch."
+      ]
+    },
+    "id": 5,
+    "number": 3,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "closed",
+    "title": "Implement Dependency View mode for Design Browser",
+    "updated_at": "2026-07-08 17:40:22"
+  },
+  "deleted": false,
+  "identity": "cb38a97b-bd88-81b9-9b70-567daa533ede",
+  "schemaVersion": 1
+}

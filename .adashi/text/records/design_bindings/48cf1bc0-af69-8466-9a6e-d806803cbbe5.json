@@ -1,0 +1,17 @@
+{
+  "collection": "design_bindings",
+  "data": {
+    "created_at": "2026-09-23 16:52:20",
+    "design_external_id": "storage-core",
+    "id": 104,
+    "target": "scripts/check_native_storage.mjs",
+    "target_type": "file",
+    "updated_at": "2026-09-23 16:52:20",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "48cf1bc0-af69-8466-9a6e-d806803cbbe5",
+  "schemaVersion": 1
+}

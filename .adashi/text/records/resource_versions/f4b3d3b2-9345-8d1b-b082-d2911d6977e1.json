@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "QAMCPSequence",
+    "resource_kind": "design.uml",
+    "updated_at": "2026-07-31 15:51:44",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "f4b3d3b2-9345-8d1b-b082-d2911d6977e1",
+  "schemaVersion": 1
+}

@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Lists saved rule templates, saves the currently edited rule as a reusable template, creates project rules from a selected template, and deletes templates from application settings.",
+    "destination_external_id": "store-rule-templates",
+    "external_id": "ui-memory-rules-uses-rule-templates",
+    "id": 64,
+    "source_external_id": "ui-memory-rules",
+    "tags": "",
+    "technology": "Tauri invoke / dashboard payload",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "a58820d0-1792-898d-a9c0-1ea29408d429",
+  "schemaVersion": 1
+}

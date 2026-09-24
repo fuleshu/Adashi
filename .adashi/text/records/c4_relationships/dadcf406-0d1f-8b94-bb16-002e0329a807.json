@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Manipulates the same layered and grouped SVG scene displayed by",
+    "destination_external_id": "renderer-mockup-svg",
+    "external_id": "rel-mockup-editor-renderer",
+    "id": 77,
+    "source_external_id": "ui-mockup-editor",
+    "tags": "Relationship,UI Mockup",
+    "technology": "SVG DOM and pointer events",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "dadcf406-0d1f-8b94-bb16-002e0329a807",
+  "schemaVersion": 1
+}

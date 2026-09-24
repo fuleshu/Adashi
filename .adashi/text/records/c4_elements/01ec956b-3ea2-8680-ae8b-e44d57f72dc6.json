@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Blocking first-run and recovery surface shown when settings are missing, no projects are configured, the active project id is absent, or no configured project can be opened. It reuses the project creation semantics from Settings, supports direct Windows path entry plus folder browsing, and only lets the user enter the main workspace after project creation succeeds; Cancel closes the app.",
+    "element_type": "Component",
+    "external_id": "ui-first-project-onboarding",
+    "id": 67,
+    "name": "First Project Onboarding View",
+    "parent_external_id": "4",
+    "tags": "Element,Component,Onboarding",
+    "technology": "React, TypeScript, Tauri IPC",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "01ec956b-3ea2-8680-ae8b-e44d57f72dc6",
+  "schemaVersion": 1
+}

@@ -1,0 +1,17 @@
+{
+  "collection": "design_bindings",
+  "data": {
+    "created_at": "2026-09-16 19:12:51",
+    "design_external_id": "mcp-lifecycle-rules",
+    "id": 65,
+    "target": "agents_template.md",
+    "target_type": "file",
+    "updated_at": "2026-09-16 19:12:51",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "e885521b-dcdf-8be9-a7b1-c30b711bef5b",
+  "schemaVersion": 1
+}

@@ -1,0 +1,41 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[]",
+    "completed_at": "2026-09-23 17:36:39",
+    "completion_memo": "Specified canonical per-record JSON format v1, UUID identities with preserved integer API aliases, multiline content, ordering/tombstones, complete data classification, content-based guards and external-change notifications, immutable receipts/evidence, checkout-local coordination and prepared-journal recovery. Documented independent-add/edit, overlapping-edit, delete-reference and equal-counter/different-content merge examples, plus migration/activation obligations and filesystem/concurrency limitations. Formal storage-text component and file binding updated through design read tokens. Reviewed against schema-14 inventory and full shared StorageBackend/ReadSnapshot interface. Task 17 may now implement this specification.",
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-09-23 10:00:04",
+    "created_files": "[\"docs/storage-text-format.md\"]",
+    "description": {
+      "lines": [
+        "Execution order: step 06 of 13. Depends on Adashi task ID 15. Complete this prerequisite before starting.\n",
+        "\n",
+        "Phase: Git-friendly text storage design.\n",
+        "\n",
+        "Specify a project-local text representation; JSON is a candidate, not a preselected requirement:\n",
+        "- Prefer deterministic files organized by stable resource identity instead of a single frequently rewritten project document. Define field ordering, encoding/newlines, schema versions and canonical serialization; unchanged data must not be rewritten.\n",
+        "- Define collision-resistant IDs for resources created independently in different clones. Distinguish immutable identity from human task/QA numbers; specify compatibility and migration for current integer API IDs and cross-resource references.\n",
+        "- Specify representations for multiline Mermaid/DSL/SVG and other artifact content, explicit list ordering, deletions/tombstones where needed, and immutable QA/history evidence.\n",
+        "- Classify authoritative shared data, derived indexes/previews, local settings, secrets and transient state. Do not make users merge disposable caches, local absolute paths, or a global incrementing counter on every edit.\n",
+        "- Define content-based change/conflict detection across branches; equal numeric versions from different branches must not imply equal content. Handle operation receipts and expired advisory intents without false coordination across clones.\n",
+        "- Define structural and semantic validation after a Git merge, including delete-versus-reference conflicts and unresolved conflict markers. Define crash recovery and atomic multi-file publication.\n",
+        "- Update the formal storage design with the selected format, examples and limitations.\n",
+        "\n",
+        "Acceptance: examples show independent additions and edits merging normally, while genuine overlapping edits and invalid references are detected without silent loss. Both clients can implement the same contract from this specification."
+      ]
+    },
+    "id": 16,
+    "number": 13,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "finished",
+    "title": "Storage 06/13 — Design a Git-mergeable text format and portable resource identities",
+    "updated_at": "2026-09-23 17:36:39"
+  },
+  "deleted": false,
+  "identity": "c197bedf-41ca-8b68-9015-4d9c6ccebe1c",
+  "schemaVersion": 1
+}

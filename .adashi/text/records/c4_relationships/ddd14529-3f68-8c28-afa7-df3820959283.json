@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Bumps the notification-only project change cursor after successful MCP commits through",
+    "destination_external_id": "8",
+    "external_id": "15",
+    "id": 6,
+    "source_external_id": "5",
+    "tags": "Relationship,Design Decision",
+    "technology": "SQL",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "ddd14529-3f68-8c28-afa7-df3820959283",
+  "schemaVersion": 1
+}

@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Creates the default project memory row and editable memory protocol in",
+    "destination_external_id": "store-memory",
+    "external_id": "rel-project-runtime-memory-seed",
+    "id": 71,
+    "source_external_id": "desktop-project-runtime",
+    "tags": "Relationship,Seed",
+    "technology": "SQL migration/seed transaction",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "9a1dccfb-ae23-8754-b571-ad9b6fce78a2",
+  "schemaVersion": 1
+}

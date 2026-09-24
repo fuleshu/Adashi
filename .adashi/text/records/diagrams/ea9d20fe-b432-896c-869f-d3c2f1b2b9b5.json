@@ -1,0 +1,33 @@
+{
+  "collection": "diagrams",
+  "data": {
+    "attached_to_external_id": "ui-memory-rules",
+    "created_at": "2026-07-08 17:46:20",
+    "diagram_type": "flow",
+    "id": 25,
+    "key": "RuleTemplateWorkflow",
+    "kind": "mermaid",
+    "sort_order": 17,
+    "source": {
+      "lines": [
+        "flowchart TD\n",
+        "    EditRule[Edit project rule] --> SaveTemplate[Save rule as template]\n",
+        "    SaveTemplate --> SettingsStore[Persist template in app settings]\n",
+        "    SettingsStore --> ProjectSwitch[Switch project]\n",
+        "    ProjectSwitch --> SelectTemplate[Select saved template]\n",
+        "    SelectTemplate --> CreateRule[Create new project rule from template]\n",
+        "    CreateRule --> StoreRule[Persist copied rule in project DB]\n",
+        "    SettingsStore --> DeleteTemplate[Delete template]\n",
+        "    DeleteTemplate --> SettingsStore"
+      ]
+    },
+    "title": "Rule Template Workflow",
+    "updated_at": "2026-07-08 17:46:20",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "ea9d20fe-b432-896c-869f-d3c2f1b2b9b5",
+  "schemaVersion": 1
+}

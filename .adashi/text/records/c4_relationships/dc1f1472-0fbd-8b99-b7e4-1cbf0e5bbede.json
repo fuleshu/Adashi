@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Switches selected design branches into the relation-aware dependency presentation mode through",
+    "destination_external_id": "ui-dependency-view",
+    "external_id": "rel-design-browser-dependency-view",
+    "id": 61,
+    "source_external_id": "ui-design-browser",
+    "tags": "Relationship,Dependency View",
+    "technology": "React view state",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "dc1f1472-0fbd-8b99-b7e4-1cbf0e5bbede",
+  "schemaVersion": 1
+}

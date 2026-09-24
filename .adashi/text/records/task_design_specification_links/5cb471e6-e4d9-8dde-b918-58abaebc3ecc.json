@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-07-09 08:35:37",
+    "design_external_id": "store-fixed-hook-prompts",
+    "id": 35,
+    "sort_order": 7,
+    "target_type": "element",
+    "task_id": {
+      "ref": "931ad0ae-4cd8-8f6c-9cc5-b0f41a02d3d8"
+    }
+  },
+  "deleted": false,
+  "identity": "5cb471e6-e4d9-8dde-b918-58abaebc3ecc",
+  "schemaVersion": 1
+}

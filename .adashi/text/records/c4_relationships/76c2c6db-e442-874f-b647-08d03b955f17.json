@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Delegates atomic document read-token checks and out_of_date responses with current documents and merge instructions to",
+    "destination_external_id": "mcp-concurrency-api",
+    "external_id": "rel-design-save-concurrency-api",
+    "id": 110,
+    "source_external_id": "mcp-design-save",
+    "tags": "Relationship,Concurrency,Design Decision",
+    "technology": "shared Rust contract",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "76c2c6db-e442-874f-b647-08d03b955f17",
+  "schemaVersion": 1
+}

@@ -1,0 +1,37 @@
+{
+  "collection": "diagrams",
+  "data": {
+    "attached_to_external_id": "desktop-qa-runtime",
+    "created_at": "2026-07-08 10:31:44",
+    "diagram_type": "flow",
+    "id": 19,
+    "key": "QARunWorkflow",
+    "kind": "mermaid",
+    "sort_order": 11,
+    "source": {
+      "lines": [
+        "flowchart TD\n",
+        "    A[User or Codex requests QA run] --> B[Resolve job ids or query filters]\n",
+        "    B --> C[Create qa_runs execution group]\n",
+        "    C --> D[For each enabled matching QA job]\n",
+        "    D --> E[Snapshot command and metadata]\n",
+        "    E --> F[Execute command with timeout]\n",
+        "    F --> G[Capture output and exit code]\n",
+        "    G --> H[Store qa_job_runs evidence]\n",
+        "    H --> I{More jobs?}\n",
+        "    I -->|yes| D\n",
+        "    I -->|no| J[Summarize qa_runs result]\n",
+        "    J --> K[Bump project revision]\n",
+        "    K --> L[Dashboard and MCP read derived states]"
+      ]
+    },
+    "title": "QA Query Run Workflow",
+    "updated_at": "2026-07-08 10:31:44",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "cb62102f-e64c-87c4-8028-86f89b66abc7",
+  "schemaVersion": 1
+}

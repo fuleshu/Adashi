@@ -1,0 +1,17 @@
+{
+  "collection": "design_bindings",
+  "data": {
+    "created_at": "2026-07-07 09:35:11",
+    "design_external_id": "6",
+    "id": 25,
+    "target": "src-tauri/src/schema.rs",
+    "target_type": "file",
+    "updated_at": "2026-07-07 09:35:11",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "06576bef-95ab-8289-9a15-7d34370c94e1",
+  "schemaVersion": 1
+}

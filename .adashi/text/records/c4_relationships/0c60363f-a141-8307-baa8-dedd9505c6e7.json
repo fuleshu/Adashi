@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Attaches mockup artifact ids to explicit C4 elements or relationships and exposes them to design, task, and QA links through",
+    "destination_external_id": "store-design-workspace",
+    "external_id": "rel-mockup-store-design-workspace",
+    "id": 88,
+    "source_external_id": "store-ui-mockups",
+    "tags": "Relationship,Design Specification Links,UI Mockup",
+    "technology": "Design external ids",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "0c60363f-a141-8307-baa8-dedd9505c6e7",
+  "schemaVersion": 1
+}

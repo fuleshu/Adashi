@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Activates validated destinations with writer coordination",
+    "destination_external_id": "storage-config",
+    "external_id": "storage-migration-config",
+    "id": 134,
+    "source_external_id": "storage-migration",
+    "tags": "",
+    "technology": "Shared typed Rust API",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "fd729265-f00b-8ccc-af07-d23bf2efc516",
+  "schemaVersion": 1
+}

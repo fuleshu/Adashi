@@ -1,0 +1,23 @@
+{
+  "collection": "qa_jobs",
+  "data": {
+    "command": "cargo build --manifest-path src-tauri/Cargo.toml --bin adashi-mcp; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; $exe = Join-Path (Get-Location) 'src-tauri\\target\\debug\\adashi-mcp.exe'; $psi = [System.Diagnostics.ProcessStartInfo]::new($exe); $psi.WorkingDirectory = (Get-Location).Path; $psi.UseShellExecute = $false; $psi.RedirectStandardInput = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true; $p = [System.Diagnostics.Process]::Start($psi); $p.StandardInput.AutoFlush = $true; $p.StandardInput.WriteLine('{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"adashi-qa\",\"version\":\"1\"}}}'); Start-Sleep -Seconds 2; if (!$p.HasExited) { $p.Kill() }; $out = $p.StandardOutput.ReadToEnd(); $err = $p.StandardError.ReadToEnd(); if ($out -notmatch 'protocolVersion' -or $out -notmatch '\"tools\"') { Write-Output $out; Write-Error (\"MCP initialize smoke failed. stderr: \" + $err); exit 1 }; Write-Output 'MCP stdio initialize smoke passed';",
+    "created_at": "2026-07-08 11:40:46",
+    "created_by": "codex",
+    "description": "Builds the debug MCP binary, starts it over stdio, sends an MCP initialize request, and asserts that the server returns protocol and tool capability metadata.",
+    "enabled": 1,
+    "id": 5,
+    "name": "MCP stdio initialize smoke",
+    "number": 5,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "shell": "powershell",
+    "timeout_seconds": 90,
+    "updated_at": "2026-07-08 11:40:46",
+    "working_directory": ""
+  },
+  "deleted": false,
+  "identity": "32f3a09e-b3ea-8673-a802-33701dd4b4d3",
+  "schemaVersion": 1
+}

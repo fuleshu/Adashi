@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Validates authoritative project selection before opening storage",
+    "destination_external_id": "storage-config",
+    "external_id": "storage-core-config",
+    "id": 128,
+    "source_external_id": "storage-core",
+    "tags": "",
+    "technology": "Shared typed Rust API",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "aaee95e2-3fbe-8dcf-9b7a-f02e1424cfbd",
+  "schemaVersion": 1
+}

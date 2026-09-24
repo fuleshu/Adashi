@@ -1,0 +1,26 @@
+{
+  "collection": "qa_job_runs",
+  "data": {
+    "command_snapshot": "{\"command\":\"cargo build --manifest-path src-tauri/Cargo.toml --bin adashi-mcp\",\"designSpecificationLinks\":[{\"designExternalId\":\"5\",\"id\":4,\"qaJobId\":4,\"sortOrder\":0,\"targetType\":\"element\",\"title\":\"Adashi MCP Server\"},{\"designExternalId\":\"mcp-qa-api\",\"id\":5,\"qaJobId\":4,\"sortOrder\":1,\"targetType\":\"element\",\"title\":\"QA MCP API\"}],\"enabled\":true,\"name\":\"MCP binary build\",\"shell\":\"powershell\",\"tags\":[\"binary\",\"mcp\",\"rust\"],\"taskLinks\":[],\"timeoutSeconds\":180,\"workingDirectory\":\"\"}",
+    "duration_ms": 616,
+    "exit_code": 0,
+    "finished_at": "2026-07-08 11:41:01",
+    "id": 6,
+    "output": {
+      "lines": [
+        "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.36s\n"
+      ]
+    },
+    "qa_job_id": {
+      "ref": "5a0110d7-932d-8620-b150-7b362bcb7ff6"
+    },
+    "qa_run_id": {
+      "ref": "8e0c60f0-bf58-8874-b7a2-f4734856d104"
+    },
+    "started_at": "2026-07-08 11:41:01",
+    "status": "passed"
+  },
+  "deleted": false,
+  "identity": "0349c4ab-ee19-87ff-a83b-030fd3dd5ca2",
+  "schemaVersion": 1
+}

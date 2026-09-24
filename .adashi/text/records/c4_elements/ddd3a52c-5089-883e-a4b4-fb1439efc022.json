@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Dashboard UI bridge that forwards selected or double-clicked Structurizr element and relationship ids from the iframe viewer back to React.",
+    "element_type": "Component",
+    "external_id": "renderer-selection-bridge",
+    "id": 37,
+    "name": "Renderer Selection Bridge",
+    "parent_external_id": "4",
+    "tags": "Element,Component,Renderer",
+    "technology": "Browser postMessage",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "ddd3a52c-5089-883e-a4b4-fb1439efc022",
+  "schemaVersion": 1
+}

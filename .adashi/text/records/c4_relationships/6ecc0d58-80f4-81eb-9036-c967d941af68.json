@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Migrates and seeds formal design workspace data in",
+    "destination_external_id": "store-design-workspace",
+    "external_id": "21",
+    "id": 20,
+    "source_external_id": "desktop-project-runtime",
+    "tags": "Relationship",
+    "technology": "SQL",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "6ecc0d58-80f4-81eb-9036-c967d941af68",
+  "schemaVersion": 1
+}

@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Uses shared validation and deterministic PNG rendering for revision context through",
+    "destination_external_id": "desktop-mockup-runtime",
+    "external_id": "rel-mcp-mockup-runtime",
+    "id": 84,
+    "source_external_id": "mcp-mockup-api",
+    "tags": "Relationship,MCP,UI Mockup",
+    "technology": "Shared Rust domain path",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "f13a3f7b-abd1-850e-8b69-a724608d08ee",
+  "schemaVersion": 1
+}

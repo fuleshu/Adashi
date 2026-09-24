@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Reuses the same project creation validation and folder input behavior as",
+    "destination_external_id": "ui-settings",
+    "external_id": "rel-first-project-onboarding-settings",
+    "id": 69,
+    "source_external_id": "ui-first-project-onboarding",
+    "tags": "Relationship,Onboarding",
+    "technology": "Shared React form semantics",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "c066074b-9d24-86cc-8137-53ec2ef3c1e8",
+  "schemaVersion": 1
+}

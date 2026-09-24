@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Enabled and disabled optional user rule prompts keyed by intent and lifecycle hook. Each mutable rule carries its own resource version so different rules can be edited concurrently and overlapping edits fail instead of silently replacing one another. Fixed product hook prompts remain separate and must not appear in the Rules list.",
+    "element_type": "Component",
+    "external_id": "store-rules",
+    "id": 33,
+    "name": "Lifecycle Rules Store",
+    "parent_external_id": "6",
+    "tags": "Element,Component",
+    "technology": "rules, per-rule version",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "61c9df8c-32fd-843b-8517-d9b59f2f0d92",
+  "schemaVersion": 1
+}

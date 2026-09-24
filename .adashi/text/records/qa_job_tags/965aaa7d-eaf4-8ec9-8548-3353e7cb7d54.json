@@ -1,0 +1,13 @@
+{
+  "collection": "qa_job_tags",
+  "data": {
+    "created_at": "2026-07-08 11:40:46",
+    "qa_job_id": {
+      "ref": "32f3a09e-b3ea-8673-a802-33701dd4b4d3"
+    },
+    "tag": "stdio"
+  },
+  "deleted": false,
+  "identity": "965aaa7d-eaf4-8ec9-8548-3353e7cb7d54",
+  "schemaVersion": 1
+}

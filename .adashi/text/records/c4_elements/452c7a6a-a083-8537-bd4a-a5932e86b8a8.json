@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Deterministic MCP tools for Codex to list, create, update, delete, query, and run QA jobs. Reads expose QA job versions; definition updates and deletes require the targeted job version, while immutable run evidence appends under unique run identities. Disjoint QA jobs and evidence appends may proceed concurrently. Supports filters by state, tag, task link, and design specification link.",
+    "element_type": "Component",
+    "external_id": "mcp-qa-api",
+    "id": 60,
+    "name": "QA MCP API",
+    "parent_external_id": "5",
+    "tags": "MCP,QA",
+    "technology": "MCP stdio, Rust, per-job optimistic concurrency",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "452c7a6a-a083-8537-bd4a-a5932e86b8a8",
+  "schemaVersion": 1
+}

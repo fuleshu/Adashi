@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "probe-body-check",
+    "resource_kind": "memory.note",
+    "updated_at": "2026-09-23 17:24:14",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "17861ac4-606c-8bc6-af77-f4c0ffc86a83",
+  "schemaVersion": 1
+}

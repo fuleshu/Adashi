@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Validates, persists, versions, and reads accepted, working, annotated, and proposed mockup state in",
+    "destination_external_id": "store-ui-mockups",
+    "external_id": "rel-mockup-runtime-store",
+    "id": 81,
+    "source_external_id": "desktop-mockup-runtime",
+    "tags": "Relationship,UI Mockup",
+    "technology": "SQLite transactions",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "b415a2b2-133d-87ce-a47d-cc7f5b5ae939",
+  "schemaVersion": 1
+}

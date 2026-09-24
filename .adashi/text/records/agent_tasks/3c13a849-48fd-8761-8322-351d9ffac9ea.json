@@ -1,0 +1,40 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[\"src-tauri/Cargo.toml\",\"src-tauri/Cargo.lock\",\"src-tauri/src/storage/mod.rs\",\"src-tauri/src/storage/config.rs\",\"src-tauri/src/storage/sqlite.rs\",\"src-tauri/src/storage/sqlite/design.rs\",\"src-tauri/src/storage/sqlite/snapshot.rs\",\"src-tauri/src/storage/sqlite/references.rs\",\"src-tauri/src/storage/sqlite/tasks.rs\",\"src-tauri/src/storage/sqlite/qa.rs\",\"src-tauri/src/storage/sqlite/memory.rs\",\"src-tauri/src/qa_runner.rs\",\"src-tauri/src/desktop.rs\",\"src-tauri/src/mcp.rs\",\"src/main.tsx\",\"scripts/check_native_storage.mjs\",\"scripts/check_storage_parity.py\",\"scripts/check_storage_core.py\",\"docs/storage-text-format.md\"]",
+    "completed_at": "2026-09-23 18:14:04",
+    "completion_memo": "Implemented the task-16 format through the shared factory: canonical UUID records/foreign references, deterministic encoding and tombstones; disposable in-memory SQL projection covering all authoritative schema-14 domains; content-derived guarded writes, original-fingerprint receipts, cross-process file locking and prepared before/after journal recovery; local-only machine mappings/intents/QA ownership, portable receipt barriers; strict schema/merge/reference/SVG/model checks and external inventory invalidation. Desktop now compares full opaque cursors (native testing found numeric ordering skipped branch changes); QA uses returned guards, and retained history uses timestamps. Required completeness audit tightened local-change cursors, malformed draft/QA evidence checks, alias/tombstone collisions, and uncertain outcomes after journal preparation. Validation: 193 application tests pass (5 existing ignored), 8 focused text cases pass, frontend/native/MCP builds pass, two independent MCP processes pass concurrent writes and exactly-once QA replay, resolver/read-stability checks pass, and all 6 native Tauri/WebView2 text scenarios pass. Final evidence: target/native-storage/1fbc5e87-de98-46a3-ad5d-68911b59df3d/evidence.json and target/storage-parity/9136a17e-c609-4cef-a586-c2a64e5a8a0d/prepare-evidence.json. Contract, reproducible checks and filesystem/Git concurrency limitations are documented in docs/storage-text-format.md and docs/storage-text-validation.md. Task 18 can now add verified conversion and project settings.",
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-09-23 10:00:04",
+    "created_files": "[\"src-tauri/src/storage/text/mod.rs\",\"src-tauri/src/storage/text/codec.rs\",\"src-tauri/src/storage/text/engine.rs\",\"src-tauri/src/storage/text/records.rs\",\"src-tauri/src/storage/text/guards.rs\",\"src-tauri/src/storage/text/journal.rs\",\"src-tauri/src/storage/text/local.rs\",\"src-tauri/src/storage/text/validation.rs\",\"src-tauri/src/storage/text/tests.rs\",\"docs/storage-text-validation.md\"]",
+    "description": {
+      "lines": [
+        "Execution order: step 07 of 13. Depends on Adashi task ID 16. Complete this prerequisite before starting.\n",
+        "\n",
+        "Phase: Git-friendly text storage implementation.\n",
+        "\n",
+        "Implement the format and identity decisions from task 16 through the shared adapter:\n",
+        "- Support all authoritative project domains and their relationships, with stable IDs and deterministic, narrowly scoped file updates.\n",
+        "- Implement guarded writes, consistent reads, local cross-process coordination, idempotent operations, atomic multi-file change publication and recovery from interruption.\n",
+        "- Rebuild optional local indexes/caches from canonical files; they must never become a second source of truth.\n",
+        "- Detect external edits, Git checkout/pull/merge and branch changes; invalidate stale snapshots and notify desktop/MCP through the shared change mechanism. Preserve unsaved desktop edits and return actionable conflicts.\n",
+        "- Reject malformed data, unsupported schema versions, unresolved Git markers and semantic conflicts before allowing dependent writes.\n",
+        "- Keep the normal Git workflow under user control; the adapter reads/writes project files without automatically committing, pushing or resolving conflicting edits.\n",
+        "\n",
+        "Acceptance: both desktop and MCP can read and mutate a text-backed project with the same domain behavior as SQLite. Independent edits touch only relevant canonical files, no-op reads leave the working tree clean, and interruption/conflict tests show no partial visible mutation or silent overwrite."
+      ]
+    },
+    "id": 17,
+    "number": 14,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "finished",
+    "title": "Storage 07/13 — Implement the Git-friendly text storage adapter",
+    "updated_at": "2026-09-23 18:14:04"
+  },
+  "deleted": false,
+  "identity": "3c13a849-48fd-8761-8322-351d9ffac9ea",
+  "schemaVersion": 1
+}

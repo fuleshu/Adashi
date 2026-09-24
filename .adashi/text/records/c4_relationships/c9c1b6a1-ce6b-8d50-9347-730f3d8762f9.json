@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Protects QA definition mutations while permitting independent evidence appends through",
+    "destination_external_id": "mcp-concurrency-api",
+    "external_id": "rel-qa-api-concurrency-api",
+    "id": 112,
+    "source_external_id": "mcp-qa-api",
+    "tags": "Relationship,Concurrency",
+    "technology": "shared Rust contract",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "c9c1b6a1-ce6b-8d50-9347-730f3d8762f9",
+  "schemaVersion": 1
+}

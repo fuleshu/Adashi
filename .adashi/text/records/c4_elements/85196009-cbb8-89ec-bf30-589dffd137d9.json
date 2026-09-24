@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Dashboard workspace for browsing, filtering, editing, deleting, and running project-local QA jobs. Shows job state, design/task links, tags, run actions such as run visible/red/stale/linked jobs, and an integrated console for live and historical QA output.",
+    "element_type": "Component",
+    "external_id": "ui-qa-workspace",
+    "id": 58,
+    "name": "QA Workspace View",
+    "parent_external_id": "4",
+    "tags": "UI,QA,Tasks",
+    "technology": "React, Tauri commands",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "85196009-cbb8-89ec-bf30-589dffd137d9",
+  "schemaVersion": 1
+}

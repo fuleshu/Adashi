@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Creates mockups, requests AI revision, loads comparisons, accepts or rejects proposals, discards drafts, and deletes mockups through",
+    "destination_external_id": "desktop-mockup-runtime",
+    "external_id": "rel-mockup-workspace-runtime",
+    "id": 79,
+    "source_external_id": "ui-mockup-workspace",
+    "tags": "Relationship,UI Mockup",
+    "technology": "Tauri IPC",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "fee00b0f-c256-8694-97cd-470c199043ff",
+  "schemaVersion": 1
+}

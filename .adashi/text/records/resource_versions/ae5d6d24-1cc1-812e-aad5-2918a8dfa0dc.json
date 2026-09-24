@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "desktop-architecture-projection",
+    "resource_kind": "design.element",
+    "updated_at": "2026-09-11 17:42:12",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "ae5d6d24-1cc1-812e-aad5-2918a8dfa0dc",
+  "schemaVersion": 1
+}

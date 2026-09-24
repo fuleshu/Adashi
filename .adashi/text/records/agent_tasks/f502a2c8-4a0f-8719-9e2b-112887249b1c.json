@@ -1,0 +1,41 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[]",
+    "completed_at": null,
+    "completion_memo": "",
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-09-23 10:00:04",
+    "created_files": "[]",
+    "description": {
+      "lines": [
+        "Execution order: step 10 of 13. Depends on Adashi task ID 19. Complete this prerequisite before starting.\n",
+        "\n",
+        "Phase: shared server SQL design, after the SQLite and Git-friendly phases.\n",
+        "\n",
+        "Select and document the initial supported server SQL engine and deployment/access model before implementation:\n",
+        "- Preserve one logical store and backend selection per project; define project isolation even when a server hosts several projects.\n",
+        "- Decide connection ownership, connection pooling, network timeouts, cancellation, schema migration ownership and supported client/schema compatibility.\n",
+        "- Define user identity, authentication, project permissions and attribution. Do not confuse a computer ID or local alias with an authenticated user; enforce authorization at the selected trusted boundary.\n",
+        "- Define secure connection/secret references, TLS verification, credential rotation and safe logs. Shareable project metadata must not contain passwords or tokens.\n",
+        "- Map the common adapter contract to SQL transactions, resource-version/readToken checks, operation receipts, reference integrity and external-change detection.\n",
+        "- Specify concurrent edits, deletion conflicts, disconnects, ambiguous commit outcomes and retries. Reconnection must not duplicate committed mutations or create a divergent local fallback.\n",
+        "- Specify backup/restore and upgrades, and the location/trust policy for executing shared QA definitions; sharing a database must not implicitly execute another user's commands.\n",
+        "\n",
+        "Acceptance: formal architecture and sequence diagrams settle the engine, trust boundary, project/user model, failure semantics and migration strategy while preserving the shared desktop/MCP adapter. Record remaining product choices explicitly."
+      ]
+    },
+    "id": 20,
+    "number": 17,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "todo",
+    "title": "Storage 10/13 — Design shared server SQL storage and multi-user access",
+    "updated_at": "2026-09-23 13:27:33"
+  },
+  "deleted": false,
+  "identity": "f502a2c8-4a0f-8719-9e2b-112887249b1c",
+  "schemaVersion": 1
+}

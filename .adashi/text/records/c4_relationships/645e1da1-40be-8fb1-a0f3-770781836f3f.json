@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Protects overlapping task mutations with target task versions through",
+    "destination_external_id": "mcp-concurrency-api",
+    "external_id": "rel-task-api-concurrency-api",
+    "id": 111,
+    "source_external_id": "mcp-task-api",
+    "tags": "Relationship,Concurrency",
+    "technology": "shared Rust contract",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "645e1da1-40be-8fb1-a0f3-770781836f3f",
+  "schemaVersion": 1
+}

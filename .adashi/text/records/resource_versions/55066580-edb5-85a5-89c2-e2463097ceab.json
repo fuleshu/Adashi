@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "rel-mockup-editor-renderer",
+    "resource_kind": "design.relationship",
+    "updated_at": "2026-07-31 15:51:44",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "55066580-edb5-85a5-89c2-e2463097ceab",
+  "schemaVersion": 1
+}

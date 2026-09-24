@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Implements every StorageFactory, StorageBackend and ReadSnapshot operation over the existing project SQLite file. Owns all production SQL, row mapping, schema/seeding and computer registration in storage/sqlite/. WAL read transactions pin consistent views while atomic immediate write transactions apply validation, resource/readToken guards, changes, versions, receipts and one revision. Schema 14 preserves IDs/history/drafts/legacy receipts and seeds previously unversioned resources. Initialized registered reads are write-free. Desktop and MCP use the shared selecting ProjectStore without Connection access; QA shell execution and local caches stay outside the backend.",
+    "element_type": "Component",
+    "external_id": "storage-sqlite",
+    "id": 161,
+    "name": "SQLite Storage Adapter",
+    "parent_external_id": "6",
+    "tags": "Element,Component,Storage",
+    "technology": "Rust storage contract",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "ed6ba2f4-839e-8fba-8a53-e5ec17a8911e",
+  "schemaVersion": 1
+}

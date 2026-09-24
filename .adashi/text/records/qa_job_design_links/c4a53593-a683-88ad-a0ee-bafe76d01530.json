@@ -1,0 +1,16 @@
+{
+  "collection": "qa_job_design_links",
+  "data": {
+    "created_at": "2026-07-08 11:40:42",
+    "design_external_id": "mcp-qa-api",
+    "id": 5,
+    "qa_job_id": {
+      "ref": "5a0110d7-932d-8620-b150-7b362bcb7ff6"
+    },
+    "sort_order": 1,
+    "target_type": "element"
+  },
+  "deleted": false,
+  "identity": "c4a53593-a683-88ad-a0ee-bafe76d01530",
+  "schemaVersion": 1
+}

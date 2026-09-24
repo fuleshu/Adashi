@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "settings-edits-fixed-hook-prompts",
+    "resource_kind": "design.relationship",
+    "updated_at": "2026-07-31 15:51:44",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "e50d5877-53c8-8d0d-86d3-48e227719588",
+  "schemaVersion": 1
+}

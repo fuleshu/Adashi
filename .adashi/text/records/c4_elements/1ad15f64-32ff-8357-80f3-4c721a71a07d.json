@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Human developer, architect, or product owner who reviews formal design in the Adashi dashboard, manages operational project context such as tasks and QA, and gives design intent to the coding agent for MCP-backed authoring.",
+    "element_type": "Person",
+    "external_id": "actor-developer",
+    "id": 83,
+    "name": "Developer",
+    "parent_external_id": null,
+    "tags": "Element,Person,Actor",
+    "technology": "",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "1ad15f64-32ff-8357-80f3-4c721a71a07d",
+  "schemaVersion": 1
+}

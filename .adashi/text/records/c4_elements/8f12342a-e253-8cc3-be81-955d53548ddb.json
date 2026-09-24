@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Dashboard surfaces for editing the separately versioned SQL-backed shared memory summary and memory protocol, displaying retained important handover notes newest first, and managing optional user lifecycle rules. Note-only memory is visible even when the shared summary is empty. Memory shows optional-write guidance and server-provided retention limits, and external note writes refresh without remounting unchanged summary or protocol editors. Fixed design hook prompts are excluded from the Rules list and edited in Settings.",
+    "element_type": "Component",
+    "external_id": "ui-memory-rules",
+    "id": 21,
+    "name": "Memory and Rules Views",
+    "parent_external_id": "4",
+    "tags": "Element,Component",
+    "technology": "React, EasyMDE, Tauri IPC",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "8f12342a-e253-8cc3-be81-955d53548ddb",
+  "schemaVersion": 1
+}

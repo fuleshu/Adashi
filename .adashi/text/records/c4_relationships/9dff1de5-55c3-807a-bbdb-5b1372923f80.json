@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Jumps from any task design specification link to the selected design browser scope in",
+    "destination_external_id": "ui-design-browser",
+    "external_id": "task-view-design-browser",
+    "id": 47,
+    "source_external_id": "ui-taskqa-placeholder",
+    "tags": "Relationship,Design Specification Links",
+    "technology": "React navigation state",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "9dff1de5-55c3-807a-bbdb-5b1372923f80",
+  "schemaVersion": 1
+}

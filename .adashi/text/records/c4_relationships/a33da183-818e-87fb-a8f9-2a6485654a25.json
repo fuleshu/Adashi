@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Bumps the notification-only project change cursor after a successful committed mutation through",
+    "destination_external_id": "8",
+    "external_id": "rel-concurrency-api-project-cursor",
+    "id": 115,
+    "source_external_id": "mcp-concurrency-api",
+    "tags": "Relationship,Concurrency,Design Decision",
+    "technology": "SQL",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "a33da183-818e-87fb-a8f9-2a6485654a25",
+  "schemaVersion": 1
+}

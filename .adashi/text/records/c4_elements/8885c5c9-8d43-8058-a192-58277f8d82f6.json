@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Displays sanitized layered SVG mockups using the artifact viewport and project fonts. Preserves stable data-adashi-id, data-role, and data-label metadata for groups and elements, keeps the red annotation layer visually separate, and presents accepted, working, and proposed versions without treating derived raster previews as source of truth.",
+    "element_type": "Component",
+    "external_id": "renderer-mockup-svg",
+    "id": 73,
+    "name": "Mockup SVG Renderer",
+    "parent_external_id": "4",
+    "tags": "Element,Component,Renderer,UI Mockup",
+    "technology": "React, SVG DOM",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "8885c5c9-8d43-8058-a192-58277f8d82f6",
+  "schemaVersion": 1
+}

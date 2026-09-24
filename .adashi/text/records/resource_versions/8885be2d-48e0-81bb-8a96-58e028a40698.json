@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "mcp-portable-unsigned-schema-20260801",
+    "resource_kind": "memory.note",
+    "updated_at": "2026-09-23 17:24:14",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "8885be2d-48e0-81bb-8a96-58e028a40698",
+  "schemaVersion": 1
+}

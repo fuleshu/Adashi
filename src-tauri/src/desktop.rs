@@ -359,27 +359,6 @@ fn load_rule_templates(state: &AppState) -> Result<Vec<RuleTemplate>, String> {
         .map_err(|_| "Settings lock was poisoned".to_string())
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProjectRevisionPayload {
-    project_id: String,
-    revision: i64,
-    change_cursor: crate::storage::ChangeCursor,
-    updated_at: String,
-}
-
-#[tauri::command]
-fn get_project_revision(
-    project_id: Option<String>,
-    state: State<'_, AppState>,
-) -> Result<ProjectRevisionPayload, String> {
-    let project=resolve_project(&state,project_id.as_deref())?;
-    let mut store=open_project_store(&project).map_err(|e|e.to_string())?;
-    let snapshot=store.snapshot().map_err(|e|e.to_string())?;
-    let metadata=snapshot.metadata();
-    Ok(ProjectRevisionPayload {project_id:project.id,revision:metadata.revision,change_cursor:metadata.cursor.clone(),updated_at:metadata.updated_at.clone()})
-}
-
 #[tauri::command]
 fn close_app(app: AppHandle) -> Result<(), String> {
     app.exit(0);
@@ -1126,7 +1105,7 @@ pub fn run() {
             get_app_settings,
             get_dashboard,
             get_mockup,
-            get_project_revision,
+            storage_commands::get_project_revision,
             pick_project_folder,
             set_active_project,
             set_architecture_file_name,

@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Project-local Settings-managed optional project-specific instructions for design/run.start and implementation/run.start. Empty defaults add no generic Adashi manual to startup. Known historical built-in prompts are retired through idempotent versioned migration while custom project text remains intact.",
+    "element_type": "Component",
+    "external_id": "store-fixed-hook-prompts",
+    "id": 48,
+    "name": "Fixed Hook Prompt Settings Store",
+    "parent_external_id": "6",
+    "tags": "Element,Component,Design Decision",
+    "technology": "fixed_hook_prompts",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "d3fc0ad9-2171-8cad-8c6e-ee280b5f9e95",
+  "schemaVersion": 1
+}

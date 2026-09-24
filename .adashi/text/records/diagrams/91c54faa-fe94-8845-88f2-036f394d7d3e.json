@@ -1,0 +1,21 @@
+{
+  "collection": "diagrams",
+  "data": {
+    "attached_to_external_id": null,
+    "created_at": "2026-07-06 09:23:14",
+    "diagram_type": "",
+    "id": 1,
+    "key": "AdashiContainers",
+    "kind": "structurizr",
+    "sort_order": 1,
+    "source": "",
+    "title": "Adashi container view",
+    "updated_at": "2026-07-06 09:23:14",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "91c54faa-fe94-8845-88f2-036f394d7d3e",
+  "schemaVersion": 1
+}

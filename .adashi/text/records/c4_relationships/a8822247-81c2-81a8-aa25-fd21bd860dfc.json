@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Reviews rendered formal design and manages project context through",
+    "destination_external_id": "4",
+    "external_id": "rel-developer-dashboard",
+    "id": 89,
+    "source_external_id": "actor-developer",
+    "tags": "Relationship",
+    "technology": "Desktop UI",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "a8822247-81c2-81a8-aa25-fd21bd860dfc",
+  "schemaVersion": 1
+}

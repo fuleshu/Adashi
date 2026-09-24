@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-07-09 08:35:37",
+    "design_external_id": "ui-first-project-onboarding",
+    "id": 28,
+    "sort_order": 0,
+    "target_type": "element",
+    "task_id": {
+      "ref": "931ad0ae-4cd8-8f6c-9cc5-b0f41a02d3d8"
+    }
+  },
+  "deleted": false,
+  "identity": "6753bc10-c308-8418-8e7b-be126895a857",
+  "schemaVersion": 1
+}

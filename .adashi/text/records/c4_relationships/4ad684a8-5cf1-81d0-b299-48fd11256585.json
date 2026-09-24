@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Persists with the rest of application settings so templates survive project switches and remain outside `.adashi` project databases.",
+    "destination_external_id": "9",
+    "external_id": "rule-templates-persist-app-settings",
+    "id": 67,
+    "source_external_id": "store-rule-templates",
+    "tags": "",
+    "technology": "settings.json",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "4ad684a8-5cf1-81d0-b299-48fd11256585",
+  "schemaVersion": 1
+}

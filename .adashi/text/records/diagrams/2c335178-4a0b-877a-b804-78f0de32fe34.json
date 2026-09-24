@@ -1,0 +1,59 @@
+{
+  "collection": "diagrams",
+  "data": {
+    "attached_to_external_id": "mcp-mockup-api",
+    "created_at": "2026-07-18 14:33:15",
+    "diagram_type": "sequence",
+    "id": 28,
+    "key": "UIMockupRevisionSequence",
+    "kind": "mermaid",
+    "sort_order": 20,
+    "source": {
+      "lines": [
+        "sequenceDiagram\n",
+        "    autonumber\n",
+        "    participant User\n",
+        "    participant UI as UI Mockup Workspace\n",
+        "    participant Runtime as UI Mockup Runtime\n",
+        "    participant Store as UI Mockup Store\n",
+        "    participant Codex\n",
+        "    participant API as UI Mockup Revision Context API\n",
+        "    participant Save as Transactional Design Save API\n",
+        "\n",
+        "    User->>UI: Edit layered SVG and draw annotations\n",
+        "    UI->>Runtime: Save working SVG, edit log, and vector annotation paths\n",
+        "    Runtime->>Store: Persist recoverable working draft\n",
+        "    User->>UI: Request AI revision\n",
+        "    UI->>Runtime: Mark draft pendingAgent\n",
+        "    Runtime->>Runtime: Render combined PNG from working SVG and annotations\n",
+        "    Codex->>API: list pending mockup revisions\n",
+        "    API->>Store: Read pending artifact metadata\n",
+        "    Codex->>API: get revision context\n",
+        "    API->>Runtime: Request deterministic preview\n",
+        "    API->>Store: Read accepted SVG, working SVG, manifest, edit log, and annotations\n",
+        "    API-->>Codex: Return structured context plus PNG image content\n",
+        "    Note over API,Codex: MCP exposes facts and does not interpret user intent\n",
+        "    Codex->>Codex: Interpret visual and structured changes against formal design\n",
+        "    Codex->>Save: Propose cleaned SVG and updated lightweight manifest with expected revision\n",
+        "    Save->>Store: Validate sanitization, stable ids, attachment, and base revision\n",
+        "    Store-->>UI: Project revision exposes proposed candidate\n",
+        "    User->>UI: Compare working and proposed versions\n",
+        "    alt user accepts\n",
+        "        UI->>Runtime: Accept proposal\n",
+        "        Runtime->>Store: Promote proposal to accepted SVG and clear draft evidence\n",
+        "    else user rejects\n",
+        "        UI->>Runtime: Reject proposal\n",
+        "        Runtime->>Store: Preserve working draft, edit log, and annotations\n",
+        "    end"
+      ]
+    },
+    "title": "User-edited mockup AI revision sequence",
+    "updated_at": "2026-07-18 14:33:15",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "2c335178-4a0b-877a-b804-78f0de32fe34",
+  "schemaVersion": 1
+}

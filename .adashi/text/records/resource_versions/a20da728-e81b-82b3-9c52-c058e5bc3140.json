@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "FormalDesignSave",
+    "resource_kind": "design.uml",
+    "updated_at": "2026-09-16 08:20:47",
+    "version": 3
+  },
+  "deleted": false,
+  "identity": "a20da728-e81b-82b3-9c52-c058e5bc3140",
+  "schemaVersion": 1
+}

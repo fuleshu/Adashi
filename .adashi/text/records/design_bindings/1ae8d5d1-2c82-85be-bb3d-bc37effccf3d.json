@@ -1,0 +1,17 @@
+{
+  "collection": "design_bindings",
+  "data": {
+    "created_at": "2026-09-24 07:57:52",
+    "design_external_id": "storage-text",
+    "id": 137,
+    "target": "scripts/git_collaboration/merges.py",
+    "target_type": "file",
+    "updated_at": "2026-09-24 07:57:52",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "1ae8d5d1-2c82-85be-bb3d-bc37effccf3d",
+  "schemaVersion": 1
+}

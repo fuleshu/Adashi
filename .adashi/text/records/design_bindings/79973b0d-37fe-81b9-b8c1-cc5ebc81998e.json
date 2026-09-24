@@ -1,0 +1,17 @@
+{
+  "collection": "design_bindings",
+  "data": {
+    "created_at": "2026-07-08 10:31:44",
+    "design_external_id": "mcp-qa-api",
+    "id": 47,
+    "target": "src-tauri/src/mcp.rs",
+    "target_type": "file",
+    "updated_at": "2026-07-08 10:31:44",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "79973b0d-37fe-81b9-b8c1-cc5ebc81998e",
+  "schemaVersion": 1
+}

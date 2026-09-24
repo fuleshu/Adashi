@@ -1,0 +1,39 @@
+{
+  "collection": "diagrams",
+  "data": {
+    "attached_to_external_id": "ui-taskqa-placeholder",
+    "created_at": "2026-07-07 17:38:45",
+    "diagram_type": "flow",
+    "id": 13,
+    "key": "TaskDashboardWorkflow",
+    "kind": "mermaid",
+    "sort_order": 8,
+    "source": {
+      "lines": [
+        "flowchart TD\n",
+        "    List[Task list] --> Filter{State filter}\n",
+        "    Filter --> OpenFinished[Default open plus finished]\n",
+        "    Filter --> AllStates[All states]\n",
+        "    List --> Detail[Task detail editor]\n",
+        "    Detail --> Create[Create task]\n",
+        "    Detail --> Delete[Delete task]\n",
+        "    Detail --> Links[Search add reorder and remove design links]\n",
+        "    Links --> Jump[Jump to clicked design browser scope]\n",
+        "    Detail --> Confirm{Finished task}\n",
+        "    Confirm --> ConfirmOnly[Confirm]\n",
+        "    Confirm --> ConfirmCommit[Optional confirm plus commit later]\n",
+        "    ConfirmOnly --> Confirmed[Confirmed state]\n",
+        "    ConfirmCommit --> Confirmed\n",
+        "    ConfirmCommit --> CommitId[Store commit id when successful]"
+      ]
+    },
+    "title": "Task dashboard workflow",
+    "updated_at": "2026-07-07 17:50:35",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "cb754094-4805-8800-b56e-779bc9d12cd7",
+  "schemaVersion": 1
+}

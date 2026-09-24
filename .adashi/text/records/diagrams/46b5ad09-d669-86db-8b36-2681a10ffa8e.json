@@ -1,0 +1,37 @@
+{
+  "collection": "diagrams",
+  "data": {
+    "attached_to_external_id": "ui-dependency-view",
+    "created_at": "2026-07-08 15:37:47",
+    "diagram_type": "flow",
+    "id": 23,
+    "key": "DependencyViewProjectionWorkflow",
+    "kind": "mermaid",
+    "sort_order": 15,
+    "source": {
+      "lines": [
+        "flowchart TD\n",
+        "    A[Selected C4 branch] --> B[Collect branch children]\n",
+        "    B --> C[Find immediate incoming and outgoing relationship endpoints]\n",
+        "    C --> D[Include external dependency neighbors]\n",
+        "    D --> E[Rank nodes by dependency direction and containment]\n",
+        "    E --> F[Prioritize key relationships and collapse noisy edges]\n",
+        "    F --> G[Emit deterministic Structurizr view coordinates]\n",
+        "    G --> H[Render readable Dependency View]\n",
+        "    H --> I[Inspector keeps full relationship and source detail]\n",
+        "\n",
+        "    C --> J{Endpoint outside selected branch?}\n",
+        "    J -->|Yes| D\n",
+        "    J -->|No| E"
+      ]
+    },
+    "title": "Dependency View projection workflow",
+    "updated_at": "2026-07-08 15:37:47",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "46b5ad09-d669-86db-8b36-2681a10ffa8e",
+  "schemaVersion": 1
+}

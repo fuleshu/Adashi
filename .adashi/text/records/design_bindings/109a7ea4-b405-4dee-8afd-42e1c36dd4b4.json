@@ -1,0 +1,17 @@
+{
+  "collection": "design_bindings",
+  "data": {
+    "created_at": "2026-09-24 15:16:35",
+    "design_external_id": "storage-migration",
+    "id": 3781143975,
+    "target": "scripts/check_native_conversion.mjs",
+    "target_type": "file",
+    "updated_at": "2026-09-24 15:16:35",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "109a7ea4-b405-4dee-8afd-42e1c36dd4b4",
+  "schemaVersion": 1
+}

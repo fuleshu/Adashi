@@ -1,0 +1,25 @@
+{
+  "collection": "project_memory",
+  "data": {
+    "created_at": "2026-07-06 17:13:32",
+    "memory_body": {
+      "lines": [
+        "Reviewed 2026-09-08. Current project constraints:\n",
+        "- Resource-scoped optimistic concurrency is implemented. Treat project_state.revision as a notification cursor; mutations use per-resource versions, atomic read/write guards and idempotent operation ids. Advisory intents do not grant write authority. Do not reintroduce silent last-write-wins.\n",
+        "- Compact MCP contract v2 is documented in docs/context-efficiency.md: apply injectionPrompt once at every required hook, use section metadata for caching, retrieve task details explicitly, and follow bounded summary pages with validated state filters and cursors.\n",
+        "- Startup supplies the full required protocol/guidance, a current summary within 2,000 characters and a bounded design index; historical handovers require explicit retrieval. Keep summaries current and notes important, complete and non-routine. Only an authorized coordinator replaces the versioned summary or resolves reviewed note ids; retain provenance within retention limits.\n",
+        "- Preserve narrow design tools, closed operation schemas, generated Structurizr protection, and the separation of UML artifacts from UI mockups. Publish portable nonnegative integer constraints for count schemas.\n",
+        "- The stdio MCP server has its own lifecycle, separate from the desktop UI. Rebuild and reconnect clients when changing its binary or schemas. NSIS is configured perMachine; user settings remain under LocalAppData/Adashi, separate from installed binaries.\n",
+        "- The three resolved handovers and former summary are historical evidence, not current task/build/process status. Consult source, linked formal design and current validation for later changes."
+      ]
+    },
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "protocol_rule": "",
+    "updated_at": "2026-09-16 19:12:51"
+  },
+  "deleted": false,
+  "identity": "d67587f3-6592-8275-bdc1-e8f5697177f2",
+  "schemaVersion": 1
+}

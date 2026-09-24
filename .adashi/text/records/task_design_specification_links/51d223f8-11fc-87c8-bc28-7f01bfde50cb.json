@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-07-31 08:49:30",
+    "design_external_id": "mcp-concurrency-api",
+    "id": 62,
+    "sort_order": 0,
+    "target_type": "element",
+    "task_id": {
+      "ref": "206a48e3-659b-8deb-9d82-216db4fd2ff1"
+    }
+  },
+  "deleted": false,
+  "identity": "51d223f8-11fc-87c8-bc28-7f01bfde50cb",
+  "schemaVersion": 1
+}

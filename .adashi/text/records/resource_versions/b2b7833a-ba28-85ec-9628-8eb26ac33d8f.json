@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "ui-qa-workspace",
+    "resource_kind": "design.element",
+    "updated_at": "2026-07-31 15:51:44",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "b2b7833a-ba28-85ec-9628-8eb26ac33d8f",
+  "schemaVersion": 1
+}

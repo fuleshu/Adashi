@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Lifecycle contract v2 returns one canonical injectionPrompt plus metadata-only rules and addressable sections with stable ids, resource versions, UTF-8 byte ranges and rendered-content versions. All four hooks remain mandatory. run.start supplies applicable project-specific rules and custom memory/fixed-hook instructions, a bounded current memory summary and, for design/implementation, a metadata-only design index. Generic Adashi workflow and API manuals belong in agents_template.md and on-demand operation help, never built-in startup prompts. Known historical built-in prompts are migrated to empty defaults without deleting custom project instructions. Empty rules do not suppress other sections; status=empty identifies an empty hook. Clients cache sections only while their content remains in active context.",
+    "element_type": "Component",
+    "external_id": "mcp-lifecycle-rules",
+    "id": 24,
+    "name": "Lifecycle Rule Injection API",
+    "parent_external_id": "5",
+    "tags": "Element,Component",
+    "technology": "MCP tool, SQL, generated design context",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "215b0402-a1e4-8924-9d23-15bb184be0d8",
+  "schemaVersion": 1
+}

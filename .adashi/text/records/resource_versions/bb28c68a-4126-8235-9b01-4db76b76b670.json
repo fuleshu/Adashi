@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "task-view-dashboard-api",
+    "resource_kind": "design.relationship",
+    "updated_at": "2026-07-31 15:51:44",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "bb28c68a-4126-8235-9b01-4db76b76b670",
+  "schemaVersion": 1
+}

@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-07-08 17:46:48",
+    "design_external_id": "ui-memory-rules",
+    "id": 23,
+    "sort_order": 1,
+    "target_type": "element",
+    "task_id": {
+      "ref": "55d53130-3516-81bf-adeb-df5a4ff89f6f"
+    }
+  },
+  "deleted": false,
+  "identity": "3d33a055-406b-834a-98db-57a472220c12",
+  "schemaVersion": 1
+}

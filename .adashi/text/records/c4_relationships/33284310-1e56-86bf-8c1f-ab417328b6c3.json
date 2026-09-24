@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Delegates project creation, database opening, migration, clean seeding, and invalid-project detection to",
+    "destination_external_id": "desktop-project-runtime",
+    "external_id": "rel-dashboard-api-project-runtime",
+    "id": 70,
+    "source_external_id": "desktop-dashboard-api",
+    "tags": "Relationship,Onboarding",
+    "technology": "Rust call boundary",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "33284310-1e56-86bf-8c1f-ab417328b6c3",
+  "schemaVersion": 1
+}

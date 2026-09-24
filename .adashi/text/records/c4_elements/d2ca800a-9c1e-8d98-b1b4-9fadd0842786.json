@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Resolves local project registrations and uses the same shared storage factory as MCP. Reads the portable .adashi/storage.json descriptor; missing selects legacy SQLite, malformed/future/unavailable configurations fail before store creation. Local registration aliases never replace canonical stored identity. Initialization/seeding/schema compatibility belongs to the selected adapter. Task 13 retains an explicit SQLite connection bridge for unmigrated callers; task 14 removes it.",
+    "element_type": "Component",
+    "external_id": "desktop-project-runtime",
+    "id": 17,
+    "name": "Project Runtime",
+    "parent_external_id": "3",
+    "tags": "Element,Component",
+    "technology": "Shared Rust project/storage core",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "d2ca800a-9c1e-8d98-b1b4-9fadd0842786",
+  "schemaVersion": 1
+}

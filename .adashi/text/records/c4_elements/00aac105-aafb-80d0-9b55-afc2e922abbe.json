@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Cross-cutting MCP mutation contract for safe parallel agents. Preconditions apply only to resources a mutation can overwrite, with atomic validation and no partial storage. Implemented design-document contract: Adashi issues a content-hash readToken with each complete editable document snapshot and owns the dependency and transaction bookkeeping. Agents return the token unchanged on updates and deletes rather than building explicit read/write sets. An out_of_date error includes stored false, document identity, full currentDocument, fresh readToken, and a direct instruction to merge intended edits into that document before retrying. The current document and token must describe the same snapshot; retries are checked again. Creates remain create-only with unique identities and commit-time referential validation. Unrelated document edits do not conflict through a global revision. Existing task, QA, memory, rule, and mockup resource-version contracts remain in scope until separately revised. Optional TTL intent markers are advisory scheduling signals only, and idempotency keys make safe retries deterministic.",
+    "element_type": "Component",
+    "external_id": "mcp-concurrency-api",
+    "id": 124,
+    "name": "Resource-Scoped Concurrency API",
+    "parent_external_id": "5",
+    "tags": "Element,Component,MCP,Concurrency",
+    "technology": "MCP tools, Rust, optimistic concurrency, typed conflict results",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "00aac105-aafb-80d0-9b55-afc2e922abbe",
+  "schemaVersion": 1
+}

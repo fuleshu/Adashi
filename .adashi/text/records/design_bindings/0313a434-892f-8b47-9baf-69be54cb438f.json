@@ -1,0 +1,17 @@
+{
+  "collection": "design_bindings",
+  "data": {
+    "created_at": "2026-07-07 09:35:11",
+    "design_external_id": "ui-settings",
+    "id": 11,
+    "target": "SettingsView",
+    "target_type": "symbol",
+    "updated_at": "2026-07-07 09:35:11",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "0313a434-892f-8b47-9baf-69be54cb438f",
+  "schemaVersion": 1
+}

@@ -1,0 +1,17 @@
+{
+  "collection": "design_bindings",
+  "data": {
+    "created_at": "2026-09-23 13:59:53",
+    "design_external_id": "storage-core",
+    "id": 90,
+    "target": "src-tauri/storage-api/src/qa.rs",
+    "target_type": "file",
+    "updated_at": "2026-09-23 13:59:53",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "7c2ce978-7946-8fce-a17a-84e4629f5b65",
+  "schemaVersion": 1
+}

@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Deterministic MCP tools for listing pending mockup revisions and retrieving accepted and working SVG facts, manifest metadata, edit operations, annotations, and rendered PNG evidence. Mutations condition only the target mockup's accepted and working revisions; edits to different mockups proceed independently, while two agents changing the same working state conflict precisely. Codex interprets user changes and submits proposals through the transactional design save boundary.",
+    "element_type": "Component",
+    "external_id": "mcp-mockup-api",
+    "id": 75,
+    "name": "UI Mockup Revision Context API",
+    "parent_external_id": "5",
+    "tags": "Element,Component,MCP,UI Mockup",
+    "technology": "MCP stdio, Rust, target-scoped mockup revisions",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "83f8eb9e-8063-8c90-8145-07e550ba0a2e",
+  "schemaVersion": 1
+}

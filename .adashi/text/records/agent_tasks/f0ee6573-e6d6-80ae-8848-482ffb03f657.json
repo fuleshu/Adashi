@@ -1,0 +1,42 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[]",
+    "completed_at": "2026-09-23 10:20:36",
+    "completion_memo": "Completed the backend-neutral project storage design in docs/project-storage.md and the formal Adashi model. Inventoried all persistence domains and local/derived/transient data; specified one versioned project descriptor, legacy SQLite default, typed snapshots/atomic guarded mutations, design readToken preservation, fingerprinted replay, opaque notification cursors, portable identity migration, secure profile boundaries and safe backend switching. Added six storage components, relationships and three validated Mermaid diagrams; linked tasks 13–23 to their precise specifications. Read back the saved core/diagrams. Task 13 explicitly delivers the shared factory, SQLite bridge and typed rules conformance slice; task 14 owns complete domain extraction. No alternate backend implementation was made during this design task.",
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-09-23 09:59:50",
+    "created_files": "[\"docs/project-storage.md\"]",
+    "description": {
+      "lines": [
+        "Execution order: step 01 of 13. First task in the storage roadmap.\n",
+        "\n",
+        "Phase: shared adapter foundation. First step of the ordered storage and multi-user roadmap.\n",
+        "\n",
+        "Goal: keep storage project-scoped while letting each project select SQLite, Git-friendly text files, or a shared server SQL database. The desktop app and MCP server must use the same adapter implementation and domain rules.\n",
+        "\n",
+        "Scope:\n",
+        "- Inventory all persisted domains and access paths: project identity, design/C4/UML/bindings, mockup accepted/draft/proposal state, tasks and links, QA definitions and evidence, memory, rules and fixed prompts, resource versions, idempotency receipts, intents, and revision notifications.\n",
+        "- Define typed backend-neutral operations, consistent snapshots, atomic multi-resource changes, validation/errors, migrations and schema versions. Do not expose rusqlite connections or SQL to consumers.\n",
+        "- Preserve atomic resource-version checks, design readTokens, operationId replay, reference integrity and the notification-only role of the project cursor.\n",
+        "- Define one project backend descriptor and its precedence, discovery, default-to-SQLite compatibility, and the split between shared project data and local paths, credentials, caches and transient coordination.\n",
+        "- Define portable project/resource identity and compatibility with existing integer task/QA IDs; finalize the offline identity strategy in task 16.\n",
+        "- Extend the existing formal Adashi design (Project Data Store, Project Runtime and settings boundaries), with storage, change-notification and migration diagrams. Add precise design links to subsequent tasks as their specifications become available.\n",
+        "\n",
+        "Acceptance: documented adapter and configuration contracts cover every current persistence domain, both clients, all three backend types, and the conformance-test matrix. No alternate backend is implemented in this design step."
+      ]
+    },
+    "id": 12,
+    "number": 9,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "closed",
+    "title": "Storage 01/13 — Design the shared project storage adapter and configuration contract",
+    "updated_at": "2026-09-23 17:31:57"
+  },
+  "deleted": false,
+  "identity": "f0ee6573-e6d6-80ae-8848-482ffb03f657",
+  "schemaVersion": 1
+}

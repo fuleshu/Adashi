@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Keeps one registry of exposed MCP tool names, rewrites stored rules and fixed-hook prompts that reference tools removed by a capability restructuring, and reports references it cannot map so instruction rot is visible instead of silent.",
+    "element_type": "Component",
+    "external_id": "desktop-prompt-hygiene",
+    "id": 142,
+    "name": "Prompt Hygiene",
+    "parent_external_id": "3",
+    "tags": "",
+    "technology": "",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "97cf4d72-c97b-82f0-a83f-2bce1f74aef8",
+  "schemaVersion": 1
+}

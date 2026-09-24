@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Hierarchy-first design browser with tree navigation, C4 level controls, breadcrumbs, local UML and UI mockup artifact tabs, source panels, inspector, and traceability navigation between linked artifacts.",
+    "element_type": "Component",
+    "external_id": "ui-design-browser",
+    "id": 20,
+    "name": "Design Browser",
+    "parent_external_id": "4",
+    "tags": "Element,Component",
+    "technology": "React, TypeScript",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "88d2d471-fe52-8b0f-9dc9-853cb4f9c31e",
+  "schemaVersion": 1
+}

@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Reads compact formal design summary, artifact types, and bindings to generate direct run.start context for design and implementation intents from",
+    "destination_external_id": "store-design-workspace",
+    "external_id": "lifecycle-generated-design-context-store",
+    "id": 41,
+    "source_external_id": "mcp-lifecycle-rules",
+    "tags": "Relationship,Generated Hook Context,Design Decision",
+    "technology": "SQL",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "23897f40-5b39-81cf-b7c7-f4953f7600e1",
+  "schemaVersion": 1
+}

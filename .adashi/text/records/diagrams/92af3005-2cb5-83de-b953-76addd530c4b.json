@@ -1,0 +1,37 @@
+{
+  "collection": "diagrams",
+  "data": {
+    "attached_to_external_id": "ui-qa-workspace",
+    "created_at": "2026-07-08 10:38:27",
+    "diagram_type": "flow",
+    "id": 22,
+    "key": "QAWorkspaceWorkflow",
+    "kind": "mermaid",
+    "sort_order": 14,
+    "source": {
+      "lines": [
+        "flowchart TD\n",
+        "    A[Open QA workspace] --> B[Load QA jobs with derived state]\n",
+        "    B --> C[Filter by state tag task or design link]\n",
+        "    C --> D{User action}\n",
+        "    D -->|Edit job| E[Update name description command metadata links tags or enabled flag]\n",
+        "    D -->|Delete job| F[Remove QA job definition after confirmation]\n",
+        "    D -->|Run selected or visible| G[Submit explicit ids or current query]\n",
+        "    G --> H[Show integrated console output]\n",
+        "    H --> I[Merge run summary and latest job states]\n",
+        "    D -->|Open history| J[Inspect qa_runs and qa_job_runs evidence]\n",
+        "    E --> B\n",
+        "    F --> B\n",
+        "    I --> B"
+      ]
+    },
+    "title": "QA Workspace Dashboard Workflow",
+    "updated_at": "2026-07-08 10:38:27",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "92af3005-2cb5-83de-b953-76addd530c4b",
+  "schemaVersion": 1
+}

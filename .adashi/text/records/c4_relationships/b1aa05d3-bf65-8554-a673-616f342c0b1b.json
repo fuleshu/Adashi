@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Persists validated C4, UML, and binding changes and regenerates source in",
+    "destination_external_id": "store-design-workspace",
+    "external_id": "35",
+    "id": 34,
+    "source_external_id": "mcp-design-save",
+    "tags": "Relationship",
+    "technology": "SQL transaction",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "b1aa05d3-bf65-8554-a673-616f342c0b1b",
+  "schemaVersion": 1
+}

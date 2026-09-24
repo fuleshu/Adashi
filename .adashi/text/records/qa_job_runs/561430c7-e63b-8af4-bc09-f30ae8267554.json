@@ -1,0 +1,27 @@
+{
+  "collection": "qa_job_runs",
+  "data": {
+    "command_snapshot": "{\"command\":\"cargo check --manifest-path src-tauri/Cargo.toml\",\"designSpecificationLinks\":[],\"enabled\":true,\"name\":\"Tauri compile check\",\"shell\":\"powershell\",\"tags\":[],\"taskLinks\":[],\"timeoutSeconds\":120,\"workingDirectory\":\"\"}",
+    "duration_ms": 6853,
+    "exit_code": 0,
+    "finished_at": "2026-07-08 11:02:11",
+    "id": 1,
+    "output": {
+      "lines": [
+        "    Checking adashi v0.1.0 (C:\\src\\Adashi\\src-tauri)\n",
+        "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.46s\n"
+      ]
+    },
+    "qa_job_id": {
+      "ref": "a1c1469d-192d-8f0c-989f-420462e303d9"
+    },
+    "qa_run_id": {
+      "ref": "fdf6d09f-3d52-8ffd-b572-8e5dbba2bc20"
+    },
+    "started_at": "2026-07-08 11:02:04",
+    "status": "passed"
+  },
+  "deleted": false,
+  "identity": "561430c7-e63b-8af4-bc09-f30ae8267554",
+  "schemaVersion": 1
+}

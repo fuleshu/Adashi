@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Makes note appends idempotent and canonical compaction versioned through",
+    "destination_external_id": "mcp-concurrency-api",
+    "external_id": "rel-memory-api-concurrency-api",
+    "id": 113,
+    "source_external_id": "mcp-memory-api",
+    "tags": "Relationship,Concurrency,Memory",
+    "technology": "shared Rust contract",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "68cae78f-5341-8c2f-9b40-a310b1a40fe1",
+  "schemaVersion": 1
+}

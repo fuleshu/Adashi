@@ -1,0 +1,38 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[\"src-tauri/src/settings.rs\",\"src-tauri/src/rules.rs\",\"src-tauri/src/lib.rs\",\"src/main.tsx\",\"src/styles.css\"]",
+    "completed_at": "2026-07-08 18:03:53",
+    "completion_memo": "Implemented cross-project lifecycle rule templates stored in app settings. Added settings-backed RuleTemplate storage with normalization, save/delete helpers, and legacy settings compatibility; added Tauri commands to save a selected project rule as a template, create a normal project-local rule from a selected template, and delete templates without touching project SQLite. Dashboard and app settings payloads now include rule templates. Extended the Rules workspace with template selection, save/create/delete controls, while fixed hook prompts remain separate. Added Rust tests for settings normalization/save/delete and template-to-rule insertion. Verified with cargo check, cargo test, git diff --check, and npm run build outside the sandbox after the known Vite/esbuild spawn EPERM sandbox failure.",
+    "confirmation_commit_id": null,
+    "confirmed_at": "2026-07-18 14:46:00",
+    "created_at": "2026-07-08 17:46:48",
+    "created_files": "[]",
+    "description": {
+      "lines": [
+        "Add reusable rule templates for the Rules workspace.\n",
+        "\n",
+        "Requirements:\n",
+        "- Store rule templates in application settings (`%LOCALAPPDATA%\\Adashi\\settings.json`), not in the project SQLite database, so templates are shared across projects.\n",
+        "- A template should capture the editable project rule fields needed to recreate a rule: name, enabled/default enabled state, intend, hook, and prompt. Include stable template ids and timestamps in settings for reliable UI operations.\n",
+        "- Add Tauri/Rust command support to list templates in dashboard/settings payloads, save an existing project rule as a template, create a project-local rule from a template, and delete a template.\n",
+        "- Creating from a template must insert a normal project rule into the active project DB and bump the project revision through the existing rule creation path.\n",
+        "- Saving/deleting templates must update application settings only; do not create project DB tables for templates.\n",
+        "- Extend the Rules UI with simple controls to save the selected rule as a template, create a rule from a selected template, and delete a template. No template editing UI is required.\n",
+        "- Preserve fixed hook prompts as Settings-managed hooks and keep them out of optional rule templates unless a user explicitly creates a normal project rule from a template.\n",
+        "- Verify with focused Rust tests for settings normalization/save/delete/template-to-rule behavior where practical, plus `cargo check` and the frontend build if available."
+      ]
+    },
+    "id": 6,
+    "number": 4,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "closed",
+    "title": "Implement cross-project rule templates stored in app settings",
+    "updated_at": "2026-07-18 14:46:00"
+  },
+  "deleted": false,
+  "identity": "55d53130-3516-81bf-adeb-df5a4ff89f6f",
+  "schemaVersion": 1
+}

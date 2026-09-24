@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-07-09 08:35:37",
+    "design_external_id": "ui-settings",
+    "id": 37,
+    "sort_order": 9,
+    "target_type": "element",
+    "task_id": {
+      "ref": "931ad0ae-4cd8-8f6c-9cc5-b0f41a02d3d8"
+    }
+  },
+  "deleted": false,
+  "identity": "6355dfab-5013-8896-bdcb-26ceb4881295",
+  "schemaVersion": 1
+}

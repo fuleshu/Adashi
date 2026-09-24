@@ -1,0 +1,42 @@
+{
+  "collection": "diagrams",
+  "data": {
+    "attached_to_external_id": "8",
+    "created_at": "2026-07-06 16:35:43",
+    "diagram_type": "sequence",
+    "id": 3,
+    "key": "MCPLiveUpdateDecision",
+    "kind": "mermaid",
+    "sort_order": 3,
+    "source": {
+      "lines": [
+        "sequenceDiagram\n",
+        "    autonumber\n",
+        "    participant Codex\n",
+        "    participant MCP as Adashi MCP Server\n",
+        "    participant DB as Project Data Store\n",
+        "    participant Desktop as Tauri Desktop Runtime\n",
+        "    participant UI as Dashboard UI\n",
+        "\n",
+        "    Codex->>MCP: perform resource-scoped mutation\n",
+        "    MCP->>DB: conditionally persist through shared resource versions\n",
+        "    DB-->>MCP: committed touched resources and new versions\n",
+        "    MCP->>DB: bump notification-only project change cursor\n",
+        "    UI->>Desktop: poll current project change cursor\n",
+        "    Desktop->>DB: read project change cursor\n",
+        "    DB-->>Desktop: cursor changed\n",
+        "    Desktop->>DB: fetch changed resource snapshots\n",
+        "    Desktop-->>UI: return updated resource payload\n",
+        "    UI->>UI: merge changed records without resetting view state"
+      ]
+    },
+    "title": "Project change cursor and surgical dashboard refresh",
+    "updated_at": "2026-07-31 08:48:51",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "6bccde78-d783-8f89-a5d7-d1ce2622e0d2",
+  "schemaVersion": 1
+}

@@ -1,0 +1,39 @@
+{
+  "collection": "diagrams",
+  "data": {
+    "attached_to_external_id": "ui-design-browser",
+    "created_at": "2026-07-07 09:35:11",
+    "diagram_type": "sequence",
+    "id": 7,
+    "key": "DesignBrowserNavigation",
+    "kind": "mermaid",
+    "sort_order": 5,
+    "source": {
+      "lines": [
+        "sequenceDiagram\n",
+        "    autonumber\n",
+        "    participant UI as Design Browser\n",
+        "    participant Frame as Structurizr C4 Renderer\n",
+        "    participant Mermaid as Mermaid UML Renderer\n",
+        "    participant Desktop as Direct Design Edit Commands\n",
+        "    participant Store as Formal Design Workspace Store\n",
+        "\n",
+        "    UI->>Frame: post Structurizr workspace JSON and view key\n",
+        "    Frame-->>UI: post selected or opened element ids\n",
+        "    UI->>Mermaid: render attached feature-flow UML source\n",
+        "    UI->>Desktop: submit narrow element or relationship fact edit\n",
+        "    Desktop->>Store: update semantic rows and regenerated source\n",
+        "    Store-->>Desktop: fresh dashboard payload\n",
+        "    Desktop-->>UI: updated design snapshot"
+      ]
+    },
+    "title": "Design browser navigation and direct edit flow",
+    "updated_at": "2026-07-07 09:35:11",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "c494bd0f-3a0a-801f-a12b-e2c54bc1656d",
+  "schemaVersion": 1
+}

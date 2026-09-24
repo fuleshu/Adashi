@@ -1,0 +1,44 @@
+{
+  "collection": "diagrams",
+  "data": {
+    "attached_to_external_id": "ui-mockup-workspace",
+    "created_at": "2026-07-18 14:33:15",
+    "diagram_type": "flow",
+    "id": 30,
+    "key": "UIMockupImplementationPlan",
+    "kind": "mermaid",
+    "sort_order": 22,
+    "source": {
+      "lines": [
+        "flowchart TD\n",
+        "    Start[\"Approved static layered SVG mockup design\"] --> Foundation[\"Task 1: Extension foundation\"]\n",
+        "    Foundation --> Schema[\"Add schema migration and mockup domain model\"]\n",
+        "    Schema --> Runtime[\"Implement shared runtime, SVG policy, revision lifecycle, and project revision bumps\"]\n",
+        "    Runtime --> Raster[\"Render deterministic PNG from the same SVG viewport and fonts\"]\n",
+        "    Raster --> MCP[\"Add pending-list and revision-context MCP tools with mixed SVG, metadata, edit log, annotations, and PNG content\"]\n",
+        "    MCP --> DesignAPI[\"Extend design retrieval, transactional save, target resolution, task links, and QA links for mockups\"]\n",
+        "    DesignAPI --> App[\"Integrate local Mockup tabs, workspace, comparison, request, accept, reject, discard, and delete actions\"]\n",
+        "    App --> FoundationTests[\"Migration, sanitization, revision, MCP payload, image-content, and Tauri integration tests\"]\n",
+        "    FoundationTests --> FoundationGate{\"Foundation contract passes\"}\n",
+        "    FoundationGate -->|No| Schema\n",
+        "    FoundationGate -->|Yes| Editor[\"Task 2: Layered SVG mockup editor\"]\n",
+        "    Editor --> Canvas[\"Build selectable grouped SVG canvas and inline text editing\"]\n",
+        "    Canvas --> Manipulation[\"Add drag, resize, add, edit, delete, duplicate, group, ungroup, and z-order controls\"]\n",
+        "    Manipulation --> Palette[\"Add panel, text, button, field, image placeholder, and divider primitives\"]\n",
+        "    Palette --> History[\"Add undo and redo with recoverable draft persistence\"]\n",
+        "    History --> Pencil[\"Add red pencil, eraser, optional text callouts, and separate annotation layer\"]\n",
+        "    Pencil --> RevisionUX[\"Connect dirty state and Request AI revision workflow\"]\n",
+        "    RevisionUX --> EditorTests[\"Unit, interaction, persistence, visual, and real Tauri runtime QA\"]\n",
+        "    EditorTests --> Done[\"Two implementation tasks ready for execution\"]"
+      ]
+    },
+    "title": "UI mockup extension implementation plan",
+    "updated_at": "2026-07-18 14:33:15",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "d4c30fe4-665f-8db3-abc2-fb352c519804",
+  "schemaVersion": 1
+}

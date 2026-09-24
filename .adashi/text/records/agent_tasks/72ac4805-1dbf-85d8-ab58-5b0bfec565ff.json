@@ -1,0 +1,24 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[]",
+    "completed_at": null,
+    "completion_memo": "",
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-07-06 09:23:14",
+    "created_files": "[]",
+    "description": "Add rmcp server resources for C4 workspaces, Mermaid diagrams, task injection, and QA gates.",
+    "id": 1,
+    "number": 1,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "closed",
+    "title": "Expose design workspace over MCP",
+    "updated_at": "2026-07-07 18:13:42"
+  },
+  "deleted": false,
+  "identity": "72ac4805-1dbf-85d8-ab58-5b0bfec565ff",
+  "schemaVersion": 1
+}

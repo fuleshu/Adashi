@@ -1,0 +1,16 @@
+{
+  "collection": "coding_guidelines",
+  "data": {
+    "body": "Keep MCP lifecycle separate from the desktop UI lifecycle. MCP writes and UI writes must go through shared Rust domain functions that update the SQLite store and bump a single project revision marker. The Dashboard UI polls the revision and reconciles changed records by id, updating only fields that changed instead of blanking or fully refreshing the dashboard. Adashi does not attempt multi-editor conflict resolution; external MCP writes are authoritative and last write wins.",
+    "created_at": "2026-07-06 16:35:43",
+    "id": 3,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "severity": "required",
+    "title": "MCP updates are merged surgically"
+  },
+  "deleted": false,
+  "identity": "1c027640-064b-8228-85b0-b3b3b59c1771",
+  "schemaVersion": 1
+}

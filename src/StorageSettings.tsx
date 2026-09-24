@@ -4,9 +4,9 @@ import "./StorageSettings.css";
 
 type Backend = "sqlite" | "text";
 type Preview = { source: Backend; target: Backend; planToken: string; counts: Record<string, number>; destinationPopulated: boolean; warnings: string[] };
-type Report = { backend: Backend; backupFolder: string };
+type Report = { backend: Backend; backupFolder: string; warnings: string[] };
 const labels: Record<Backend, string> = { sqlite: "SQLite database", text: "Git text files" };
-const collections: Record<string, string> = { agent_tasks: "Tasks", c4_elements: "Design elements", c4_relationships: "Relationships", design_bindings: "Bindings", diagrams: "Diagrams", ui_mockups: "Mockups", rules: "Rules", qa_jobs: "QA jobs", qa_runs: "QA runs", project_memory_notes: "Memory notes", mutation_operations: "Operation receipts" };
+const collections: Record<string, string> = { agent_tasks: "Tasks", c4_elements: "Design elements", c4_relationships: "Relationships", design_bindings: "Bindings", diagrams: "Diagrams", ui_mockups: "Mockups", rules: "Rules", qa_jobs: "QA jobs", qa_runs: "QA runs", project_memory_notes: "Memory notes" };
 
 export function StorageSettings({ projectId, changeCursor, onChanged }: { projectId: string; changeCursor: string; onChanged: () => Promise<void> }) {
   const [current, setCurrent] = React.useState<Backend>();
@@ -16,6 +16,7 @@ export function StorageSettings({ projectId, changeCursor, onChanged }: { projec
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
   const [report, setReport] = React.useState<Report>();
+  const [refreshError, setRefreshError] = React.useState("");
   const mounted = React.useRef(true);
   const backend = React.useRef<Backend>();
   React.useEffect(() => {
@@ -24,17 +25,18 @@ export function StorageSettings({ projectId, changeCursor, onChanged }: { projec
   }, []);
   React.useEffect(() => {
     let cancelled = false;
-    invoke<{ backend: Backend }>("get_project_storage", { projectId }).then(s => {
-      if (!cancelled) {
+    if (busy) return;
+    invoke<{ backend: Backend } | null>("get_project_storage", { projectId }).then(s => {
+      if (!cancelled && s) {
         setCurrent(s.backend);
         if (backend.current !== s.backend) { setTarget(s.backend === "sqlite" ? "text" : "sqlite"); setPreview(undefined); }
         backend.current = s.backend;
       }
     }).catch(e => { if (!cancelled) setError(String(e)); });
     return () => { cancelled = true; };
-  }, [projectId, changeCursor]);
+  }, [projectId, changeCursor, busy]);
   async function review() {
-    setBusy(true); setError(""); setReport(undefined); setPreview(undefined); setArchive(false);
+    setBusy(true); setError(""); setRefreshError(""); setReport(undefined); setPreview(undefined); setArchive(false);
     try {
       const plan = await invoke<Preview>("preview_storage_migration", { projectId, target });
       if (mounted.current) setPreview(plan);
@@ -47,11 +49,17 @@ export function StorageSettings({ projectId, changeCursor, onChanged }: { projec
     try {
       const result = await invoke<Report>("migrate_project_storage", { projectId, target: preview.target, planToken: preview.planToken, archiveDestination: archive });
       if (mounted.current) {
+        backend.current = result.backend;
         setCurrent(result.backend); setTarget(result.backend === "sqlite" ? "text" : "sqlite"); setReport(result); setPreview(undefined);
-        await onChanged();
+        // Conversion has committed. A failed refresh must not report it as failed.
+        await refresh();
       }
     } catch (e) { if (mounted.current) { setError(String(e)); setPreview(undefined); } }
     finally { if (mounted.current) setBusy(false); }
+  }
+  async function refresh() {
+    try { await onChanged(); if (mounted.current) setRefreshError(""); }
+    catch (e) { if (mounted.current) setRefreshError(String(e)); }
   }
   return <section className="data-panel settings-panel storage-settings" aria-label="Project storage">
     <div className="rules-panel-heading"><h3>Project storage</h3></div>
@@ -75,6 +83,7 @@ export function StorageSettings({ projectId, changeCursor, onChanged }: { projec
       <button type="button" disabled={busy || (preview.destinationPopulated && !archive)} onClick={() => void convert()}>Convert and switch</button>
     </div>}
     {error && <p className="storage-error" role="alert">{error}</p>}
-    {report && <div role="status"><p>Converted and switched to {labels[report.backend]}.</p><p>Backup: <code className="storage-backup">{report.backupFolder}</code></p></div>}
+    {report && <div role="status"><p>Converted and switched to {labels[report.backend]}.</p><p>Backup: <code className="storage-backup">{report.backupFolder}</code></p>{report.warnings.map(w => <p key={w}>{w}</p>)}</div>}
+    {refreshError && <div role="alert"><p>Conversion completed, but the dashboard could not refresh: {refreshError}</p><button type="button" disabled={busy} onClick={() => void refresh()}>Refresh dashboard</button></div>}
   </section>;
 }

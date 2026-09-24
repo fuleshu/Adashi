@@ -1,0 +1,17 @@
+{
+  "collection": "design_bindings",
+  "data": {
+    "created_at": "2026-07-07 09:35:11",
+    "design_external_id": "ui-taskqa-placeholder",
+    "id": 12,
+    "target": "TasksView",
+    "target_type": "symbol",
+    "updated_at": "2026-07-07 17:38:45",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "da6e62e9-278a-8d71-8a20-aff90d3b0391",
+  "schemaVersion": 1
+}

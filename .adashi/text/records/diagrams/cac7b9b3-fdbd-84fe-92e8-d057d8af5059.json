@@ -1,0 +1,44 @@
+{
+  "collection": "diagrams",
+  "data": {
+    "attached_to_external_id": "mcp-task-api",
+    "created_at": "2026-07-06 09:23:14",
+    "diagram_type": "sequence",
+    "id": 2,
+    "key": "TaskLifecycle",
+    "kind": "mermaid",
+    "sort_order": 2,
+    "source": {
+      "lines": [
+        "sequenceDiagram\n",
+        "    autonumber\n",
+        "    participant User\n",
+        "    participant UI as Task Workspace View\n",
+        "    participant Codex\n",
+        "    participant MCP as Task MCP API\n",
+        "    participant Store as Task Store\n",
+        "    participant Design as Formal Design Workspace\n",
+        "\n",
+        "    User->>UI: Create or edit open task\n",
+        "    UI->>Store: Persist title description and design links\n",
+        "    Codex->>MCP: create_task or update_task with high-confidence design links\n",
+        "    MCP->>Store: Persist open task\n",
+        "    Codex->>MCP: finish_task with memo and changed files\n",
+        "    MCP->>Store: Mark finished and store AI completion payload\n",
+        "    MCP->>Design: Load linked design branches when task is read\n",
+        "    User->>UI: Confirm finished task\n",
+        "    UI->>Store: Mark confirmed\n",
+        "    Note over UI,Store: Optional future Confirm plus Commit can store a commit id without making confirmation depend on git\n",
+        "    Note over MCP,Store: Future finish_task may create linked QA focus or smoke entries when the QA model exists"
+      ]
+    },
+    "title": "Task lifecycle and ownership",
+    "updated_at": "2026-07-07 17:50:35",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "cac7b9b3-fdbd-84fe-92e8-d057d8af5059",
+  "schemaVersion": 1
+}

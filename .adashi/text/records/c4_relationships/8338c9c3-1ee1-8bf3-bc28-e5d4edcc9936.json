@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Lists pending mockups and retrieves structured revision evidence plus rendered PNG from",
+    "destination_external_id": "mcp-mockup-api",
+    "external_id": "rel-codex-mockup-api",
+    "id": 83,
+    "source_external_id": "1",
+    "tags": "Relationship,UI Mockup",
+    "technology": "MCP",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "8338c9c3-1ee1-8bf3-bc28-e5d4edcc9936",
+  "schemaVersion": 1
+}

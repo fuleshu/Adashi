@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-07-18 14:35:26",
+    "design_external_id": "UIMockupLifecycle",
+    "id": 59,
+    "sort_order": 7,
+    "target_type": "uml",
+    "task_id": {
+      "ref": "2db9d10b-13c7-8dda-ad46-449f0ea6a269"
+    }
+  },
+  "deleted": false,
+  "identity": "62a89b5a-efd6-817c-8319-f137c4286e42",
+  "schemaVersion": 1
+}

@@ -1,0 +1,45 @@
+{
+  "collection": "diagrams",
+  "data": {
+    "attached_to_external_id": "storage-core",
+    "created_at": "2026-09-23 10:20:02",
+    "diagram_type": "sequence",
+    "id": 49,
+    "key": "ProjectStorageGuardedChange",
+    "kind": "mermaid",
+    "sort_order": 27,
+    "source": {
+      "lines": [
+        "sequenceDiagram\n",
+        "    participant Client\n",
+        "    participant Core\n",
+        "    participant Adapter\n",
+        "    participant Desktop\n",
+        "    Client->>Core: typed mutation with operation ID and resource guards\n",
+        "    Core->>Core: validate inputs and request fingerprint\n",
+        "    Core->>Adapter: begin atomic unit\n",
+        "    Adapter->>Adapter: check durable receipt inside transaction\n",
+        "    alt identical retry\n",
+        "        Adapter-->>Core: original committed result\n",
+        "    else new operation\n",
+        "        Adapter->>Adapter: compare guards and validate dependencies\n",
+        "        Adapter->>Adapter: apply changes or roll back all\n",
+        "        Adapter->>Adapter: persist receipt and changed resource versions\n",
+        "        Adapter->>Adapter: commit with content cursor\n",
+        "        Adapter-->>Core: committed result and cursor\n",
+        "    end\n",
+        "    Core-->>Client: typed result or precise conflict\n",
+        "    Desktop->>Core: compare opaque change cursor\n",
+        "    Core-->>Desktop: refresh committed state while preserving drafts"
+      ]
+    },
+    "title": "Atomic changes, replay and notification",
+    "updated_at": "2026-09-23 10:20:02",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "2c6c21b2-ae91-8b69-aa1c-36fcaf509241",
+  "schemaVersion": 1
+}

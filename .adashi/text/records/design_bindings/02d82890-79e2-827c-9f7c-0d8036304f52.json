@@ -1,0 +1,17 @@
+{
+  "collection": "design_bindings",
+  "data": {
+    "created_at": "2026-09-11 17:42:12",
+    "design_external_id": "desktop-architecture-projection",
+    "id": 59,
+    "target": "src-tauri/src/projection.rs",
+    "target_type": "file",
+    "updated_at": "2026-09-11 17:42:12",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "02d82890-79e2-827c-9f7c-0d8036304f52",
+  "schemaVersion": 1
+}

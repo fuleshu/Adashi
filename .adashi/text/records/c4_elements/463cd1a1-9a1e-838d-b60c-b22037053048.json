@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Project-local task persistence for numbered tasks, lifecycle state, title, description, ordered design specification links, AI completion evidence, timestamps, optional git confirmation ids, and a per-task resource version incremented transactionally with task and link changes.",
+    "element_type": "Component",
+    "external_id": "store-taskqa-dummy",
+    "id": 34,
+    "name": "Task Store and QA Attachment Point",
+    "parent_external_id": "6",
+    "tags": "Element,Component",
+    "technology": "agent_tasks, task_design_specification_links, per-task version",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "463cd1a1-9a1e-838d-b60c-b22037053048",
+  "schemaVersion": 1
+}

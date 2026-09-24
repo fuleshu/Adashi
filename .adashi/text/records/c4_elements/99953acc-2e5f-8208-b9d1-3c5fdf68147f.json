@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Notification-only change identity observed through the shared storage adapter. The SQLite implementation retains its monotonic project revision and existing numeric protocol fields. The backend-neutral cursor is opaque and compared for equality, permitting future Git content identities to detect checkout/revert as well as edits. Mutations use resource versions/design readTokens, never a project cursor as write authority. Publish only committed material changes; refresh preserves user drafts.",
+    "element_type": "Component",
+    "external_id": "8",
+    "id": 8,
+    "name": "Project Revision Marker",
+    "parent_external_id": "6",
+    "tags": "Element,Component",
+    "technology": "project_state",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "99953acc-2e5f-8208-b9d1-3c5fdf68147f",
+  "schemaVersion": 1
+}

@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "storage-text|file|scripts/git_collaboration/recovery.py",
+    "resource_kind": "design.binding",
+    "updated_at": "2026-09-24 07:57:52",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "35dcd832-ad4c-8ae1-b857-8734137f9bea",
+  "schemaVersion": 1
+}

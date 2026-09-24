@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Renders bounded, deterministic managed blocks from the canonical design model into a project's instruction files: the project root plus one block per folder containing bound files. Generation is opt-in per project and is driven by project open and settings changes. Blocks are wrapped in adashi markers, carry the design revision they were rendered from, and are overwritten on regeneration so external edits are transient.",
+    "element_type": "Component",
+    "external_id": "desktop-architecture-projection",
+    "id": 141,
+    "name": "Architecture Projection",
+    "parent_external_id": "3",
+    "tags": "",
+    "technology": "",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "ccc47caa-9dbf-8d03-ab37-052f313aed66",
+  "schemaVersion": 1
+}

@@ -1,0 +1,39 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[\"src-tauri/src/settings.rs\",\"src-tauri/src/lib.rs\",\"src/main.tsx\",\"src/styles.css\"]",
+    "completed_at": "2026-07-09 09:08:19",
+    "completion_memo": "Implemented first-project onboarding instead of the synthetic default project fallback. App settings now preserve missing/empty project state and clear invalid active project ids, so startup can route those cases into onboarding. The Tauri runtime shares project creation through a single add_project_to_settings helper, verifies first-project database initialization, and exposes close_app for Cancel. React startup now loads settings first, treats missing/unopenable active projects as onboarding, renders a blocking Create your first project surface with shared project creation and folder picker semantics, keeps creation errors on that surface, and only enters the main dashboard after get_dashboard succeeds. Added regression coverage for missing settings, empty settings, invalid active project ids, no-active project resolution, and first-project DB initialization from empty settings. Verified with cargo check, cargo test, git diff --check, and npm run build outside the sandbox after the known Vite/esbuild spawn EPERM sandbox failure.",
+    "confirmation_commit_id": null,
+    "confirmed_at": "2026-07-18 14:46:07",
+    "created_at": "2026-07-09 08:35:37",
+    "created_files": "[]",
+    "description": {
+      "lines": [
+        "Implement the first-start and invalid-project recovery behavior from `FirstProjectOnboardingFlow`.\n",
+        "\n",
+        "Requirements:\n",
+        "- Remove the automatic synthetic default Adashi project fallback from app settings normalization/startup. Missing settings, empty project lists, missing active project ids, and unusable configured projects must become an onboarding state instead of entering the main dashboard or hard-crashing into an unreachable error shell.\n",
+        "- On startup, load settings first. If a valid active project can be opened, continue to the normal dashboard. If no valid project can be opened, render a blocking \"Create your first project\" screen.\n",
+        "- The onboarding screen must expose the same project creation semantics as Settings: project name, direct Windows folder path entry, Browse using the modern Windows folder picker, Create, and Cancel.\n",
+        "- Create must create/select the project, initialize the project-local `.adashi/adashi.sqlite3`, run all migrations, and seed the clean default project data: project row, revision state, design workspace, default memory/protocol, and fixed design/implementation hook prompt entries. Only after successful creation may the app enter the main UI.\n",
+        "- Create should use the same initialize code from the settings screen, do not duplicate same code\n",
+        "- Creation errors stay on the onboarding screen with an actionable error message; the main workspace must remain inaccessible until a project exists and opens successfully.\n",
+        "- Cancel closes the desktop app without navigating to the main screen.\n",
+        "- Existing Settings project creation must keep working and should share validation/helper behavior where practical.\n",
+        "- Add regression coverage for missing settings, empty settings, invalid active project, first-project creation DB initialization, and cancel/close command behavior where feasible. Verify with Rust tests, cargo check, frontend build, and relevant UI smoke coverage."
+      ]
+    },
+    "id": 7,
+    "number": 5,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "closed",
+    "title": "Implement first-project onboarding instead of default project fallback",
+    "updated_at": "2026-07-18 14:46:07"
+  },
+  "deleted": false,
+  "identity": "931ad0ae-4cd8-8f6c-9cc5-b0f41a02d3d8",
+  "schemaVersion": 1
+}

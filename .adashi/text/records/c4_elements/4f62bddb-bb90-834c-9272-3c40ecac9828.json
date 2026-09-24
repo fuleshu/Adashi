@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Deterministic MCP task API with versioned task mutations. Contract v2 list retrieval queries SQL summary columns only: id, number, title bounded to 240 characters with titleTruncated, state and version. Default page size 25, maximum 100; filteredTotal, hasMore and nextCursor make completeness explicit. Omitted/null states selects all; [] selects none; exact schema enums open, finished and confirmed reject invalid filters. Keyset cursors bind project, normalized states and project revision; stale cursors fail and require restart. Full detail and linked design remain in get_task. Creates use unique task identity; update, finish and delete use expected task versions. Finish remains AI-owned with completion evidence.",
+    "element_type": "Component",
+    "external_id": "mcp-task-api",
+    "id": 26,
+    "name": "Task MCP API",
+    "parent_external_id": "5",
+    "tags": "Element,Component",
+    "technology": "MCP tools, SQL, per-task optimistic concurrency",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "4f62bddb-bb90-834c-9272-3c40ecac9828",
+  "schemaVersion": 1
+}

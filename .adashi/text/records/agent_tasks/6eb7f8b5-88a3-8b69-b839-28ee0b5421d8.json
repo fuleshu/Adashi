@@ -1,0 +1,39 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[\"src-tauri/src/storage/sqlite/tests.rs\",\"src-tauri/src/storage/sqlite/memory.rs\",\"src-tauri/src/storage/sqlite/fixed_hooks.rs\",\"src-tauri/src/storage/sqlite.rs\",\"src-tauri/src/mcp/context.rs\",\"scripts/check_read_only_storage.py\",\"src/main.tsx\",\"src/styles.css\",\"public/structurizr/viewer.html\",\"docs/storage-api-migration.md\"]",
+    "completed_at": "2026-09-23 16:52:50",
+    "completion_memo": "Completed SQLite/shared adapter acceptance after task 14. Added all-domain public-API conformance fixtures covering consistent snapshots, legacy schema-13 upgrade, write-free read-only reopening, two computer mappings, preserved IDs/links and receipts, mockup drafts/proposals, QA evidence retention, stale guards/readTokens, references, rollback and replay. Fixed a memory read that still initialized rows. Native Tauri/WebView2 plus an independent MCP process exposed and now verifies the fix for silent stale-editor overwrites: dirty text, Markdown and completion drafts pin their original resource version, survive refresh/rejection and require explicit current-value reload. Fixed Markdown effect placement and zero-size hidden diagram fitting. Final native verification ran through an isolated WebView integration harness without OS input takeover; all six scenarios pass and no test processes remain. Validation: 185 application tests passed (5 ignored), 10 standalone API tests passed, frontend/full native builds and MCP-only build passed, 39 MCP operation contracts with transactional/content-token checks passed, 45 reads preserved database bytes/mtime/revision, 80 concurrent reads preserved database/settings, two MCP processes passed disjoint/conflicting edits and exactly-once QA retry. Reproduction commands, intentional changes and native evidence are recorded in docs/storage-sqlite-validation.md; final native evidence is target/native-storage/037c59f2-94d3-4759-9ccb-414a0ed4304a/evidence.json. Text and server SQL backends remain intentionally unavailable pending their later tasks.",
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-09-23 10:00:04",
+    "created_files": "[\"src-tauri/src/storage/sqlite/tests/conformance.rs\",\"src/VersionedField.tsx\",\"src/versionedDraft.ts\",\"scripts/check_versioned_draft.mjs\",\"scripts/check_storage_parity.py\",\"scripts/check_native_storage.mjs\",\"docs/storage-sqlite-validation.md\"]",
+    "description": {
+      "lines": [
+        "Execution order: step 05 of 13. Depends on Adashi task ID 14. Complete this prerequisite before starting.\n",
+        "\n",
+        "Phase: SQLite completion gate before Git-friendly storage.\n",
+        "\n",
+        "Build meaningful regression evidence for the shared adapter and SQLite implementation:\n",
+        "- Run conformance tests across every domain, including consistent reads, atomic multi-resource failure, stale expectedVersion/readToken rejection, idempotent retry and reference validation.\n",
+        "- Exercise separate desktop and MCP processes against the same fixture project, including concurrent disjoint writes and conflicting edits.\n",
+        "- Verify initialization and legacy schema upgrades separately from read-only access. Extend the existing read-only storage checks to confirm unchanged database bytes, mtime and revision after repeated reads.\n",
+        "- Verify shared project identity with two computer mappings, legacy IDs/links, mockup drafts/proposals, QA history, rules and memory retention.\n",
+        "- Exercise actual native desktop reads and edits plus MCP operations, including external-change refresh without losing unsaved UI state.\n",
+        "\n",
+        "Acceptance: the SQLite phase has passing automated checks and recorded native desktop/MCP evidence. The backend selection remains per project, and the current SQLite workflow is preserved. Record any intentional API or data-model changes explicitly before the next phase."
+      ]
+    },
+    "id": 15,
+    "number": 12,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "finished",
+    "title": "Storage 05/13 — Verify SQLite compatibility and the shared adapter contract",
+    "updated_at": "2026-09-23 16:52:50"
+  },
+  "deleted": false,
+  "identity": "6eb7f8b5-88a3-8b69-b839-28ee0b5421d8",
+  "schemaVersion": 1
+}

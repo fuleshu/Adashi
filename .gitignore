@@ -26,3 +26,11 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+
+# Adashi portable project storage (local state and conversion backups stay private)
+!/.adashi/
+/.adashi/*
+!/.adashi/storage.json
+!/.adashi/text/
+!/.adashi/text/**
+/.adashi/text/**/.adashi-publish-*.tmp

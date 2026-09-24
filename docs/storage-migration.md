@@ -95,11 +95,24 @@ dirty editor state, and requires conflict review before saving stale drafts.
 Publication records `.adashi/local/storage-migration.json` before touching the
 destination. On the next open, recovery rolls back target/local files if the
 old descriptor is selected, or completes publication if the new descriptor is
-selected. Failures before activation keep the source selected and retain the
-backup. If an external edit matches neither journal image, recovery stops and
+selected. A publication failure runs rollback before returning its error, keeps
+the source selected and retains the backup. Recovery skips files already at their
+required contents, so an untouched locked destination cannot prevent restoration
+of files published earlier. Once the verified descriptor is committed, conversion
+reports success; a failure to remove the temporary recovery journal is a warning
+and cleanup is retried on the next open. Reads can use the complete recovered data
+while cleanup is blocked; new writes wait until the old journal can be removed
+so it cannot interfere with later changes. If an external edit matches neither journal image, recovery stops and
 keeps the edit, journal and backups for explicit reconciliation. Do not delete
 the journal to bypass that check. A locked destination file similarly prevents
 activation; close the process holding that inactive file and retry the preview.
+
+Background revision and storage-status polling runs off the desktop UI thread.
+When conversion holds the storage lock beyond a polling attempt, that attempt is
+deferred and retried by polling instead of displaying a conversion timeout. Only
+one revision poll is in flight at a time. Automatic dashboard refreshes do not
+dismiss error dialogs. A dashboard-refresh failure after conversion is displayed
+separately with a retry action; the successful conversion result remains visible.
 
 To inspect a source backup, copy its `source/` folder to a separate location and
 register that folder. Do not copy a backup over a live project. The generated
@@ -113,6 +126,15 @@ mockup proposals and drafts, note resolutions, QA history, original receipts,
 three consecutive conversions, stale handles/guards, source edits, independent
 projects, unsupported data, running QA and interrupted publication on either
 side of activation. The text tests cover restoring deleted natural child keys.
+Publication fault tests additionally cover every precommit write boundary, failed
+source checks, Windows destination locks, errors after descriptor commit and
+recovery-journal cleanup failures.
+
+`scripts/check_native_conversion.mjs` reproduces a project-sized conversion in an
+isolated native desktop using a copy of the source backup specified by
+`ADASHI_CONVERSION_SOURCE`. It checks every activated byte against the verified
+conversion, captures transient dialogs, and on Windows exercises a real locked
+destination failure and verifies that the original project remains usable.
 
 After building frontend and desktop/MCP binaries, run
 `ADASHI_TEST_MIGRATION=1 node scripts/check_native_storage.mjs` (set the environment
@@ -134,3 +156,13 @@ Two MCP processes also passed concurrent writes and exactly-once QA execution:
 The resolver/read-stability run preserved database and settings bytes/mtime
 across 80 concurrent reads:
 `target/storage-core/cd30ada2-ee41-44bb-b9ca-f085cba1497d/`.
+
+Regression verification on 2026-09-24 reproduced a five-second background lock
+timeout during a successful 13-second release conversion. The rebuilt desktop
+completed the same 859-file conversion in 22 seconds without an error dialog,
+then restored the original selection and bytes after a real Windows destination
+lock rejected reverse conversion. All 210 application tests passed (five existing
+ignored), including the publication and cleanup fault cases, and all nine native
+desktop/MCP scenarios passed. Frontend and desktop/MCP builds succeeded.
+Evidence: `target/native-conversion/b773cef7-f3ad-4174-912a-eef8bd04353c/evidence.json`
+and `target/native-storage/dad689c2-b748-4b46-bf23-ea0050c28ec9/evidence.json`.

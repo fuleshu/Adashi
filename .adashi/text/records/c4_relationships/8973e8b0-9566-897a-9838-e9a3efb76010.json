@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Reads configured projects and active project selection as explicit user state without inserting a fallback project into",
+    "destination_external_id": "9",
+    "external_id": "rel-project-runtime-app-settings-explicit",
+    "id": 73,
+    "source_external_id": "desktop-project-runtime",
+    "tags": "Relationship,Onboarding,Design Decision",
+    "technology": "Rust settings module / JSON",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "8973e8b0-9566-897a-9838-e9a3efb76010",
+  "schemaVersion": 1
+}

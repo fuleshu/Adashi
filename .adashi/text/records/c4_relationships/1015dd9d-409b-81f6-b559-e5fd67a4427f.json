@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Exports/imports verified snapshots through typed adapters",
+    "destination_external_id": "storage-core",
+    "external_id": "storage-migration-core",
+    "id": 133,
+    "source_external_id": "storage-migration",
+    "tags": "",
+    "technology": "Shared typed Rust API",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "1015dd9d-409b-81f6-b559-e5fd67a4427f",
+  "schemaVersion": 1
+}

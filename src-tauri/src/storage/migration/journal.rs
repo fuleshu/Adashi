@@ -51,6 +51,11 @@ fn bytes(value: &Option<String>) -> StorageResult<Option<Vec<u8>>> {
 }
 fn replace(root: &Path, name: &str, value: Option<Vec<u8>>) -> StorageResult<()> {
     let target = path(root, name)?;
+    // In particular, do not rewrite untouched files during rollback: the file
+    // that rejected publication may still be locked, but already has its old data.
+    if text::journal::read_optional(&target)? == value {
+        return Ok(());
+    }
     match value {
         Some(data) => text::journal::atomic_write(&target, &data),
         None => match fs::remove_file(target) {
@@ -61,6 +66,42 @@ fn replace(root: &Path, name: &str, value: Option<Vec<u8>>) -> StorageResult<()>
     }
 }
 impl Activation {
+    /// Return an error only after rollback. Once the descriptor commits, report
+    /// success; journal cleanup is maintenance and cannot undo a verified switch.
+    pub fn execute(
+        &self,
+        root: &Path,
+        backup: &Path,
+        check_source: impl FnOnce() -> StorageResult<()>,
+    ) -> StorageResult<Vec<String>> {
+        self.execute_with(root, backup, check_source, |_| Ok(()))
+    }
+
+    fn execute_with(
+        &self,
+        root: &Path,
+        backup: &Path,
+        check_source: impl FnOnce() -> StorageResult<()>,
+        after_write: impl FnMut(&str) -> StorageResult<()>,
+    ) -> StorageResult<Vec<String>> {
+        let result = self
+            .save(root, backup)
+            .and_then(|()| self.publish_with(root, check_source, after_write));
+        if let Err(error) = result {
+            let committed = text::journal::read_optional(&path(root, DESCRIPTOR)?)?
+                == bytes(&self.files[DESCRIPTOR].after)?;
+            recover_for_read(root).map_err(|recovery| invalid(&format!(
+                "Conversion could not finish recovery: {recovery}. Original error: {error}. The source backup is retained at {}.", backup.display()
+            )))?;
+            if !committed {
+                return Err(invalid(&format!("Conversion failed and was rolled back; the previous storage remains selected. {error}")));
+            }
+        }
+        Ok(cleanup(root).err().map(|error| format!(
+            "Conversion completed. Temporary recovery-file cleanup will be retried when the project is reopened: {error}"
+        )).into_iter().collect())
+    }
+
     pub fn prepare(root: &Path, after: BTreeMap<String, Option<Vec<u8>>>) -> StorageResult<Self> {
         if !after.contains_key(DESCRIPTOR) {
             return Err(invalid("Activation is missing its descriptor"));
@@ -101,21 +142,32 @@ impl Activation {
         text::journal::atomic_write(&backup.join("activation.json"), &data)?;
         text::journal::atomic_write(&root.join(PENDING), &data)
     }
+    #[cfg(test)]
     pub fn publish(
         &self,
         root: &Path,
         check_source: impl FnOnce() -> StorageResult<()>,
     ) -> StorageResult<()> {
+        self.publish_with(root, check_source, |_| Ok(()))
+    }
+    fn publish_with(
+        &self,
+        root: &Path,
+        check_source: impl FnOnce() -> StorageResult<()>,
+        mut after_write: impl FnMut(&str) -> StorageResult<()>,
+    ) -> StorageResult<()> {
         self.verify(root)?;
         for (name, item) in &self.files {
             if name != DESCRIPTOR && !name.starts_with(".adashi/local/") {
                 replace(root, name, bytes(&item.after)?)?;
+                after_write(name)?;
             }
         }
         check_source()?;
         for (name, item) in &self.files {
             if name.starts_with(".adashi/local/") {
                 replace(root, name, bytes(&item.after)?)?;
+                after_write(name)?;
             }
         }
         // An editor must not have changed either selection or published data.
@@ -134,10 +186,29 @@ impl Activation {
             return Err(invalid("Storage selection changed during conversion"));
         }
         replace(root, DESCRIPTOR, bytes(&descriptor.after)?)?;
-        fs::remove_file(root.join(PENDING)).map_err(StorageError::backend)
+        after_write(DESCRIPTOR)
+    }
+}
+
+fn cleanup(root: &Path) -> StorageResult<()> {
+    match fs::remove_file(root.join(PENDING)) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(StorageError::backend(error)),
     }
 }
 pub(super) fn recover(root: &Path) -> StorageResult<()> {
+    recover_inner(root, true)
+}
+
+/// Reads may use completely restored data while a cleanup-only lock is held.
+/// Writers must remove the journal first, otherwise later recovery could mistake
+/// their new changes for interference with the old conversion.
+pub(super) fn recover_for_read(root: &Path) -> StorageResult<()> {
+    recover_inner(root, false)
+}
+
+fn recover_inner(root: &Path, require_cleanup: bool) -> StorageResult<()> {
     let Some(data) = text::journal::read_optional(&root.join(PENDING))? else {
         return Ok(());
     };
@@ -154,7 +225,14 @@ pub(super) fn recover(root: &Path) -> StorageResult<()> {
             )?;
         }
     }
-    fs::remove_file(root.join(PENDING)).map_err(StorageError::backend)
+    let result = cleanup(root);
+    if require_cleanup {
+        result.map_err(|error| invalid(&format!(
+            "Project data is fully recovered, but the temporary conversion journal is still locked. Close the process holding it and retry before making further changes. {error}"
+        )))
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -172,3 +250,7 @@ pub(super) fn interrupt(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "recovery_tests.rs"]
+mod tests;

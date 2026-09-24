@@ -1,0 +1,48 @@
+{
+  "collection": "qa_job_runs",
+  "data": {
+    "command_snapshot": "{\"command\":\"cargo test --manifest-path src-tauri/Cargo.toml\",\"designSpecificationLinks\":[{\"designExternalId\":\"5\",\"id\":1,\"qaJobId\":3,\"sortOrder\":0,\"targetType\":\"element\",\"title\":\"Adashi MCP Server\"},{\"designExternalId\":\"mcp-qa-api\",\"id\":2,\"qaJobId\":3,\"sortOrder\":1,\"targetType\":\"element\",\"title\":\"QA MCP API\"},{\"designExternalId\":\"QAMCPSequence\",\"id\":3,\"qaJobId\":3,\"sortOrder\":2,\"targetType\":\"uml\",\"title\":\"QA MCP Query and Run Sequence\"}],\"enabled\":true,\"name\":\"MCP Rust unit tests\",\"shell\":\"powershell\",\"tags\":[\"mcp\",\"rust\",\"tests\"],\"taskLinks\":[],\"timeoutSeconds\":180,\"workingDirectory\":\"\"}",
+    "duration_ms": 4292,
+    "exit_code": 0,
+    "finished_at": "2026-07-08 11:41:01",
+    "id": 5,
+    "output": {
+      "lines": [
+        "\n",
+        "running 3 tests\n",
+        "test design::tests::save_changes_rejects_unknown_delete_without_bumping_revision ... ok\n",
+        "test design::tests::save_changes_delete_element_cascades_design_dependencies ... ok\n",
+        "test design::tests::save_changes_deletes_relationship_and_uml_artifact ... ok\n",
+        "\n",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s\n",
+        "\n",
+        "\n",
+        "running 0 tests\n",
+        "\n",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n",
+        "\n",
+        "\n",
+        "running 0 tests\n",
+        "\n",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n",
+        "\n",
+        "\n",
+        "running 0 tests\n",
+        "\n",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n",
+        "\n"
+      ]
+    },
+    "qa_job_id": {
+      "ref": "aefc4085-60c0-86cd-9162-199a61fd7ef7"
+    },
+    "qa_run_id": {
+      "ref": "8e0c60f0-bf58-8874-b7a2-f4734856d104"
+    },
+    "started_at": "2026-07-08 11:40:56",
+    "status": "passed"
+  },
+  "deleted": false,
+  "identity": "cb5e374c-1503-8e88-859a-e7623e4f0d13",
+  "schemaVersion": 1
+}

@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-09-23 10:20:20",
+    "design_external_id": "storage-config",
+    "id": 84,
+    "sort_order": 1,
+    "target_type": "element",
+    "task_id": {
+      "ref": "e6122d89-8a2c-8545-a87e-bd7c68007a5b"
+    }
+  },
+  "deleted": false,
+  "identity": "480336ab-3936-8a39-b1fc-f7855830fb0a",
+  "schemaVersion": 1
+}

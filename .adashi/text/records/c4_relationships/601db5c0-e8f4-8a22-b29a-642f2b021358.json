@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Selects once server implementation passes conformance; unavailable until then",
+    "destination_external_id": "storage-server-sql",
+    "external_id": "storage-core-server",
+    "id": 131,
+    "source_external_id": "storage-core",
+    "tags": "",
+    "technology": "Shared typed Rust API",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "601db5c0-e8f4-8a22-b29a-642f2b021358",
+  "schemaVersion": 1
+}

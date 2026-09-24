@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Project identity plus the notification-only project change cursor used by MCP writes and UI polling. The cursor orders visible project changes but does not decide whether a resource update may commit; overwrite protection belongs to versions on the touched resources.",
+    "element_type": "Component",
+    "external_id": "store-project-registry",
+    "id": 29,
+    "name": "Project Registry and Revision Store",
+    "parent_external_id": "6",
+    "tags": "Element,Component",
+    "technology": "projects, project_state",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "5b1ea284-f0f8-8944-93e2-ccb72fde7948",
+  "schemaVersion": 1
+}

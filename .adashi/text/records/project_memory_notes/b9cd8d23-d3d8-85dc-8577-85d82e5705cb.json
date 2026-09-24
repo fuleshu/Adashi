@@ -1,0 +1,18 @@
+{
+  "collection": "project_memory_notes",
+  "data": {
+    "body": "2026-07-31: Investigated why the Windows installer places Adashi under %LOCALAPPDATA%\\Adashi. The packaged NSIS installer is using Tauri's implicit default because src-tauri/tauri.conf.json has no bundle.windows.nsis.installMode; the installed Tauri 2.11 schema defaults that setting to currentUser. The live HKCU uninstall entry confirms C:\\Users\\timo\\AppData\\Local\\Adashi, and that directory currently mixes adashi.exe, adashi-mcp.exe, uninstall.exe, and settings.json. Adashi's own settings_path intentionally writes %LOCALAPPDATA%\\Adashi\\settings.json. Conclusion: this is an unconfigured Tauri per-user default, not an explicit Adashi packaging decision; setting NSIS installMode to perMachine would install under Program Files and restore code/data separation. No source files changed.",
+    "created_at": "2026-07-31 15:57:27",
+    "id": 1,
+    "note_id": "windows-installer-appdata-investigation-20260731",
+    "operation_id": "windows-installer-appdata-investigation-20260731",
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "run_id": "019fb8e1-ba9b-7fe2-8f71-884556efba78",
+    "task_id": null
+  },
+  "deleted": false,
+  "identity": "b9cd8d23-d3d8-85dc-8577-85d82e5705cb",
+  "schemaVersion": 1
+}

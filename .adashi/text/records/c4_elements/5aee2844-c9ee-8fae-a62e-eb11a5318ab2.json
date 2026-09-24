@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Dashboard UI component that renders typed Mermaid UML artifacts attached to C4 elements or relationships.",
+    "element_type": "Component",
+    "external_id": "renderer-mermaid",
+    "id": 36,
+    "name": "Mermaid UML Renderer",
+    "parent_external_id": "4",
+    "tags": "Element,Component,Renderer",
+    "technology": "React, Mermaid.js",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "5aee2844-c9ee-8fae-a62e-eb11a5318ab2",
+  "schemaVersion": 1
+}

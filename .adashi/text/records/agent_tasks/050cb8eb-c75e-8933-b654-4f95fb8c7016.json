@@ -1,0 +1,47 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[\"src-tauri/Cargo.toml\",\"src-tauri/src/storage/config.rs\",\"src-tauri/src/storage/mod.rs\",\"src-tauri/src/storage/sqlite.rs\",\"src-tauri/src/storage/sqlite/tests.rs\",\"src-tauri/src/storage/text/mod.rs\",\"src-tauri/src/storage/text/records.rs\",\"src-tauri/src/storage/text/journal.rs\",\"src-tauri/src/storage/text/tests.rs\",\"src-tauri/storage-api/src/api.rs\",\"src-tauri/storage-api/src/error.rs\",\"src-tauri/src/desktop.rs\",\"src/main.tsx\",\"scripts/check_native_storage.mjs\",\"docs/storage-text-format.md\"]",
+    "completed_at": "2026-09-23 18:58:15",
+    "completion_memo": {
+      "lines": [
+        "Completed after task 17, preserving the requested sequential execution. Added per-project Settings storage selection and a reusable MigrationAdapter/SourceSnapshot service for SQLite <-> Git text. Conversion pins the source under writer locks, binds previews to source/descriptor/destination/Git-ignore contents, stages complete data, validates all authoritative counts and semantic equivalence, preserves usable source backups and exact inactive-destination before-images, and activates the generation-bearing descriptor last. A recovery journal rolls back before activation or completes after activation; external edits are preserved and reported, including an external revert to a valid old file image. Populated destinations require an explicit backup-and-replace choice. Unknown data and running QA block conversion. Old handles fail after selection changes; scoped cursors refresh desktop/MCP and original dirty draft guards are preserved. Missing activated clone data never seeds an empty project. UUIDs, tombstones, deleted numeric ID high-water marks, task IDs/references, mockup drafts/proposals/annotations, completed QA evidence, memory resolution history, local computer mappings and original receipts survive round trips. Added Git tracking/ignore and second-clone/recovery documentation, formal design descriptions and bindings.\n",
+        "\n",
+        "Validation: 203 Rust application tests passed, 5 pre-existing ignored; all 10 storage API contract tests passed. Frontend and desktop/MCP debug builds passed. All 9 native Tauri/WebView2 scenarios passed on final binaries with an independent MCP process, including both settings conversions, explicit destination replacement choice, preserved IDs, stale editor rejection with retained draft, project independence and readable backup paths. Final evidence: target/native-storage/220c6d9a-a8e1-4945-a81b-736daadf9749/evidence.json. Independent MCP concurrency/exactly-once QA passed: target/storage-parity/c3f8a55b-7b38-4be7-8c3f-33643cfbec86/prepare-evidence.json. 80 concurrent resolver reads preserved database/settings bytes and mtime: target/storage-core/cd30ada2-ee41-44bb-b9ca-f085cba1497d. Git ignore behavior verified in an isolated converted fixture. git diff --check clean. Source backups are retained, the real Adashi project's backend was not converted, and changes remain uncommitted. No unresolved task-18 blockers; server SQL remains the later task-22 extension. Arbitrary Git/editor writes must stay idle during final activation; unexpected journal edits stop for reconciliation instead of discarding data."
+      ]
+    },
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-09-23 10:00:04",
+    "created_files": "[\"src-tauri/src/storage/migration/mod.rs\",\"src-tauri/src/storage/migration/journal.rs\",\"src-tauri/src/storage/migration/tests.rs\",\"src-tauri/src/storage/transfer.rs\",\"src-tauri/src/storage/text/transfer.rs\",\"src-tauri/src/storage/sqlite/transfer.rs\",\"src-tauri/src/storage_commands.rs\",\"src/StorageSettings.tsx\",\"src/StorageSettings.css\",\"scripts/check_native_storage_migration.mjs\",\"docs/storage-migration.md\"]",
+    "description": {
+      "lines": [
+        "Execution order: step 08 of 13. Depends on Adashi task ID 17. Complete this prerequisite before starting.\n",
+        "\n",
+        "Phase: Git-friendly text storage adoption.\n",
+        "\n",
+        "Provide the project settings and conversion workflow needed to switch between SQLite and text storage:\n",
+        "- Expose a clear per-project storage selector used by the same backend resolver in desktop and MCP.\n",
+        "- Build a reusable adapter-to-adapter migration service, first supporting SQLite to text and text to SQLite.\n",
+        "- Export from a consistent source snapshot; migrate IDs and references according to task 16; retain all authoritative domains, drafts, proposals, history and operation provenance.\n",
+        "- Stage the destination, validate counts and semantic equivalence, preserve the source/backup, and activate the new descriptor only after successful verification.\n",
+        "- Detect source changes during conversion and prevent writes through stale project handles after a backend switch. Define behavior when desktop and MCP are both connected.\n",
+        "- Make interrupted/failed conversions recoverable; never silently overwrite a populated destination or drop unsupported records.\n",
+        "- Document tracked files and ignored local/runtime files, and opening the same project from a second clone.\n",
+        "\n",
+        "Acceptance: representative full projects round-trip with intact relationships and content; failed/interrupted migrations leave a usable source; each project switches independently; both clients observe the selected backend."
+      ]
+    },
+    "id": 18,
+    "number": 15,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "finished",
+    "title": "Storage 08/13 — Add safe SQLite/text migration and project storage settings",
+    "updated_at": "2026-09-23 18:58:15"
+  },
+  "deleted": false,
+  "identity": "050cb8eb-c75e-8933-b654-4f95fb8c7016",
+  "schemaVersion": 1
+}

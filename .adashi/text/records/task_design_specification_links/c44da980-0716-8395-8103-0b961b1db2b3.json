@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-07-18 14:35:26",
+    "design_external_id": "UIMockupEditorWorkflow",
+    "id": 57,
+    "sort_order": 5,
+    "target_type": "uml",
+    "task_id": {
+      "ref": "2db9d10b-13c7-8dda-ad46-449f0ea6a269"
+    }
+  },
+  "deleted": false,
+  "identity": "c44da980-0716-8395-8103-0b961b1db2b3",
+  "schemaVersion": 1
+}

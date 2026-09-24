@@ -1,0 +1,13 @@
+{
+  "collection": "qa_job_tags",
+  "data": {
+    "created_at": "2026-07-08 11:40:39",
+    "qa_job_id": {
+      "ref": "aefc4085-60c0-86cd-9162-199a61fd7ef7"
+    },
+    "tag": "tests"
+  },
+  "deleted": false,
+  "identity": "c815fc88-326e-85e6-b75e-5b08a14648aa",
+  "schemaVersion": 1
+}

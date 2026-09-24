@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Stores separately versioned canonical summary/protocol, idempotent handover notes, and project_memory_note_resolutions linking exact reviewed note ids to the resolving summary version and operation. Active reads exclude resolved notes; explicit retained-history retrieval preserves their original text, timestamps, run/task and operation provenance. Retention counts all notes including resolved history: at most 20 notes and 12,000 Unicode body characters, summary at most 4,000 and new notes at most 1,000. Expiring notes cascade their resolution metadata. Maintenance migrates exact old built-in protocols while preserving custom rules. Oversized legacy bodies become complete-boundary excerpts with explicit omission notices, never silent SQL clipping or invented semantic summaries. Receipts retain identity; replay cannot resurrect expired or stale bodies.",
+    "element_type": "Component",
+    "external_id": "store-memory",
+    "id": 32,
+    "name": "Project Memory Store",
+    "parent_external_id": "6",
+    "tags": "Element,Component",
+    "technology": "project_memory, project_memory_notes, versioned compaction",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "93366789-a73b-84e0-aa18-73bbfada3456",
+  "schemaVersion": 1
+}

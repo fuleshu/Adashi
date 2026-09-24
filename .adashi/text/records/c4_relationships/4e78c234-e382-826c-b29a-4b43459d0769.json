@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Displays and edits task workspace records through",
+    "destination_external_id": "desktop-dashboard-api",
+    "external_id": "29",
+    "id": 28,
+    "source_external_id": "ui-taskqa-placeholder",
+    "tags": "Relationship",
+    "technology": "Tauri IPC",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "4e78c234-e382-826c-b29a-4b43459d0769",
+  "schemaVersion": 1
+}

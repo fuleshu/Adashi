@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Uses the identical shared project storage factory and operations",
+    "destination_external_id": "storage-core",
+    "external_id": "storage-mcp-core",
+    "id": 127,
+    "source_external_id": "5",
+    "tags": "",
+    "technology": "Shared typed Rust API",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "5fd0f38a-7412-8720-9cdc-a98211a68d08",
+  "schemaVersion": 1
+}

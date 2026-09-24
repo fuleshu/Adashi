@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "renderer-mockup-svg",
+    "resource_kind": "design.element",
+    "updated_at": "2026-07-31 15:51:44",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "a19a1c53-7f2a-82e3-9f31-72504735e81a",
+  "schemaVersion": 1
+}

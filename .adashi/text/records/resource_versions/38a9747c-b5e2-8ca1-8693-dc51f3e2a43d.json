@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "mcp-memory-api",
+    "resource_kind": "design.element",
+    "updated_at": "2026-09-08 19:14:12",
+    "version": 3
+  },
+  "deleted": false,
+  "identity": "38a9747c-b5e2-8ca1-8693-dc51f3e2a43d",
+  "schemaVersion": 1
+}

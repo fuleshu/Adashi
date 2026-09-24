@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Narrow UI edit commands for C4 element facts, relationship facts, and simple relationship creation.",
+    "element_type": "Component",
+    "external_id": "desktop-direct-design-edit",
+    "id": 19,
+    "name": "Direct Design Edit Commands",
+    "parent_external_id": "3",
+    "tags": "Element,Component",
+    "technology": "Tauri commands, SQL",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "b3cf0e72-7685-8fea-8f6f-f5bccd75393a",
+  "schemaVersion": 1
+}

@@ -1,0 +1,17 @@
+{
+  "collection": "design_bindings",
+  "data": {
+    "created_at": "2026-09-16 19:12:51",
+    "design_external_id": "mcp-lifecycle-rules",
+    "id": 63,
+    "target": "src-tauri/src/mcp/context.rs",
+    "target_type": "file",
+    "updated_at": "2026-09-16 19:12:51",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "21b71146-56c9-8fde-9fcd-8c46fc9b07fc",
+  "schemaVersion": 1
+}

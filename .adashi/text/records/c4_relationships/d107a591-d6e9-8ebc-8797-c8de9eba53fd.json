@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Resolves and accesses the selected project backend through the same shared storage core used by desktop in",
+    "destination_external_id": "6",
+    "external_id": "13",
+    "id": 4,
+    "source_external_id": "5",
+    "tags": "Relationship",
+    "technology": "Shared Rust adapter; explicit SQLite bridge during extraction",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "d107a591-d6e9-8ebc-8797-c8de9eba53fd",
+  "schemaVersion": 1
+}

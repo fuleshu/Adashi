@@ -683,7 +683,8 @@ function App() {
 
     return invoke<DashboardPayload>("get_dashboard", { projectId })
       .then((loadedPayload) => {
-        setError(null);
+        // A background refresh must not dismiss an error the user is reading.
+        if (mode === "replace") setError(null);
         setOnboardingReason(null);
         setPayload((currentPayload) =>
           mode === "merge" && currentPayload?.projectId === loadedPayload.projectId
@@ -727,25 +728,25 @@ function App() {
         return;
       }
 
-      invoke<ProjectRevision>("get_project_revision", { projectId: currentPayload.projectId })
+      // Include the revision request in the reservation so slow storage cannot
+      // accumulate overlapping polls while conversion owns the writer lock.
+      refreshInFlightRef.current = true;
+      invoke<ProjectRevision | null>("get_project_revision", { projectId: currentPayload.projectId })
         .then((revision) => {
           const latestPayload = payloadRef.current;
 
           if (
-            !latestPayload ||
+            !revision || !latestPayload ||
             latestPayload.projectId !== revision.projectId ||
-            revision.changeCursor === latestPayload.changeCursor ||
-            refreshInFlightRef.current
+            revision.changeCursor === latestPayload.changeCursor
           ) {
             return;
           }
 
-          refreshInFlightRef.current = true;
-          loadDashboard(latestPayload.projectId, "merge").finally(() => {
-            refreshInFlightRef.current = false;
-          });
+          return loadDashboard(latestPayload.projectId, "merge");
         })
-        .catch((reason) => setError(String(reason)));
+        .catch((reason) => setError(String(reason)))
+        .finally(() => { refreshInFlightRef.current = false; });
     }, 1500);
 
     return () => window.clearInterval(interval);

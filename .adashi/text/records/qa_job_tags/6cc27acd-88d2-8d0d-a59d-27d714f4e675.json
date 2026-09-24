@@ -1,0 +1,13 @@
+{
+  "collection": "qa_job_tags",
+  "data": {
+    "created_at": "2026-07-08 11:40:39",
+    "qa_job_id": {
+      "ref": "aefc4085-60c0-86cd-9162-199a61fd7ef7"
+    },
+    "tag": "rust"
+  },
+  "deleted": false,
+  "identity": "6cc27acd-88d2-8d0d-a59d-27d714f4e675",
+  "schemaVersion": 1
+}

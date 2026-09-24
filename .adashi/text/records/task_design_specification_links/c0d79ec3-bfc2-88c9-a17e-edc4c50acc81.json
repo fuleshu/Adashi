@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-07-18 14:34:17",
+    "design_external_id": "renderer-mockup-svg",
+    "id": 42,
+    "sort_order": 4,
+    "target_type": "element",
+    "task_id": {
+      "ref": "f0b9bdfd-5528-8bf8-8189-f23d58a40009"
+    }
+  },
+  "deleted": false,
+  "identity": "c0d79ec3-bfc2-88c9-a17e-edc4c50acc81",
+  "schemaVersion": 1
+}

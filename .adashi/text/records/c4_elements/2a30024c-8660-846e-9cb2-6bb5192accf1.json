@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Dashboard UI component and bundled iframe asset that renders canonical Structurizr workspace JSON for C4 views.",
+    "element_type": "Component",
+    "external_id": "renderer-structurizr",
+    "id": 35,
+    "name": "Structurizr C4 Renderer",
+    "parent_external_id": "4",
+    "tags": "Element,Component,Renderer",
+    "technology": "React iframe wrapper, Structurizr UI, static viewer asset",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "2a30024c-8660-846e-9cb2-6bb5192accf1",
+  "schemaVersion": 1
+}

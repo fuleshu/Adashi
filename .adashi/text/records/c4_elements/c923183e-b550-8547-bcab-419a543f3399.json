@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Relation-aware Design Browser mode that projects a selected C4 branch plus immediate dependency neighbors into a readable component dependency view. It keeps the formal C4/UML model authoritative while adding endpoint inclusion, dependency ranking, edge prioritization, and readable relationship labels for presentation-grade inspection.",
+    "element_type": "Component",
+    "external_id": "ui-dependency-view",
+    "id": 62,
+    "name": "Dependency View Mode",
+    "parent_external_id": "4",
+    "tags": "Element,Component,Design Browser,Dependency View",
+    "technology": "React, TypeScript, Structurizr JSON projection",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "c923183e-b550-8547-bcab-419a543f3399",
+  "schemaVersion": 1
+}

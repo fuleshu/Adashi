@@ -1,11 +1,11 @@
 <!-- adashi:architecture:begin -->
-<!-- adashi:generated revision=367 -->
+<!-- adashi:generated revision=476204540909476 -->
 # Architecture — `docs` (generated)
 Generated from the Adashi design model; do not edit, change the model.
 These responsibilities are already owned here: extend them, do not duplicate.
 
 - **Shared Storage Core** (Component) — Owns the driver-independent adashi-storage-api crate: ProjectStorage, StorageBackend, Stor…
-- **Storage Migration Service** (Component) — Implemented task 18 for SQLite/text; task 22 extends to server SQL. MigrationAdapter/Sourc…
+- **Storage Migration Service** (Component) — Implemented SQLite/text migration; task 22 extends to server SQL. MigrationAdapter/SourceS…
 - **Git Text Storage Adapter** (Component) — Version-2 contract: docs/storage-text-format.md. UTF-8/LF sorted JSON per immutable UUID p…
 
 Bound here:

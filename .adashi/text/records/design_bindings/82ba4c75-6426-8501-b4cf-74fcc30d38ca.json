@@ -1,0 +1,17 @@
+{
+  "collection": "design_bindings",
+  "data": {
+    "created_at": "2026-09-23 18:09:15",
+    "design_external_id": "storage-text",
+    "id": 119,
+    "target": "src-tauri/src/storage/text/tests.rs",
+    "target_type": "file",
+    "updated_at": "2026-09-23 18:09:15",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "82ba4c75-6426-8501-b4cf-74fcc30d38ca",
+  "schemaVersion": 1
+}

@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Renders the relation-aware branch-neighborhood workspace through",
+    "destination_external_id": "renderer-structurizr",
+    "external_id": "rel-dependency-view-structurizr",
+    "id": 63,
+    "source_external_id": "ui-dependency-view",
+    "tags": "Relationship,Dependency View",
+    "technology": "Structurizr JSON iframe",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "c31addb4-e60c-8608-974a-463d403de1de",
+  "schemaVersion": 1
+}

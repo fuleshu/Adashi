@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-07-18 14:34:17",
+    "design_external_id": "mcp-design-retrieval",
+    "id": 45,
+    "sort_order": 7,
+    "target_type": "element",
+    "task_id": {
+      "ref": "f0b9bdfd-5528-8bf8-8189-f23d58a40009"
+    }
+  },
+  "deleted": false,
+  "identity": "bc53787e-aec2-82be-a793-148ae17a7a9c",
+  "schemaVersion": 1
+}

@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-09-23 10:20:20",
+    "design_external_id": "storage-core",
+    "id": 97,
+    "sort_order": 0,
+    "target_type": "element",
+    "task_id": {
+      "ref": "364da69c-1df6-89ca-b52e-b27afa0a6c1e"
+    }
+  },
+  "deleted": false,
+  "identity": "34161fab-4c89-8537-b357-4d655cc1b7fa",
+  "schemaVersion": 1
+}

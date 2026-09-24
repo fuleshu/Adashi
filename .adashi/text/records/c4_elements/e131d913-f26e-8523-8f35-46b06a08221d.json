@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Implemented SQLite/text migration; task 22 extends to server SQL. MigrationAdapter/SourceSnapshot export the complete portable schema image under checkout and source writer locks. Preview binds source, selection, target and Git ignore state. Stage and verify all authoritative record counts, references, content, local provenance and history; retain a usable source and permanent destination before/after images. Activate the generation-bearing descriptor last using a recoverable journal. Before commit, publication errors synchronously restore original destination/local files; skip already restored files so untouched locked destinations cannot obstruct rollback. Interrupted precommit publication rolls back on open; committed publication completes on open. Descriptor commit is a successful conversion even if journal cleanup must be retried, with cleanup warnings separated from conversion errors. External edits remain protected and recovery failures retain backups and explicit diagnostics. Reject unknown data, running QA, intervening edits, silent destination replacement and stale project handles. Preserve UUID/tombstone identity through round trips and reject missing activated clone data rather than seeding. Native settings uses the shared resolver. Revision/status polling runs off the UI thread and defers lock timeouts; only one revision poll runs at a time. Automatic refresh preserves error dialogs, and post-conversion dashboard failures retain the successful conversion report with a refresh action.",
+    "element_type": "Component",
+    "external_id": "storage-migration",
+    "id": 164,
+    "name": "Storage Migration Service",
+    "parent_external_id": "3",
+    "tags": "Element,Component,Storage",
+    "technology": "Rust storage contract",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "e131d913-f26e-8523-8f35-46b06a08221d",
+  "schemaVersion": 1
+}

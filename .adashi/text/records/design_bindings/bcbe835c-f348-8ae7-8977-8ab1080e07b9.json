@@ -1,0 +1,17 @@
+{
+  "collection": "design_bindings",
+  "data": {
+    "created_at": "2026-09-24 08:25:10",
+    "design_external_id": "storage-text",
+    "id": 140,
+    "target": "src-tauri/src/storage/text/tests/upgrade.rs",
+    "target_type": "file",
+    "updated_at": "2026-09-24 08:25:10",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "bcbe835c-f348-8ae7-8977-8ab1080e07b9",
+  "schemaVersion": 1
+}

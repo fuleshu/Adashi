@@ -1,0 +1,48 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[\"src-tauri/src/storage/mod.rs\",\"src-tauri/src/storage/sqlite.rs\",\"src-tauri/src/desktop.rs\",\"src-tauri/src/mcp.rs\",\"src-tauri/src/mcp/context.rs\",\"src-tauri/src/project.rs\",\"src-tauri/src/grep.rs\",\"src-tauri/src/projection.rs\",\"src-tauri/src/design_health.rs\",\"src-tauri/src/concurrency_schema.sql\",\"src-tauri/storage-api/src/changes.rs\",\"src-tauri/storage-api/src/validation.rs\",\"src-tauri/storage-api/src/error.rs\",\"docs/storage-api-migration.md\",\"docs/project-storage.md\"]",
+    "completed_at": "2026-09-23 15:13:57",
+    "completion_memo": "Implemented the complete SQLite adapter for StorageFactory, StorageBackend and every ReadSnapshot member; ProjectStore implements ProjectStorage through StorageClient. Migrated desktop, MCP, context, grep, projection, health and QA to shared typed reads/mutations. All production SQL and connections are confined to storage/sqlite and migration assets; historical raw fixtures compile only in tests. Atomic commit owns guards, domain/reference validation, versions, V1 receipts and one content cursor update. Schema 14 preserves existing tables/IDs/data and seeds additional resource versions. Initialized registered opens are write-free; WAL pins readers during writes. QA uses reservation/claim/evidence/completion commits around external shell execution; health caches are local and optional. Documented intentional API/lifecycle changes and updated formal ownership/bindings. Validation: 181 Rust tests passed (five pre-existing manual checks ignored), 10 standalone API contract tests passed; desktop+MCP and MCP-only builds passed. Real MCP scripts verified 42 read calls with identical database bytes/mtime and two processes with 80 concurrent reads, identical settings/database fingerprints and unavailable-backend rejection. Task 15 follows for expanded compatibility and native desktop/MCP evidence.",
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-09-23 10:00:04",
+    "created_files": "[\"src-tauri/src/qa_runner.rs\",\"src-tauri/src/storage/documents.rs\",\"src-tauri/src/storage/local_cache.rs\",\"src-tauri/src/storage/sqlite/snapshot.rs\",\"src-tauri/src/storage/sqlite/mutations.rs\",\"src-tauri/src/storage/sqlite/references.rs\",\"src-tauri/src/storage/sqlite/tests.rs\"]",
+    "description": {
+      "lines": [
+        "Execution order: step 04 of 13. Depends on Adashi task ID 24. Complete this prerequisite before starting.\n",
+        "\n",
+        "Phase: SQLite, the first supported backend.\n",
+        "\n",
+        "Implement SQLite against the complete backend-neutral API delivered by task 24, then migrate production callers. The full interface and operation coverage map must exist before starting; this task does not own creating the interface:\n",
+        "\n",
+        "- Cover design, mockups, task/QA data, rules, memory, project identity, coordination, queries/search, revisions, seeding and migrations.\n",
+        "- Replace direct database access in desktop commands, MCP handlers and background QA paths with shared domain/storage operations.\n",
+        "- Preserve current SQLite files and schema migration behavior, integer IDs, design links, task lifecycle, recoverable drafts, history and idempotency receipts.\n",
+        "- Keep validation, reference checks, resource-version/readToken comparison, writes and operation receipts within a single atomic operation.\n",
+        "- Keep per-computer checkout mappings and existing user-level app settings working. Opening or reading an initialized store must not create incidental data changes.\n",
+        "\n",
+        "Acceptance: the current SQLite project works through both desktop and MCP, using one SQLite adapter implementation. Production SQL and rusqlite connection handling are confined to the SQLite backend and its migration code; no client-specific persistence path remains. Existing data remains readable without export/import.\n",
+        "\n",
+        "Task 24 implementation handoff:\n",
+        "- The complete compiled contract is src-tauri/storage-api/src/api.rs: implement StorageFactory, StorageBackend and every ReadSnapshot member, then connect the selecting ProjectStore through StorageClient to ProjectStorage.\n",
+        "- Typed writes/results are in src-tauri/storage-api/src/changes.rs. Shared preparation, version/token/reference checks and receipts are in validation.rs; existing domain DTOs are extracted and reexported, preserving transport shapes.\n",
+        "- Follow docs/storage-api-migration.md for the operation-to-interface map, direct SQLite call-site audit, cache boundaries and acceptance checklist. docs/project-storage.md describes the shared lifecycle and backend selection.\n",
+        "- The current ProjectStore deliberately implements only RuleStorage until this task. Remove that transitional interface/connection escape hatch after all production callers move.\n",
+        "- Preserve health waivers as project content. Route regenerable health scans and PNG previews through LocalDerivedCache. Separate QA process execution from StartRun/CompleteJob/CompleteRun storage commits; seed versions for QA run/evidence, computer and legacy resources in an explicit migration.\n",
+        "- Task 24 tests use a scripted non-SQLite backend to prove the interface/protocol; this task must supply real SQLite implementation/conformance and caller coverage."
+      ]
+    },
+    "id": 14,
+    "number": 11,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "closed",
+    "title": "Storage 04/13 — Implement SQLite against the complete storage API and migrate callers",
+    "updated_at": "2026-09-23 17:32:09"
+  },
+  "deleted": false,
+  "identity": "211a4a28-cbc9-8061-9298-bd570bc80ed7",
+  "schemaVersion": 1
+}

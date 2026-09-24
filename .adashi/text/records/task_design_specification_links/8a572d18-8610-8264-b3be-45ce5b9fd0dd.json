@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-07-18 14:35:26",
+    "design_external_id": "ui-mockup-editor",
+    "id": 52,
+    "sort_order": 0,
+    "target_type": "element",
+    "task_id": {
+      "ref": "2db9d10b-13c7-8dda-ad46-449f0ea6a269"
+    }
+  },
+  "deleted": false,
+  "identity": "8a572d18-8610-8264-b3be-45ce5b9fd0dd",
+  "schemaVersion": 1
+}

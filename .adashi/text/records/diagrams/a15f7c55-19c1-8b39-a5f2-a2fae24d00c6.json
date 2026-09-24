@@ -1,0 +1,58 @@
+{
+  "collection": "diagrams",
+  "data": {
+    "attached_to_external_id": "mcp-concurrency-api",
+    "created_at": "2026-07-31 08:48:51",
+    "diagram_type": "sequence",
+    "id": 42,
+    "key": "ResourceScopedMutationSequence",
+    "kind": "mermaid",
+    "sort_order": 25,
+    "source": {
+      "lines": [
+        "sequenceDiagram\n",
+        "    autonumber\n",
+        "    participant Agent\n",
+        "    participant API as Adashi MCP Server\n",
+        "    participant Concurrency as Resource Concurrency API\n",
+        "    participant Store as Project Data Store\n",
+        "    participant UI as Dashboard UI\n",
+        "    Agent->>API: Read targeted editable state\n",
+        "    API->>Store: Load a consistent resource snapshot\n",
+        "    Store-->>API: Document with hash token or other domain record with version\n",
+        "    API-->>Agent: Target state and its concurrency token\n",
+        "    opt Advisory scheduling\n",
+        "        Agent->>Concurrency: Publish optional expiring resource intent\n",
+        "    end\n",
+        "    Agent->>API: Submit intended mutation and returned target token\n",
+        "    API->>Concurrency: Derive required dependency checks internally\n",
+        "    Concurrency->>Store: Begin transaction and compare target preconditions\n",
+        "    alt Target matches and mutation is valid\n",
+        "        Concurrency->>Store: Revalidate current references and destructive dependencies\n",
+        "        Concurrency->>Store: Commit all changes and advance touched versions and notification cursor\n",
+        "        Store-->>Agent: Success and new target token\n",
+        "        UI->>Store: Detect cursor change and retrieve changed resources\n",
+        "        UI->>UI: Merge updates while preserving workspace state\n",
+        "    else Design document hash differs\n",
+        "        Concurrency->>Store: Read full currentDocument and matching readToken\n",
+        "        Concurrency->>Store: End transaction without changes\n",
+        "        Concurrency-->>Agent: out_of_date, stored false, currentDocument, readToken, merge request\n",
+        "        Agent->>Agent: Merge intended edits into returned currentDocument\n",
+        "        Agent->>API: Retry merged content with returned token\n",
+        "    else Other domain conflict or validation failure\n",
+        "        Concurrency->>Store: Roll back all attempted changes\n",
+        "        Concurrency-->>Agent: Structured domain conflict or detailed validation error\n",
+        "    end\n",
+        "    Note over Agent,Store: Every retry is checked again and unrelated resource changes do not invalidate a write"
+      ]
+    },
+    "title": "Resource-scoped mutation with design document read tokens",
+    "updated_at": "2026-09-16 08:20:47",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "a15f7c55-19c1-8b39-a5f2-a2fae24d00c6",
+  "schemaVersion": 1
+}

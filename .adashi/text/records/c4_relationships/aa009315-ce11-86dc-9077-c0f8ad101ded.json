@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Persists task create, delete, read, update, finish, and design-link operations in",
+    "destination_external_id": "store-taskqa-dummy",
+    "external_id": "33",
+    "id": 32,
+    "source_external_id": "mcp-task-api",
+    "tags": "Relationship",
+    "technology": "SQL transaction",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "aa009315-ce11-86dc-9077-c0f8ad101ded",
+  "schemaVersion": 1
+}

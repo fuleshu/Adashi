@@ -1,0 +1,53 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[\"src-tauri/Cargo.lock\",\"src-tauri/Cargo.toml\",\"src-tauri/src/design.rs\",\"src-tauri/src/lib.rs\",\"src-tauri/src/mcp.rs\",\"src-tauri/src/qa.rs\",\"src-tauri/src/schema.rs\",\"src-tauri/src/schema.sql\",\"src-tauri/src/tasks.rs\",\"src/main.tsx\",\"src/styles.css\"]",
+    "completed_at": "2026-07-18 15:20:22",
+    "completion_memo": "Implemented the complete UI mockup extension foundation while keeping the direct SVG editor out of scope. Added project-local schema/runtime for accepted SVG, drafts, edit logs, annotations, proposals, lifecycle status, revision guards, safe SVG validation, and deterministic PNG rendering; extended formal design retrieval/search/save and task/QA links with a separate mockup artifact kind; added the two deterministic MCP tools including mixed structured and PNG image content; added Tauri lifecycle commands, dashboard payloads, Design Browser Mockup tabs, comparison, navigation, and user-controlled lifecycle actions. Verified with cargo fmt, 30 passing Rust tests, MCP binary build, production frontend build, git diff --check, live configured-project migration, fresh-server tool discovery, and a fresh-server pending-list call.",
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-07-18 14:34:17",
+    "created_files": "[\"src-tauri/src/mockups.rs\"]",
+    "description": {
+      "lines": [
+        "Objective:\n",
+        "Implement the approved first-class static layered-SVG mockup extension across the project-local schema, shared Rust domain/runtime, MCP surface, transactional formal-design APIs, Tauri commands, dashboard payloads, and Design Browser integration. This task establishes the complete revision and rendering contract but deliberately excludes the direct-manipulation SVG editor, which is covered by the separate editor task.\n",
+        "\n",
+        "Required scope:\n",
+        "1. Add migrations and Rust domain types for UI mockup artifacts, lightweight manifests, accepted SVG and revision, recoverable working SVG and base revision, ordered edit operations, separate vector annotations, AI proposals, lifecycle status, and derived PNG preview cache metadata.\n",
+        "2. Keep accepted layered SVG as the formal visual source. Do not introduce a composition-complete JSON layout model. Store only lightweight manifest fields such as key, explicit C4 attachment, viewport, screen, state, fidelity, and schema version.\n",
+        "3. Implement the shared UI Mockup Runtime used by Tauri and MCP paths. Sanitize and validate SVG, require stable data-adashi-id values, preserve data-role and data-label metadata, reject scripts and unsafe external resources, maintain the separate annotation layer, enforce base and project revisions, and bump the shared project revision after mutations.\n",
+        "4. Generate deterministic PNG previews from the same SVG viewport and font contract shown by Adashi. PNG remains derived evidence and may be generated on demand or cached by source revision.\n",
+        "5. Add deterministic MCP tools adashi_mockup_list_pending_revisions and adashi_mockup_get_revision_context. The context response must include accepted and working SVG, lightweight manifest, ordered edit log, vector annotation paths, and an Adashi-rendered PNG image content block. The MCP exposes facts only and performs no AI interpretation.\n",
+        "6. Extend formal design retrieval, search, explicit-id reads, target inventories, transactional design save, and design-link resolution for UI mockup artifacts without adding mockups to umlArtifactTypes. Support validated initial mockup creation and AI-proposed revisions through the design save boundary with expectedRevision.\n",
+        "7. Ensure an AI proposal never replaces accepted SVG directly. Implement user-controlled request, compare, accept, reject, resume editing, discard draft, and delete lifecycle commands. Rejection must preserve the working SVG, edit log, and annotations.\n",
+        "8. Extend task and QA design-specification links so mockup artifact ids can be attached, titled, resolved, retrieved, and navigated like C4 and UML specifications.\n",
+        "9. Integrate local Mockup tabs and the UI Mockup Workspace into the Design Browser for attached user-facing C4 elements. Show accepted, working, pending-agent, and proposed states; before and after previews; Request AI revision; accept, reject, discard, and delete actions. Route all commands through Tauri and preserve current UI state during revision-based refresh.\n",
+        "10. Add focused migration, domain, sanitization, lifecycle, stale-revision, MCP mixed-content, PNG-rendering, task-link, QA-link, Tauri-command, dashboard-payload, and real runtime integration tests.\n",
+        "\n",
+        "Acceptance criteria:\n",
+        "- Accepted SVG, working draft, annotations, proposal, and lifecycle status round-trip through project-local persistence.\n",
+        "- The same revision context returns parseable SVG and structured evidence plus a visually matching PNG without requiring Codex-side SVG conversion.\n",
+        "- Unsafe SVG content and stale base or project revisions are rejected transactionally.\n",
+        "- Agent proposals remain candidates until explicit user acceptance; rejection and resumed editing lose no user draft evidence.\n",
+        "- Mockups appear as a separate local artifact kind in design retrieval, Design Browser tabs, task links, and QA links, never as UML.\n",
+        "- Project revision polling merges mockup changes without resetting unrelated dashboard state.\n",
+        "- Tests prove the extension works with the desktop app running and through a freshly started MCP server.\n",
+        "\n",
+        "Out of scope:\n",
+        "The selectable canvas, drag and resize tools, primitive palette, inline text editing, grouping, z-order controls, undo and redo, pencil, eraser, and callout tools belong to the separate Layered SVG Mockup Editor task."
+      ]
+    },
+    "id": 8,
+    "number": 6,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "closed",
+    "title": "Implement the UI mockup extension foundation, MCP API, storage, runtime, and app integration",
+    "updated_at": "2026-09-23 17:31:42"
+  },
+  "deleted": false,
+  "identity": "f0b9bdfd-5528-8bf8-8189-f23d58a40009",
+  "schemaVersion": 1
+}

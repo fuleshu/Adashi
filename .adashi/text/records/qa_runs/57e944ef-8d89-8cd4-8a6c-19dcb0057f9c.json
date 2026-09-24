@@ -1,0 +1,18 @@
+{
+  "collection": "qa_runs",
+  "data": {
+    "finished_at": "2026-07-08 11:03:39",
+    "id": 3,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "query_snapshot": "{\"jobIds\":[1,2],\"states\":null,\"tags\":null,\"taskIds\":null,\"designExternalIds\":null,\"enabled\":null}",
+    "started_at": "2026-07-08 11:03:22",
+    "status": "passed",
+    "summary": "2 passed, 0 failed, 0 timed out",
+    "trigger_source": "dashboard"
+  },
+  "deleted": false,
+  "identity": "57e944ef-8d89-8cd4-8a6c-19dcb0057f9c",
+  "schemaVersion": 1
+}

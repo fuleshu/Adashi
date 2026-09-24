@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Reads memory, rules, tasks, and formal design context through",
+    "destination_external_id": "5",
+    "external_id": "10",
+    "id": 1,
+    "source_external_id": "1",
+    "tags": "Relationship",
+    "technology": "MCP",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "b00db0f4-4e14-88e3-b0dd-b896a78ad041",
+  "schemaVersion": 1
+}

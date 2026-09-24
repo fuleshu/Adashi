@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "storage-text|file|src-tauri/src/storage/text/guards.rs",
+    "resource_kind": "design.binding",
+    "updated_at": "2026-09-23 18:09:15",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "6172c9fb-02fa-80e4-950e-f166c8e5cb33",
+  "schemaVersion": 1
+}

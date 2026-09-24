@@ -1,0 +1,17 @@
+{
+  "collection": "design_bindings",
+  "data": {
+    "created_at": "2026-07-07 09:35:11",
+    "design_external_id": "renderer-selection-bridge",
+    "id": 34,
+    "target": "public/structurizr/viewer.html",
+    "target_type": "file",
+    "updated_at": "2026-07-07 09:35:11",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "ec4af1d8-fd2a-8e38-9f69-2fd374158eb4",
+  "schemaVersion": 1
+}

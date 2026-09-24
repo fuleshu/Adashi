@@ -1,0 +1,16 @@
+{
+  "collection": "qa_job_design_links",
+  "data": {
+    "created_at": "2026-07-08 11:40:46",
+    "design_external_id": "5",
+    "id": 6,
+    "qa_job_id": {
+      "ref": "32f3a09e-b3ea-8673-a802-33701dd4b4d3"
+    },
+    "sort_order": 0,
+    "target_type": "element"
+  },
+  "deleted": false,
+  "identity": "e662c8a9-3ec8-895a-8d33-b754148763eb",
+  "schemaVersion": 1
+}

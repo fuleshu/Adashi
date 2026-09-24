@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Local multi-project context layer for agentic coding workspaces, covering formal design browsing, MCP rule injection, project memory, implementation tasks, QA evidence, and project-local state.",
+    "element_type": "Software System",
+    "external_id": "2",
+    "id": 2,
+    "name": "Adashi",
+    "parent_external_id": null,
+    "tags": "Element,Software System",
+    "technology": "",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "d6fc492c-d866-8c8f-8a1f-7086d89b75b9",
+  "schemaVersion": 1
+}

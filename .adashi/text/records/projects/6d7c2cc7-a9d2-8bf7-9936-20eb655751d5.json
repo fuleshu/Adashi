@@ -1,0 +1,14 @@
+{
+  "collection": "projects",
+  "data": {
+    "created_at": "2026-07-06 09:23:14",
+    "id": 1,
+    "name": "Adashi",
+    "repository_path": null,
+    "slug": "adashi",
+    "updated_at": "2026-09-22 07:55:41"
+  },
+  "deleted": false,
+  "identity": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5",
+  "schemaVersion": 1
+}

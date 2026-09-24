@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Application-level JSON settings section for reusable lifecycle rule templates. Templates live in `%LOCALAPPDATA%\\Adashi\\settings.json` rather than any project database, so they can be reused across projects.",
+    "element_type": "Component",
+    "external_id": "store-rule-templates",
+    "id": 66,
+    "name": "Rule Template Settings Store",
+    "parent_external_id": "9",
+    "tags": "Settings,Rules",
+    "technology": "Rust settings serialization / JSON",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "5a7c3ebd-70bb-8d3c-a8f6-fba824007e85",
+  "schemaVersion": 1
+}

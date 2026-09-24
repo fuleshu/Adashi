@@ -1,0 +1,23 @@
+{
+  "collection": "qa_jobs",
+  "data": {
+    "command": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "created_at": "2026-07-08 11:40:39",
+    "created_by": "codex",
+    "description": "Runs the Rust test suite that currently covers the MCP-adjacent Rust backend, including design-save regression tests compiled through the same crate as the MCP server.",
+    "enabled": 1,
+    "id": 3,
+    "name": "MCP Rust unit tests",
+    "number": 3,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "shell": "powershell",
+    "timeout_seconds": 180,
+    "updated_at": "2026-07-08 11:40:39",
+    "working_directory": ""
+  },
+  "deleted": false,
+  "identity": "aefc4085-60c0-86cd-9162-199a61fd7ef7",
+  "schemaVersion": 1
+}

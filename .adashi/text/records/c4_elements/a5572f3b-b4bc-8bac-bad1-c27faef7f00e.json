@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Shared Rust/Tauri execution boundary for persisted QA jobs. Resolves query-selected jobs, snapshots command definitions, runs one or more jobs as an ad hoc execution group, captures stdout/stderr/exit metadata, persists run evidence, and bumps the project revision.",
+    "element_type": "Component",
+    "external_id": "desktop-qa-runtime",
+    "id": 59,
+    "name": "QA Execution Runtime",
+    "parent_external_id": "3",
+    "tags": "Runtime,QA",
+    "technology": "Rust, Tauri, child process execution, SQLite",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "a5572f3b-b4bc-8bac-bad1-c27faef7f00e",
+  "schemaVersion": 1
+}

@@ -1,0 +1,56 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[\"src-tauri/src/design.rs\",\"src-tauri/src/fixed_hooks.rs\",\"src-tauri/src/lib.rs\",\"src-tauri/src/mcp.rs\",\"src-tauri/src/memory.rs\",\"src-tauri/src/mockups.rs\",\"src-tauri/src/qa.rs\",\"src-tauri/src/rules.rs\",\"src-tauri/src/schema.rs\",\"src-tauri/src/tasks.rs\",\"src/MockupEditor.tsx\",\"src/main.tsx\"]",
+    "completed_at": "2026-07-31 10:15:53",
+    "completion_memo": "Implemented resource-scoped optimistic concurrency across Adashi. Project revision is notification-only; mutable resources expose monotonic versions; design mutations use explicit read/write guards; conflicts are structured and compact; mutation retries are idempotent; advisory intents have TTLs; memory supports append-only notes and canonical compaction; mockups have independent accepted and working versions; MCP, Tauri, and React callers were migrated. Verification: full Rust suite passed (54 tests, 0 failures), Vite production build passed, fresh adashi-mcp stdio verification found 33 tools with closed schemas, and git diff --check passed. No task-linked QA jobs existed.",
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-07-31 08:49:30",
+    "created_files": "[\"src-tauri/src/concurrency.rs\",\"src-tauri/src/concurrency_schema.sql\",\"src-tauri/src/desktop.rs\",\"src-tauri/src/desktop_module.rs\",\"src-tauri/src/project.rs\"]",
+    "description": {
+      "lines": [
+        "Implement the approved formal design that decouples safe mutation preconditions from the global project revision.\n",
+        "\n",
+        "Required behavior:\n",
+        "- Keep project_state.revision as a notification-only project change cursor. Bump it once after each successful changed transaction; never use it as the general overwrite-prevention gate.\n",
+        "- Add monotonically increasing resource versions to independently mutable design elements, relationships, UML artifacts, bindings, tasks, QA job definitions, lifecycle rules, canonical memory/protocol state, and mockup working and accepted state. Reads through MCP and Tauri must expose the relevant versions.\n",
+        "- Replace project-wide expectedRevision checks with resource-scoped expected versions for updates and deletes. Multi-resource design saves must carry an explicit read/write set, validate every required version and current dependency inside one transaction, and either store all changes or none.\n",
+        "- Allow independent creates under stable unique ids and commit-time referential validation. Concurrent creates of different resources must not conflict. Duplicate identity, stale targeted updates, and structural deletes with changed dependents must fail deterministically.\n",
+        "- Return compact structured conflicts containing resource kind, resource id, expected version, and current version. Agents and the dashboard reload only conflicted resources; there must be no blind retry or silent overwrite.\n",
+        "- Preserve semantic no-op behavior: no changed resource version and no project cursor bump.\n",
+        "- Add idempotency keys for mutation retries.\n",
+        "- Add advisory agent resource intents with agent/run identity and TTL. Intents help scheduling but never grant write authority, block a valid versioned commit, or substitute for concurrency checks.\n",
+        "- Add append-only, idempotent project memory notes keyed by run and optional task. Normal agent completion appends a note rather than replacing the shared memory body. Canonical memory compaction is an explicit coordinator operation conditioned on the canonical-memory version and must preserve notes that arrived after the compaction snapshot. Version the memory protocol rule separately.\n",
+        "- Give mockups independent accepted and working revisions so unrelated mockups never block each other and same-mockup overlap is detected precisely.\n",
+        "- Update every in-repo MCP and Tauri mutation caller in the same task. Do not introduce a Last-Write-Wins compatibility path. If a temporary legacy expectedRevision input is retained during migration, it must remain the stricter project-wide fallback and be clearly deprecated.\n",
+        "- Keep the dashboard's existing mounted-state and surgical merge behavior. Present resource-specific conflicts without resetting unrelated UI state.\n",
+        "\n",
+        "Verification and regressions:\n",
+        "- Two agents updating different resources from the same initial project cursor both succeed.\n",
+        "- Two agents updating the same resource produce one success and one precise non-storing conflict.\n",
+        "- Disjoint items inside task, QA, rule, design, and mockup families do not conflict.\n",
+        "- Mixed design changes remain atomic when any targeted version or dependency is stale.\n",
+        "- Concurrent unique creates succeed; duplicate ids and unsafe structural deletion fail without partial state.\n",
+        "- Memory note retry is idempotent, parallel notes are preserved, and compaction cannot drop a later note.\n",
+        "- Expired intents disappear and live intents remain advisory only.\n",
+        "- No-op retries do not increment resource versions or the project cursor.\n",
+        "- UI polling still detects external commits and merges changed records without resetting active workspaces.\n",
+        "- Generated MCP schemas remain closed and operation-specific, and fresh stdio verification proves the new contracts.\n",
+        "\n",
+        "Do not add CRDTs, long-held database locks, an event bus, or a full collaborative editor. Keep SQLite transactions short and make correctness depend on resource versions plus commit-time validation."
+      ]
+    },
+    "id": 11,
+    "number": 8,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "closed",
+    "title": "Implement resource-scoped optimistic concurrency for parallel agents",
+    "updated_at": "2026-09-23 17:31:50"
+  },
+  "deleted": false,
+  "identity": "206a48e3-659b-8deb-9d82-216db4fd2ff1",
+  "schemaVersion": 1
+}

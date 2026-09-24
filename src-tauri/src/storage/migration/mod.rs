@@ -34,6 +34,9 @@ pub(crate) fn lock(project: &ProjectRegistration) -> StorageResult<text::journal
 pub(crate) fn recover(project: &ProjectRegistration) -> StorageResult<()> {
     journal::recover(Path::new(&project.folder))
 }
+pub(crate) fn recover_for_read(project: &ProjectRegistration) -> StorageResult<()> {
+    journal::recover_for_read(Path::new(&project.folder))
+}
 fn adapter(kind: &str) -> StorageResult<Box<dyn MigrationAdapter>> {
     match kind {
         "sqlite" => Ok(Box::new(sqlite::transfer::SqliteMigrationAdapter)),
@@ -62,11 +65,12 @@ pub(crate) struct MigrationReport {
     pub backend: String,
     pub backup_folder: String,
     pub counts: BTreeMap<String, usize>,
+    pub warnings: Vec<String>,
 }
 
 pub(crate) fn status(project: &ProjectRegistration) -> StorageResult<StorageStatus> {
     let _lock = lock(project)?;
-    recover(project)?;
+    recover_for_read(project)?;
     let (descriptor, _) = config::resolve(project)?;
     descriptor.require_available()?;
     Ok(StorageStatus {
@@ -118,7 +122,7 @@ pub(crate) fn preview(
     target: &str,
 ) -> StorageResult<MigrationPreview> {
     let _lock = lock(project)?;
-    recover(project)?;
+    recover_for_read(project)?;
     let (descriptor, _) = config::resolve(project)?;
     descriptor.require_available()?;
     adapter(target)?;
@@ -232,20 +236,13 @@ pub(crate) fn convert(
         Some(serde_json::to_vec_pretty(&selected).map_err(StorageError::backend)?),
     );
     let activation = journal::Activation::prepare(root, after)?;
-    activation.save(root, &backup)?;
     // Local checkout state is part of the image and is shared by adapters. The
     // journal publishes it, so check the source immediately before publication.
-    let result = activation.publish(root, || source.ensure_unchanged());
-    drop(source);
-    if let Err(error) = result {
-        recover(project)?;
-        if config::resolve(project)?.0 != selected {
-            return Err(error);
-        }
-    }
+    let warnings = activation.execute(root, &backup, || source.ensure_unchanged())?;
     Ok(MigrationReport {
         backend: target.into(),
         backup_folder: backup.to_string_lossy().into_owned(),
         counts,
+        warnings,
     })
 }

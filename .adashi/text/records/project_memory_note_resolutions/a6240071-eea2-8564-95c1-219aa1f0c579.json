@@ -1,0 +1,17 @@
+{
+  "collection": "project_memory_note_resolutions",
+  "data": {
+    "note_id": {
+      "ref": "72b1f31b-1b5f-834b-9108-5f62d69c9e60"
+    },
+    "operation_id": "context-efficiency-adashi-memory-review-20260908",
+    "project_id": {
+      "ref": "72b1f31b-1b5f-834b-9108-5f62d69c9e60"
+    },
+    "resolved_at": "2026-09-08 19:34:06",
+    "summary_version": 3
+  },
+  "deleted": false,
+  "identity": "a6240071-eea2-8564-95c1-219aa1f0c579",
+  "schemaVersion": 1
+}

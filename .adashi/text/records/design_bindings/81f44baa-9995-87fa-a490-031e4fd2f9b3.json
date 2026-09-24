@@ -1,0 +1,17 @@
+{
+  "collection": "design_bindings",
+  "data": {
+    "created_at": "2026-09-23 18:47:57",
+    "design_external_id": "storage-migration",
+    "id": 128,
+    "target": "docs/storage-migration.md",
+    "target_type": "file",
+    "updated_at": "2026-09-23 18:47:57",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "81f44baa-9995-87fa-a490-031e4fd2f9b3",
+  "schemaVersion": 1
+}

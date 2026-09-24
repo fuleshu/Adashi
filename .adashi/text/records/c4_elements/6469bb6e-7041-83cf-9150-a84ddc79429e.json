@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Planned tasks 20-23. Selected SQL engine behind the same domain contract, project isolation, authenticated user authorization and attribution, secure local credential resolution, atomic resource guards/receipts and committed change notifications. Reconnect/unknown commits resolve through durable operation identity; no silent local fallback. Engine and trust boundary are selected in task 20.",
+    "element_type": "Component",
+    "external_id": "storage-server-sql",
+    "id": 163,
+    "name": "Server SQL Storage Adapter",
+    "parent_external_id": "6",
+    "tags": "Element,Component,Storage",
+    "technology": "Rust storage contract",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "6469bb6e-7041-83cf-9150-a84ddc79429e",
+  "schemaVersion": 1
+}

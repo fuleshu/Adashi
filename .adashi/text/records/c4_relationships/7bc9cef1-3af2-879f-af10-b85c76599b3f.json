@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Submits narrow design fact edits through",
+    "destination_external_id": "desktop-direct-design-edit",
+    "external_id": "26",
+    "id": 25,
+    "source_external_id": "ui-design-browser",
+    "tags": "Relationship",
+    "technology": "Tauri IPC",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "7bc9cef1-3af2-879f-af10-b85c76599b3f",
+  "schemaVersion": 1
+}

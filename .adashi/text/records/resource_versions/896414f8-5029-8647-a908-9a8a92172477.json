@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "storage-mcp-core",
+    "resource_kind": "design.relationship",
+    "updated_at": "2026-09-23 10:20:02",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "896414f8-5029-8647-a908-9a8a92172477",
+  "schemaVersion": 1
+}

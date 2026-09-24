@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Selects the implemented shared text backend for a text descriptor; both clients use the same typed contract",
+    "destination_external_id": "storage-text",
+    "external_id": "storage-core-text",
+    "id": 130,
+    "source_external_id": "storage-core",
+    "tags": "",
+    "technology": "Shared typed Rust API",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "89676276-2f67-858d-aea5-d7b05671db79",
+  "schemaVersion": 1
+}

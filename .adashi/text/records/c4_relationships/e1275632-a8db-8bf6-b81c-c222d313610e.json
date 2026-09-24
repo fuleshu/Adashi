@@ -1,0 +1,18 @@
+{
+  "collection": "c4_relationships",
+  "data": {
+    "description": "Displays accepted, working, annotated, and proposed layered SVG through",
+    "destination_external_id": "renderer-mockup-svg",
+    "external_id": "rel-mockup-workspace-renderer",
+    "id": 75,
+    "source_external_id": "ui-mockup-workspace",
+    "tags": "Relationship,UI Mockup",
+    "technology": "React props and SVG DOM",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "e1275632-a8db-8bf6-b81c-c222d313610e",
+  "schemaVersion": 1
+}

@@ -1,0 +1,19 @@
+{
+  "collection": "c4_elements",
+  "data": {
+    "description": "Dashboard task workspace with a classic task list on the left and editable task detail on the right. It defaults to open plus finished tasks, offers state filters, lets the user create/delete tasks, confirm finished work, and add/remove multiple linked design specifications through searchable design-scope selection; clicking a design link jumps to that design browser scope.",
+    "element_type": "Component",
+    "external_id": "ui-taskqa-placeholder",
+    "id": 23,
+    "name": "Task Workspace View",
+    "parent_external_id": "4",
+    "tags": "Element,Component",
+    "technology": "React, TypeScript, Tauri IPC",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "0633842d-50b7-8fb7-8496-6488990334ab",
+  "schemaVersion": 1
+}
