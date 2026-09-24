@@ -94,10 +94,6 @@ fn invalid_and_unavailable_descriptors_never_create_a_database() {
             "storage.invalid_configuration",
         ),
         (
-            r#"{"schemaVersion":1,"backend":{"kind":"text"}}"#,
-            "storage.backend_unavailable",
-        ),
-        (
             r#"{"schemaVersion":1,"backend":{"kind":"serverSql","connectionProfile":"team","namespace":"p"}}"#,
             "storage.backend_unavailable",
         ),
@@ -136,7 +132,7 @@ fn project_selection_is_independent_and_invalid_selection_cannot_modify_existing
     first.descriptor(r#"{"schemaVersion":1,"backend":{"kind":"text"}}"#);
     assert!(matches!(
         ProjectStore::open_for_computer(&first.project, "fixture-computer"),
-        Err(StorageError::BackendUnavailable(_))
+        Err(StorageError::Validation(_))
     ));
     assert_eq!(fs::read(&path).unwrap(), before);
     let mut available = second.open();

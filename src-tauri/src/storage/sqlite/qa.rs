@@ -161,7 +161,7 @@ fn load_latest_job_run_summary(
         "SELECT id, qa_run_id, status, exit_code, started_at, finished_at, duration_ms
          FROM qa_job_runs
          WHERE qa_job_id = ?1
-         ORDER BY id DESC
+         ORDER BY started_at DESC, id DESC
          LIMIT 1",
         params![qa_job_id],
         read_job_run_summary,
@@ -448,7 +448,7 @@ pub fn load_runs(
             "SELECT id, trigger_source, query_snapshot, status, started_at, finished_at, summary
              FROM qa_runs
              WHERE project_id = ?1
-             ORDER BY id DESC
+             ORDER BY started_at DESC, id DESC
              LIMIT ?2",
         )
         .map_err(|err| err.to_string())?;
@@ -474,7 +474,7 @@ pub fn load_run_summaries(
             "SELECT id, trigger_source, query_snapshot, status, started_at, finished_at, summary
              FROM qa_runs
              WHERE project_id = ?1
-             ORDER BY id DESC
+             ORDER BY started_at DESC, id DESC
              LIMIT ?2",
         )
         .map_err(|err| err.to_string())?;
@@ -506,7 +506,7 @@ fn load_run_job_statuses(db: &Connection, qa_run_id: i64) -> Result<Vec<QaRunJob
             "SELECT qa_job_id, status, exit_code, duration_ms
              FROM qa_job_runs
              WHERE qa_run_id = ?1
-             ORDER BY id",
+             ORDER BY started_at, id",
         )
         .map_err(|err| err.to_string())?;
     let rows = statement
@@ -1099,7 +1099,7 @@ fn load_latest_job_run(db: &Connection, qa_job_id: i64) -> Result<Option<QaJobRu
                 started_at, finished_at, duration_ms, output
          FROM qa_job_runs
          WHERE qa_job_id = ?1
-         ORDER BY id DESC
+         ORDER BY started_at DESC, id DESC
          LIMIT 1",
         params![qa_job_id],
         read_job_run,
@@ -1119,7 +1119,7 @@ fn load_job_run_history(
                     started_at, finished_at, duration_ms, output
              FROM qa_job_runs
              WHERE qa_job_id = ?1
-             ORDER BY id DESC
+             ORDER BY started_at DESC, id DESC
              LIMIT ?2",
         )
         .map_err(|err| err.to_string())?;
@@ -1138,7 +1138,7 @@ fn load_job_runs_for_run(db: &Connection, qa_run_id: i64) -> Result<Vec<QaJobRun
                     started_at, finished_at, duration_ms, output
              FROM qa_job_runs
              WHERE qa_run_id = ?1
-             ORDER BY id",
+             ORDER BY started_at, id",
         )
         .map_err(|err| err.to_string())?;
     let rows = statement
@@ -1159,7 +1159,7 @@ pub(crate) fn prune_job_run_history(db: &Connection, qa_job_id: i64) -> Result<(
                 FROM qa_job_runs
                 WHERE qa_job_id = ?1
                   AND qa_run_id IN (SELECT id FROM qa_runs WHERE status != 'running')
-                ORDER BY id DESC
+                ORDER BY started_at DESC, id DESC
                 LIMIT 2
            )",
         params![qa_job_id],
@@ -1292,6 +1292,9 @@ fn required_trimmed<'a>(value: &'a str, label: &str) -> Result<&'a str, String> 
 }
 
 fn next_job_number(db: &Connection, project_id: i64) -> Result<i64, String> {
+    if let Some(number) = crate::storage::text::random_number(db, "qa_jobs")? {
+        return Ok(number);
+    }
     db.query_row(
         "SELECT COALESCE(MAX(number), 0) + 1 FROM qa_jobs WHERE project_id = ?1",
         params![project_id],

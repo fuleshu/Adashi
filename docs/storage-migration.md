@@ -1,0 +1,136 @@
+# Switching project storage
+
+In **Settings → Project storage**, choose **SQLite database** or **Git text
+files**, then **Review conversion**. The preview includes record counts and
+warnings. **Convert and switch** copies and verifies the project before changing
+its selection. Each project has its own selection; desktop and MCP resolve the
+same `.adashi/storage.json`.
+
+An existing destination is never replaced silently. When returning to a backend
+that already has files, explicitly select **Preserve the existing destination in
+a backup and replace it**. This replaces that inactive destination with the
+current project's data; it does not merge the two datasets.
+
+Conversion preserves task IDs/numbers, design relationships and bindings, UML,
+rules, fixed prompts, memory and note-resolution history, QA definitions and
+completed evidence, mockup drafts/annotations/proposals and legacy content.
+Request retry results survive conversion within the same checkout as local runtime
+state; they are not exported to Git. Numeric guards are refreshed when needed to
+reject drafts opened before the switch. Local retries keep their original responses.
+Derived caches and renderer output are rebuilt. Computer checkout paths and
+local execution provenance remain local.
+
+Finish running QA reservations before converting. Keep Git checkout/merge and
+external file editing idle during conversion. Unknown schemas, collections,
+fields, inconsistent references and unresolved text conflicts stop conversion;
+Adashi does not discard them.
+
+## Git and a second clone
+
+For a text project, commit these files **together**:
+
+- `.adashi/storage.json` (the backend and activation generation).
+- `.adashi/text/format.json` and every `.adashi/text/records/**/*.json` record,
+  including tombstones.
+- The project's `.gitignore` change.
+
+Conversion appends a narrow managed ignore block, preserving existing rules.
+The block includes the descriptor and canonical text files while ignoring
+`.adashi/local/`, SQLite files and sidecars, conversion backups, derived caches
+and publication temporary files. Ignore rules do not untrack files already in
+Git: review `git status` and the index before committing. If an older database
+is tracked, remove it from the index yourself when adopting text storage; the
+conversion retains its local contents.
+
+Clone the repository, then register that clone's folder in Adashi on the second
+computer. The portable project identity stays the same. Its machine-specific
+checkout path is registered locally; opening/polling does not rewrite shared
+records. Both desktop and MCP read the text descriptor. Do not copy
+`.adashi/local/` between machines. Run new QA reservations in the second clone;
+copied reservations are not execution authority. Absolute QA working paths are
+retained and reported in the conversion preview for review.
+
+SQLite selection requires that checkout's database. A descriptor selecting
+SQLite is not a portable copy of the database; distribute the data explicitly
+or keep the shared project in text format. Avoid switching a shared branch's
+descriptor back to SQLite without coordinating how other clones obtain data.
+An activated descriptor with missing data fails clearly instead of creating an
+empty replacement project.
+
+See [the text contract](storage-text-format.md) for merge and conflict rules.
+
+## Transactions, backups and recovery
+
+The shared migration service uses the `MigrationAdapter`/`SourceSnapshot`
+contract. It holds a checkout-wide OS lock, pins SQLite with `BEGIN IMMEDIATE`
+(or holds the text adapter lock), exports the complete portable image and
+creates a destination in `.adashi/local/migrations/<generation>/destination/`.
+It validates the staged schema, all record counts and a semantic SHA-256 over
+all authoritative rows plus local computer records and exact local retry results.
+Current resource guards and their update timestamps are excluded because activation
+rebases those guards; incidental SQL insertion times for local retry results are
+also excluded. Request bookkeeping is absent from the project record counts.
+
+The preview token binds the source descriptor/data, destination files and
+`.gitignore`. An intervening change requires a fresh preview. The source is
+checked again before publication and activation. SQLite's writer reservation
+also prevents non-Adashi SQLite writers from committing during conversion;
+text edits are checked against file contents. Arbitrary external filesystem
+writers must still be kept idle during the final atomic descriptor replacement.
+
+Each migration folder retains a usable `source/` project, a verified
+`destination/` project payload and `activation.json` containing the exact
+before/after images of every replaced path. The source backend files remain in
+place. Returning to that backend archives its previous file images before
+replacement. UUID identity hints and deleted alias high-water marks survive
+SQLite/text round trips. Backups are never automatically deleted.
+
+The descriptor is written last and includes a new generation UUID. All newly
+issued cursors include that selection's fingerprint. Existing project handles
+reject further operations after selection changes; each new desktop/MCP
+operation resolves the descriptor again. Already obtained snapshots remain
+internally consistent. Native polling notices the changed cursor, preserves
+dirty editor state, and requires conflict review before saving stale drafts.
+
+Publication records `.adashi/local/storage-migration.json` before touching the
+destination. On the next open, recovery rolls back target/local files if the
+old descriptor is selected, or completes publication if the new descriptor is
+selected. Failures before activation keep the source selected and retain the
+backup. If an external edit matches neither journal image, recovery stops and
+keeps the edit, journal and backups for explicit reconciliation. Do not delete
+the journal to bypass that check. A locked destination file similarly prevents
+activation; close the process holding that inactive file and retry the preview.
+
+To inspect a source backup, copy its `source/` folder to a separate location and
+register that folder. Do not copy a backup over a live project. The generated
+architecture files and application-wide settings are outside project storage
+and are not part of a backend conversion.
+
+## Verification
+
+`storage::migration` tests cover full projects with linked content, pending
+mockup proposals and drafts, note resolutions, QA history, original receipts,
+three consecutive conversions, stale handles/guards, source edits, independent
+projects, unsupported data, running QA and interrupted publication on either
+side of activation. The text tests cover restoring deleted natural child keys.
+
+After building frontend and desktop/MCP binaries, run
+`ADASHI_TEST_MIGRATION=1 node scripts/check_native_storage.mjs` (set the environment
+variable using your shell's syntax). Set `ADASHI_PLAYWRIGHT_PACKAGE` if Playwright
+is not installed locally. This uses isolated projects and settings, exercises
+both settings conversions with a separate MCP process connected, verifies
+preserved IDs, stale draft rejection and another project's unchanged backend,
+and records screenshots and JSON evidence under `target/native-storage/`.
+
+Verified on Windows on 2026-09-23: 203 application tests passed (five pre-existing
+tests ignored), all 10 storage API contract tests passed, and frontend plus both
+native binaries built. The final native run passed nine scenarios, including
+both conversion buttons, destination backup consent, connected MCP reads/writes,
+dirty-draft preservation, stale-guard rejection, project independence and backup
+path layout. Evidence and screenshots:
+`target/native-storage/220c6d9a-a8e1-4945-a81b-736daadf9749/evidence.json`.
+Two MCP processes also passed concurrent writes and exactly-once QA execution:
+`target/storage-parity/c3f8a55b-7b38-4be7-8c3f-33643cfbec86/prepare-evidence.json`.
+The resolver/read-stability run preserved database and settings bytes/mtime
+across 80 concurrent reads:
+`target/storage-core/cd30ada2-ee41-44bb-b9ca-f085cba1497d/`.

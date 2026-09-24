@@ -26,6 +26,7 @@ def fingerprint(path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", required=True)
+    parser.add_argument("--backend", choices=["sqlite", "text"], default="sqlite")
     parser.add_argument("--fixture")
     parser.add_argument("--phase", choices=["prepare", "external", "verify"], default="prepare")
     options = parser.parse_args()
@@ -34,6 +35,9 @@ def main():
     folder = root / "project"
     os.environ["XDG_CONFIG_HOME"] = str(root)
     if options.phase == "prepare":
+        if options.backend == "text":
+            (folder / ".adashi").mkdir(parents=True, exist_ok=True)
+            (folder / ".adashi/storage.json").write_text(json.dumps({"schemaVersion": 1, "backend": {"kind": "text"}}), encoding="utf-8")
         settings = {"window": {"width": 1440, "height": 940, "x": None, "y": None},
                     "projects": [{"id": "fixture", "name": "Storage parity fixture", "folder": str(folder)}],
                     "lastActiveProjectId": "fixture", "ruleTemplates": [],
@@ -55,8 +59,8 @@ def main():
                           title=title))["task"] for i, title in enumerate(("Desktop edit fixture", "MCP edit fixture"))]
             with ThreadPoolExecutor(max_workers=2) as pool:
                 results = list(pool.map(lambda p: update(p, tasks[p], f"disjoint-{p}", tasks[p]["title"] + " ready"), range(2)))
-            assert all(body(r)["task"]["version"] == 2 for r in results)
-            stale = get(0, 2)
+            assert all(body(r)["task"]["version"] != tasks[i]["version"] for i, r in enumerate(results))
+            stale = get(0, tasks[1]["id"])
             with ThreadPoolExecutor(max_workers=2) as pool:
                 results = list(pool.map(lambda p: update(p, stale, f"conflict-{p}", f"MCP conflict winner {p}"), range(2)))
             errors = [r for r in results if r.get("error") or r.get("result", {}).get("isError")]
@@ -72,7 +76,9 @@ def main():
             assert (folder / "qa-executions.txt").read_text(encoding="utf-8-sig").splitlines() == ["once"]
             evidence = {"fixtureRoot": str(root), "disjointWrites": 2, "sameVersionConflictWinners": 1,
                         "qaConcurrentRetries": 2, "qaExecutions": 1,
-                        "tasks": [get(0, 1), get(0, 2)], "databaseBaseline": fingerprint(folder / ".adashi/adashi.sqlite3")}
+                        "backend": options.backend,
+                        "tasks": [get(0, t["id"]) for t in tasks],
+                        "storageBaseline": {str(p.relative_to(folder)): fingerprint(p) for p in (folder / ".adashi/text").rglob("*.json")} if options.backend == "text" else fingerprint(folder / ".adashi/adashi.sqlite3")}
         elif options.phase == "external":
             result = body(update(0, get(0, 2), "native-external-edit", "MCP update visible while draft open"))
             evidence = {"peerEdit": result, "desktopTask": get(0, 1)}

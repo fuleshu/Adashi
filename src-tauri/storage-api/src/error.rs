@@ -84,6 +84,12 @@ impl std::error::Error for StorageError {}
 pub struct ChangeCursor(pub(crate) String);
 
 impl ChangeCursor {
+    pub fn in_scope(self, scope: Option<&str>) -> Self {
+        match scope {
+            Some(scope) => Self(format!("selected:{scope}:{}", self.0)),
+            None => self,
+        }
+    }
     /// Adapters supply an opaque token; clients compare or persist it without
     /// interpreting it as a resource version or mutation precondition.
     pub fn from_token(token: impl Into<String>) -> Self {

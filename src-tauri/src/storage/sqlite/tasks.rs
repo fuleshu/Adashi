@@ -661,6 +661,9 @@ fn infer_design_target_type(db: &Connection, design_external_id: &str) -> Result
 }
 
 fn next_task_number(db: &Connection, project_id: i64) -> Result<i64, String> {
+    if let Some(number) = crate::storage::text::random_number(db, "agent_tasks")? {
+        return Ok(number);
+    }
     db.query_row(
         "SELECT COALESCE(MAX(number), 0) + 1 FROM agent_tasks WHERE project_id = ?1",
         params![project_id],

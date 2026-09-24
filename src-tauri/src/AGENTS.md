@@ -1,5 +1,5 @@
 <!-- adashi:architecture:begin -->
-<!-- adashi:generated revision=334 -->
+<!-- adashi:generated revision=367 -->
 # Architecture — `src-tauri/src` (generated)
 Generated from the Adashi design model; do not edit, change the model.
 These responsibilities are already owned here: extend them, do not duplicate.
@@ -13,5 +13,5 @@ Prompt Hygiene, QA Execution Runtime, Transactional Design Save API, QA MCP API,
 Boundaries crossing this folder:
 - Codex -> Adashi MCP Server: Reads memory, rules, tasks, and formal design context through
 
-[Showing 2 of 17 design element(s) bound here, 68 further line(s) dropped. Retrieve the rest with the adashi_design get_scope operation.]
+[Showing 2 of 18 design element(s) bound here, 70 further line(s) dropped. Retrieve the rest with the adashi_design get_scope operation.]
 <!-- adashi:architecture:end -->

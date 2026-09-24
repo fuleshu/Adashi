@@ -1,0 +1,18 @@
+.storage-settings { grid-column: 1 / -1; gap: 12px; }
+.storage-settings p { line-height: 1.5; margin: 0; font-size: 14px; }
+.storage-choice { display: flex; align-items: center; gap: 12px; max-width: 520px; }
+.storage-choice span { color: #617170; font-size: 12px; font-weight: 700; }
+.storage-choice select { background: #fffdf8; border: 1px solid #d4cebf; border-radius: 7px; color: #1f2933; flex: 1; font: inherit; font-size: 14px; min-width: 0; padding: 9px 10px; }
+.storage-settings button { background: #2f6f6d; border: 0; border-radius: 7px; color: #fff; cursor: pointer; justify-self: start; min-height: 36px; padding: 8px 14px; font-size: 14px; }
+.storage-settings button:hover { background: #245856; }
+.storage-settings button:disabled { cursor: not-allowed; opacity: 0.4; }
+.storage-preview { border-top: 1px solid #e8e1d5; display: grid; gap: 12px; margin-top: 4px; padding-top: 14px; }
+.storage-preview h4 { margin: 0; font-size: 15px; }
+.storage-preview dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 20px; margin: 0; max-width: 720px; font-size: 13px; }
+.storage-preview dl div { display: flex; justify-content: space-between; gap: 8px; }
+.storage-preview dd { margin: 0; font-variant-numeric: tabular-nums; }
+.storage-replace { display: flex; align-items: flex-start; gap: 8px; line-height: 1.5; font-size: 14px; }
+.storage-replace input { margin-top: 5px; }
+.storage-error { color: #bb3030; }
+.storage-settings > [role="status"] { min-width: 0; }
+.storage-backup { display: block; max-width: 100%; overflow-wrap: anywhere; white-space: normal; word-break: break-word; }

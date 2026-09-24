@@ -2785,10 +2785,7 @@ mod tests {
             .open_project_storage(Some(&project.id))
             .err()
             .unwrap();
-        assert!(
-            error.message.contains("storage.backend_unavailable"),
-            "{error}"
-        );
+        assert!(error.message.contains("storage.validation"), "{error}");
         assert_eq!(std::fs::read(&db_path).unwrap(), db_before);
         assert_eq!(std::fs::read(&settings_path).unwrap(), before);
     }

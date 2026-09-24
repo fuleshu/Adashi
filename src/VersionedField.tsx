@@ -35,8 +35,11 @@ export function useVersionedDraft(value: string, version: number, onSave: SaveDr
 }
 
 export function DraftConflict({ conflict, reload }: { conflict: boolean; reload: () => void }) {
+  // Reload discards the draft; focusing its button must not autosave on blur first.
   return conflict ? <span className="draft-conflict" role="status">
-    Changed elsewhere. Your draft is kept. <button type="button" onClick={reload}>Use current value</button>
+    Changed elsewhere. Your draft is kept. <button type="button"
+      onMouseDown={event => event.preventDefault()}
+      onClick={reload}>Use current value</button>
   </span> : null;
 }
 

@@ -198,8 +198,8 @@ fn enforce_retention(db: &Connection, project_id: i64) -> Result<bool, String> {
     let first_retained: Option<i64> = db
         .query_row(
             "SELECT MIN(id) FROM (
-            SELECT id, ROW_NUMBER() OVER (ORDER BY id DESC) AS position,
-                   SUM(length(body)) OVER (ORDER BY id DESC) AS chars
+            SELECT id, ROW_NUMBER() OVER (ORDER BY created_at DESC, id DESC) AS position,
+                   SUM(length(body)) OVER (ORDER BY created_at DESC, id DESC) AS chars
             FROM project_memory_notes WHERE project_id=?1
          ) WHERE position<=?2 AND chars<=?3",
             params![project_id, MAX_NOTES, MAX_MEMORY_CHARS - summary_len],
@@ -515,7 +515,7 @@ pub fn load_retained_notes(db: &Connection, project_id: i64) -> Result<Vec<Memor
             "SELECT n.note_id, n.operation_id, n.run_id, n.task_id, n.body, n.created_at, r.summary_version
              FROM project_memory_notes n LEFT JOIN project_memory_note_resolutions r
                ON r.project_id=n.project_id AND r.note_id=n.note_id
-             WHERE n.project_id=?1 ORDER BY n.id",
+             WHERE n.project_id=?1 ORDER BY n.created_at, n.id",
         )
         .map_err(|error| error.to_string())?;
     let rows = statement

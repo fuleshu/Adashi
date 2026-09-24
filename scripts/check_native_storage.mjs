@@ -16,6 +16,8 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const { chromium } = createRequire(import.meta.url)(process.env.ADASHI_PLAYWRIGHT_PACKAGE || "playwright");
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+let textBackend = process.env.ADASHI_TEST_BACKEND === "text";
+const checkMigration = process.env.ADASHI_TEST_MIGRATION === "1";
 const fixture = path.join(root, "target/native-storage", randomUUID());
 const project = path.join(fixture, "project");
 const binary = path.resolve(process.argv[2] || path.join(root, "src-tauri/target/debug/adashi.exe"));
@@ -26,6 +28,11 @@ const settings = { window: { width: 1440, height: 940, x: null, y: null },
   projects: [{ id: "fixture", name: "Native storage fixture", folder: project }],
   lastActiveProjectId: "fixture", ruleTemplates: [],
   architectureProjection: { enabled: false, fileName: "AGENTS.md" } };
+if (checkMigration) settings.projects.push({ id: "independent", name: "Independent project", folder: path.join(fixture, "independent") });
+if (textBackend) {
+  await fs.mkdir(path.join(project, ".adashi"), { recursive: true });
+  await fs.writeFile(path.join(project, ".adashi/storage.json"), JSON.stringify({ schemaVersion: 1, backend: { kind: "text" } }));
+}
 for (const directory of ["Adashi", "adashi"]) {
   await fs.mkdir(path.join(fixture, directory), { recursive: true });
   await fs.writeFile(path.join(fixture, directory, "settings.json"), JSON.stringify(settings));
@@ -58,10 +65,11 @@ async function call(name, args) {
   assert.ok(!response.result.isError, JSON.stringify(response));
   return response.result.structuredContent || JSON.parse(response.result.content[0].text);
 }
-const getTask = async id => (await call("adashi_tasks", { operation: "get", taskId: id })).task;
+const taskIds = [];
+const getTask = async id => (await call("adashi_tasks", { operation: "get", taskId: taskIds[id - 1] })).task;
 async function updateTask(id, title) {
   const task = await getTask(id);
-  return (await call("adashi_tasks", { operation: "update", taskId: id, expectedVersion: task.version,
+  return (await call("adashi_tasks", { operation: "update", taskId: task.id, expectedVersion: task.version,
     operationId: randomUUID(), title })).task;
 }
 async function until(check, message) {
@@ -73,24 +81,36 @@ async function until(check, message) {
   throw new Error(`Timed out: ${message}`);
 }
 async function fingerprint() {
+  if (textBackend) {
+    const base = path.join(project, ".adashi/text");
+    const files = (await fs.readdir(base, { recursive: true, withFileTypes: true })).filter(entry => entry.isFile());
+    const result = {};
+    for (const entry of files) {
+      const filename = path.join(entry.parentPath || entry.path, entry.name);
+      const stat = await fs.stat(filename, { bigint: true });
+      result[path.relative(base, filename)] = { sha256: createHash("sha256").update(await fs.readFile(filename)).digest("hex"), bytes: String(stat.size), mtimeNs: String(stat.mtimeNs) };
+    }
+    return result;
+  }
   const filename = path.join(project, ".adashi/adashi.sqlite3");
   const stat = await fs.stat(filename, { bigint: true });
   return { sha256: createHash("sha256").update(await fs.readFile(filename)).digest("hex"),
     bytes: String(stat.size), mtimeNs: String(stat.mtimeNs) };
 }
-const evidence = { fixture, binary, checks: [] };
+const evidence = { fixture, binary, backend: textBackend ? "text" : "sqlite", checks: [] };
 function passed(check) { evidence.checks.push(check); console.log(`PASS ${check}`); }
 let browser, desktop, page;
 try {
   await request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "native-storage-check", version: "1" } });
   mcp.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
   for (const title of ["Desktop edit fixture", "Peer edit fixture"]) {
-    await call("adashi_tasks", { operation: "create", operationId: randomUUID(), title });
+    taskIds.push((await call("adashi_tasks", { operation: "create", operationId: randomUUID(), title })).task.id);
   }
+  if (checkMigration) await call("adashi_tasks", { projectName: "independent", operation: "create", operationId: randomUUID(), title: "Other project remains SQLite" });
   await call("adashi_rules", { operation: "create", operationId: randomUUID(), name: "Markdown fixture",
     enabled: true, intend: "implementation", hook: "task.start", prompt: "Original Markdown" });
   const initial = await getTask(1);
-  await call("adashi_tasks", { operation: "update", taskId: 1, expectedVersion: initial.version,
+  await call("adashi_tasks", { operation: "update", taskId: initial.id, expectedVersion: initial.version,
     operationId: randomUUID(), state: "active" });
   const baseline = await fingerprint();
   const server = net.createServer();
@@ -112,7 +132,7 @@ try {
   const pageErrors = [];
   page.on("pageerror", error => pageErrors.push(error.stack || String(error)));
   await page.getByRole("button", { name: "Tasks", exact: true }).click();
-  await page.getByRole("button", { name: /Task Id 1 Desktop edit fixture/ }).click();
+  await page.getByRole("button", { name: new RegExp(`Task Id ${taskIds[0]} Desktop edit fixture`) }).click();
   const title = page.locator(".task-editor-form label").filter({ has: page.locator("span", { hasText: /^Title$/ }) }).locator("input");
   await title.waitFor();
   await delay(2500); // Observe at least one normal desktop revision poll.
@@ -121,7 +141,7 @@ try {
 
   await title.fill("Desktop draft survived external refresh");
   await updateTask(2, "MCP update visible while draft open");
-  await page.getByRole("button", { name: /Task Id 2 MCP update visible while draft open/ }).waitFor();
+  await page.getByRole("button", { name: new RegExp(`Task Id ${taskIds[1]} MCP update visible while draft open`) }).waitFor();
   assert.equal(await title.inputValue(), "Desktop draft survived external refresh");
   assert.equal((await getTask(1)).title, "Desktop edit fixture");
   await title.press("Tab");
@@ -149,7 +169,7 @@ try {
   const memo = page.getByRole("textbox", { name: "Memo", exact: true });
   await memo.fill("My pending completion");
   const completing = await getTask(1);
-  await call("adashi_tasks", { operation: "finish", taskId: 1, expectedVersion: completing.version,
+  await call("adashi_tasks", { operation: "finish", taskId: completing.id, expectedVersion: completing.version,
     operationId: randomUUID(), completionMemo: "Peer completion", createdFiles: [], changedFiles: [] });
   await page.locator(".task-editor-form select").getByRole("option", { name: "finished", selected: true }).waitFor({ state: "attached" });
   assert.equal(await memo.inputValue(), "My pending completion");
@@ -195,6 +215,11 @@ try {
   await delay(250);
   assert.deepEqual(pageErrors, []);
   passed("rules, memory, settings, QA and restored design views render without JavaScript errors");
+  if (checkMigration) {
+    const { verifyMigration } = await import("./check_native_storage_migration.mjs");
+    await verifyMigration({ page, call, request, getTask, updateTask, taskIds, until, passed, project, fixture, evidence });
+    textBackend = true;
+  }
   evidence.finalTasks = [await getTask(1), await getTask(2)];
   evidence.database = await fingerprint();
   evidence.success = true;

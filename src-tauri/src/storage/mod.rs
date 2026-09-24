@@ -13,13 +13,17 @@ pub use config::{BackendSelection, DescriptorSource, StorageDescriptor};
 mod config;
 pub(crate) mod documents;
 pub(crate) mod local_cache;
+pub(crate) mod migration;
 pub(crate) mod sqlite;
+pub(crate) mod text;
+pub(crate) mod transfer;
 
 /// One project and one selected backend. No driver connection escapes this facade.
 pub struct ProjectStore {
     descriptor: StorageDescriptor,
     descriptor_source: DescriptorSource,
     client: StorageClient<Box<dyn StorageBackend>>,
+    registration: ProjectRegistration,
 }
 impl ProjectStore {
     pub fn open(project: &ProjectRegistration) -> StorageResult<Self> {
@@ -43,12 +47,34 @@ impl ProjectStore {
         computer: &str,
         mode: api::OpenMode,
     ) -> StorageResult<Self> {
+        let (descriptor, _) = config::resolve(project)?;
+        descriptor.require_available()?;
+        let _lock = migration::lock(project)?;
+        migration::recover(project)?;
         let (descriptor, descriptor_source) = config::resolve(project)?;
         descriptor.require_available()?;
+        let location = if matches!(descriptor.backend, BackendSelection::Text {}) {
+            crate::settings::project_data_dir(project).join("text")
+        } else {
+            crate::settings::project_database_path(project)
+        };
+        if descriptor.generation.is_some() {
+            let marker = if matches!(descriptor.backend, BackendSelection::Text {}) {
+                location.join("format.json")
+            } else {
+                location.clone()
+            };
+            if !marker.is_file()
+                || std::fs::metadata(&marker)
+                    .map_err(StorageError::backend)?
+                    .len()
+                    == 0
+            {
+                return Err(StorageError::Unavailable("The selected project storage is missing. Restore or fetch its data together with storage.json; an activated project cannot be initialized as an empty store.".into()));
+            }
+        }
         let request = api::OpenRequest {
-            location: crate::settings::project_database_path(project)
-                .to_string_lossy()
-                .into_owned(),
+            location: location.to_string_lossy().into_owned(),
             registered_identity: ProjectIdentity {
                 id: project.id.clone(),
                 name: project.name.clone(),
@@ -56,9 +82,11 @@ impl ProjectStore {
             computer_id: computer.into(),
             checkout_path: project.folder.clone(),
             mode,
+            cursor_scope: Some(migration::selection_token(&descriptor)?),
         };
         let backend = match descriptor.backend {
             BackendSelection::Sqlite {} => sqlite::SqliteFactory.open(&request)?,
+            BackendSelection::Text {} => text::TextFactory.open(&request)?,
             _ => {
                 return Err(StorageError::BackendUnavailable(
                     descriptor.backend.kind().into(),
@@ -69,6 +97,7 @@ impl ProjectStore {
             descriptor,
             descriptor_source,
             client: StorageClient::new(backend),
+            registration: project.clone(),
         })
     }
     pub fn descriptor(&self) -> &StorageDescriptor {
@@ -77,21 +106,43 @@ impl ProjectStore {
     pub fn descriptor_source(&self) -> DescriptorSource {
         self.descriptor_source
     }
+    fn ensure_current(&mut self) -> StorageResult<()> {
+        let (current, source) = config::resolve(&self.registration)?;
+        if current != self.descriptor || source != self.descriptor_source {
+            let _ = self.client.close();
+            return Err(StorageError::Unavailable("Project storage changed; reopen the project and reload current values before saving. Unsaved drafts must keep their original guards.".into()));
+        }
+        Ok(())
+    }
 }
 impl ProjectStorage for ProjectStore {
     fn snapshot(&mut self) -> StorageResult<Box<dyn api::ReadSnapshot + '_>> {
+        let _lock = migration::lock(&self.registration)?;
+        migration::recover(&self.registration)?;
+        self.ensure_current()?;
         self.client.snapshot()
     }
     fn commit(&mut self, mutation: api::Mutation) -> StorageResult<api::CommitResult> {
+        let _lock = migration::lock(&self.registration)?;
+        migration::recover(&self.registration)?;
+        self.ensure_current()?;
         self.client.commit(mutation)
     }
     fn poll_changes(&mut self, after: &ChangeCursor) -> StorageResult<api::ChangeNotification> {
-        self.client.poll_changes(after)
+        let cursor = self.snapshot()?.metadata().cursor.clone();
+        Ok(if *after == cursor {
+            api::ChangeNotification::Unchanged { cursor }
+        } else {
+            api::ChangeNotification::Reset { cursor }
+        })
     }
     fn publish_intents(
         &mut self,
         update: &api::IntentUpdate,
     ) -> StorageResult<Vec<api::coordination::ResourceIntent>> {
+        let _lock = migration::lock(&self.registration)?;
+        migration::recover(&self.registration)?;
+        self.ensure_current()?;
         self.client.publish_intents(update)
     }
     fn close(&mut self) -> StorageResult<()> {

@@ -19,12 +19,13 @@ pub(crate) mod schema;
 pub(crate) mod seed;
 pub(crate) mod state;
 pub(crate) mod tasks;
+pub(crate) mod transfer;
 
 mod mutations;
-mod references;
-mod snapshot;
+pub(super) mod references;
+pub(super) mod snapshot;
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
 use adashi_storage_api::{
     check_versions, ChangeNotification, ChangeOutcome, CommitResult, IntentUpdate, OpenMode,
     OpenRequest, PreparedMutation, ReadSnapshot, ResourceKey, StorageBackend, StorageFactory,
@@ -41,6 +42,7 @@ pub(super) struct SqliteStorage {
     db: Option<Connection>,
     project_id: i64,
     read_only: bool,
+    cursor_scope: Option<String>,
 }
 
 fn require_rule(db: &Connection, project_id: i64, id: i64) -> StorageResult<()> {
@@ -65,6 +67,18 @@ impl StorageFactory for SqliteFactory {
 }
 
 impl SqliteStorage {
+    /// Disposable projection used by the text adapter; never opens a disk database.
+    pub(super) fn from_projection(db: Connection, project_id: i64) -> Self {
+        Self {
+            db: Some(db),
+            project_id,
+            read_only: false,
+            cursor_scope: None,
+        }
+    }
+    pub(super) fn connection(&self) -> StorageResult<&Connection> {
+        self.db.as_ref().ok_or(StorageError::Closed)
+    }
     pub(super) fn open_request(request: &OpenRequest) -> StorageResult<Self> {
         use rusqlite::OpenFlags;
         let initialize = matches!(request.mode, OpenMode::InitializeOrMigrate);
@@ -176,6 +190,7 @@ impl SqliteStorage {
             db: Some(db),
             project_id: *project_id,
             read_only,
+            cursor_scope: request.cursor_scope.clone(),
         })
     }
 }
@@ -188,7 +203,8 @@ impl StorageBackend for SqliteStorage {
             .ok_or(StorageError::Closed)?
             .transaction()
             .map_err(StorageError::backend)?;
-        let metadata = snapshot::metadata(&tx, self.project_id)?;
+        let mut metadata = snapshot::metadata(&tx, self.project_id)?;
+        metadata.cursor = metadata.cursor.in_scope(self.cursor_scope.as_deref());
         Ok(Box::new(snapshot::Snapshot { tx, metadata }))
     }
     fn commit(&mut self, prepared: PreparedMutation) -> StorageResult<CommitResult> {
@@ -231,7 +247,8 @@ impl StorageBackend for SqliteStorage {
         if changed {
             state::bump_project_revision(&tx, self.project_id).map_err(StorageError::backend)?;
         }
-        let metadata = snapshot::metadata(&tx, self.project_id)?;
+        let mut metadata = snapshot::metadata(&tx, self.project_id)?;
+        metadata.cursor = metadata.cursor.in_scope(self.cursor_scope.as_deref());
         let mut read_tokens = Vec::new();
         for outcome in &mut outcomes {
             if let ChangeOutcome::Design(value) = outcome {
@@ -272,7 +289,8 @@ impl StorageBackend for SqliteStorage {
     }
     fn poll_changes(&mut self, after: &ChangeCursor) -> StorageResult<ChangeNotification> {
         let db = self.db.as_ref().ok_or(StorageError::Closed)?;
-        let metadata = snapshot::metadata(db, self.project_id)?;
+        let mut metadata = snapshot::metadata(db, self.project_id)?;
+        metadata.cursor = metadata.cursor.in_scope(self.cursor_scope.as_deref());
         let cursor = metadata.cursor;
         if *after == cursor {
             return Ok(ChangeNotification::Unchanged { cursor });
@@ -351,6 +369,7 @@ pub(crate) fn open_test_database(
         computer_id: computer_id.into(),
         checkout_path: project.folder.clone(),
         mode: OpenMode::InitializeOrMigrate,
+        cursor_scope: None,
     })?;
     store.db.take().ok_or(StorageError::Closed)
 }

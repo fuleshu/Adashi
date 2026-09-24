@@ -14,6 +14,10 @@ pub struct OpenRequest {
     pub computer_id: String,
     pub checkout_path: String,
     pub mode: OpenMode,
+    /// Selecting-factory epoch. New cursors use this scope; historical operation
+    /// receipts retain their original cursors when a backend is switched.
+    #[serde(default)]
+    pub cursor_scope: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -246,7 +250,9 @@ pub struct IntentUpdate {
 ///
 /// Resource conflicts abort the whole batch; disjoint writes may commit.
 /// Failed commits publish nothing. No-ops retain versions/cursor but store a
-/// receipt. Return CommitUncertain only when durability cannot be determined.
+/// receipt in backend runtime state. Receipts are not portable project content:
+/// the text backend keeps them in ignored checkout-local storage, outside Git.
+/// Return CommitUncertain only when durability cannot be determined.
 /// Backend failures must not expose credentials or SQL/driver details.
 pub trait StorageBackend {
     fn snapshot(&mut self) -> StorageResult<Box<dyn ReadSnapshot + '_>>;

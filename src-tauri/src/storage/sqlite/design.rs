@@ -1847,7 +1847,10 @@ fn delete_bindings_for_design_id(
     Ok(())
 }
 
-fn validate_workspace(db: &Connection, workspace_id: i64) -> Result<Vec<DesignCorrection>, String> {
+pub(crate) fn validate_workspace(
+    db: &Connection,
+    workspace_id: i64,
+) -> Result<Vec<DesignCorrection>, String> {
     let elements = load_elements(db, workspace_id)?;
     let relationships = load_relationships(db, workspace_id)?;
     let diagrams = load_diagrams(db, workspace_id)?;
@@ -2481,7 +2484,7 @@ fn matches_terms(haystack: &str, terms: &[String]) -> bool {
     terms.iter().all(|term| haystack.contains(term))
 }
 
-fn build_structurizr_dsl(db: &Connection, workspace_id: i64) -> Result<String, String> {
+pub(crate) fn build_structurizr_dsl(db: &Connection, workspace_id: i64) -> Result<String, String> {
     let workspace = load_workspace(db)?;
     let elements = load_elements(db, workspace_id)?;
     let relationships = load_relationships(db, workspace_id)?;
@@ -2541,7 +2544,10 @@ fn build_structurizr_dsl(db: &Connection, workspace_id: i64) -> Result<String, S
     Ok(dsl)
 }
 
-fn build_structurizr_json_source(db: &Connection, workspace_id: i64) -> Result<String, String> {
+pub(crate) fn build_structurizr_json_source(
+    db: &Connection,
+    workspace_id: i64,
+) -> Result<String, String> {
     let workspace = load_workspace(db)?;
     let elements = load_elements(db, workspace_id)?;
     let relationships = load_relationships(db, workspace_id)?;

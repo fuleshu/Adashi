@@ -1,17 +1,17 @@
 <!-- adashi:architecture:begin -->
-<!-- adashi:generated revision=334 -->
+<!-- adashi:generated revision=367 -->
 # Architecture — `src` (generated)
 Generated from the Adashi design model; do not edit, change the model.
 These responsibilities are already owned here: extend them, do not duplicate.
 
+- **Project Storage Descriptor** (Component) — Optional portable .adashi/storage.json, schemaVersion 1, closed backend enum sqlite/text/s…
 - **First Project Onboarding View** (Component) — Blocking first-run and recovery surface shown when settings are missing, no projects are c…
-- **QA Workspace View** (Component) — Dashboard workspace for browsing, filtering, editing, deleting, and running project-local…
-- **Dashboard UI** (Container) — React dashboard for browsing and rendering formal C4, UML, and UI mockup artifacts, plus m…
 
-Bound here:
-- file `src/VersionedField.tsx`
-- file `src/main.tsx`
-- file `src/versionedDraft.ts`
+Also bound here:
+QA Workspace View, Dashboard UI.
 
-[Showing 3 of 3 design element(s) bound here, 7 further line(s) dropped. Retrieve the rest with the adashi_design get_scope operation.]
+Boundaries crossing this folder:
+- Dashboard UI -> Tauri Desktop Runtime: Invokes dashboard, settings, memory, rules, and narrow design edit commands through
+
+[Showing 2 of 4 design element(s) bound here, 13 further line(s) dropped. Retrieve the rest with the adashi_design get_scope operation.]
 <!-- adashi:architecture:end -->

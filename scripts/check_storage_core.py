@@ -56,7 +56,7 @@ def main():
     try:
         for _ in range(2):
             clients.append(Client(options.binary, root))
-        for project in ("legacy", "explicit"):
+        for project in ("legacy", "explicit", "text"):
             created = body(clients[0].call("adashi_rules", projectName=project, operation="create",
                            operationId=f"{project}-rule", name=f"{project} rule", enabled=True,
                            intend="implementation", hook="task.start", prompt="Fixture rule"))
@@ -79,8 +79,7 @@ def main():
         assert {name: fingerprint(path) for name, path in databases.items()} == before
 
         rejected = []
-        for project, code in (("text", "storage.backend_unavailable"),
-                              ("server", "storage.backend_unavailable"),
+        for project, code in (("server", "storage.backend_unavailable"),
                               ("invalid", "storage.invalid_configuration")):
             descriptor_path = root / project / ".adashi/storage.json"
             original = fingerprint(descriptor_path)

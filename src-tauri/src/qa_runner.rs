@@ -59,6 +59,7 @@ pub(crate) fn run(
             jobs: plans,
         })],
     })?;
+    let reservation_versions = result.versions;
     let Some(ChangeOutcome::QaRun(run)) = result.outcomes.into_iter().next() else {
         return Err(StorageError::Backend(
             "QA reservation returned an unexpected outcome".into(),
@@ -73,18 +74,30 @@ pub(crate) fn run(
             .as_nanos()
     );
     for reserved in &run.job_runs {
+        let expected_version = reservation_versions
+            .iter()
+            .find(|v| v.resource_kind == "qa.job-run" && v.resource_id == reserved.id.to_string())
+            .map(|v| v.version)
+            .ok_or_else(|| StorageError::Backend("Missing reservation version".into()))?;
         let claim = store.commit(Mutation {
             operation_id: format!("{operation}:claim:{}:{worker}", reserved.id),
             changes: vec![Change::Qa(QaWrite::ClaimJob {
                 job_run_id: reserved.id,
-                expected_version: 1,
+                expected_version,
             })],
         });
-        match claim {
-            Ok(_) => {}
+        let claimed_version = match claim {
+            Ok(result) => result
+                .versions
+                .iter()
+                .find(|v| {
+                    v.resource_kind == "qa.job-run" && v.resource_id == reserved.id.to_string()
+                })
+                .map(|v| v.version)
+                .ok_or_else(|| StorageError::Backend("QA claim returned no version".into()))?,
             Err(StorageError::Conflict(_)) => return store.snapshot()?.qa_run(run.id),
             Err(e) => return Err(e),
-        }
+        };
         let job = jobs
             .iter()
             .find(|job| job.id == reserved.qa_job_id)
@@ -99,7 +112,7 @@ pub(crate) fn run(
             operation_id: format!("{operation}:evidence:{}", reserved.id),
             changes: vec![Change::Qa(QaWrite::CompleteJob {
                 job_run_id: reserved.id,
-                expected_version: 2,
+                expected_version: claimed_version,
                 evidence: QaEvidence {
                     outcome,
                     exit_code: evidence.exit_code,
@@ -109,11 +122,12 @@ pub(crate) fn run(
             })],
         })?;
     }
+    let expected_version = resource_version(store, "qa.run", run.id)?;
     let result = store.commit(Mutation {
         operation_id: format!("{operation}:complete"),
         changes: vec![Change::Qa(QaWrite::CompleteRun {
             run_id: run.id,
-            expected_version: 1,
+            expected_version,
         })],
     })?;
     let Some(ChangeOutcome::QaRun(run)) = result.outcomes.into_iter().next() else {
@@ -122,6 +136,17 @@ pub(crate) fn run(
         ));
     };
     Ok(run)
+}
+fn resource_version(store: &mut dyn ProjectStorage, kind: &str, id: i64) -> StorageResult<i64> {
+    store
+        .snapshot()?
+        .resource_versions(&[ResourceKey {
+            kind: kind.into(),
+            id: id.to_string(),
+        }])?
+        .first()
+        .map(|v| v.version)
+        .ok_or_else(|| StorageError::Backend("Missing QA resource version".into()))
 }
 fn execute_job(job: &QaJob, project_folder: &str) -> JobEvidence {
     let start = Instant::now();

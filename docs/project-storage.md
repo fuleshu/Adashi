@@ -144,10 +144,11 @@ and matching token from one snapshot. Numerical versions cannot prove equality o
 independent Git histories; task 16 must add branch-safe content identity without
 weakening the public design-token contract. Advisory intents never act as locks.
 
-Receipts use the existing mutation_operations table. All new writes persist a
-V1 fingerprint and typed result atomically. Historical receipts remain readable
-as Legacy; reusing their IDs is rejected because they cannot prove request
-equality. No history is deleted or silently interpreted as a new receipt.
+Request retry results use the existing mutation_operations table inside SQLite.
+The text backend keeps them in ignored checkout-local state and never exports
+that table to Git. New writes persist a V1 fingerprint and typed result atomically
+with project changes. Legacy results remain local; reusing their IDs is rejected
+when they cannot prove request equality. A fresh clone has no request history.
 
 A snapshot returns identity, requested domain values/resource versions and its
 change cursor from one logical read. Dropping the read/transaction releases its

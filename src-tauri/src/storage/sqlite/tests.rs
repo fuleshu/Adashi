@@ -1,5 +1,5 @@
 use super::*;
-mod conformance;
+pub(crate) mod conformance;
 use adashi_storage_api::{
     qa::QaJobQuery,
     rules::NewRule,
@@ -7,7 +7,7 @@ use adashi_storage_api::{
     *,
 };
 
-fn fixture() -> (
+pub(crate) fn fixture() -> (
     tempfile::TempDir,
     OpenRequest,
     StorageClient<Box<dyn StorageBackend>>,
@@ -26,6 +26,7 @@ fn fixture() -> (
         computer_id: "computer-a".into(),
         checkout_path: root.path().to_string_lossy().into_owned(),
         mode: OpenMode::InitializeOrMigrate,
+        cursor_scope: None,
     };
     let client = StorageClient::new(SqliteFactory.open(&request).unwrap());
     (root, request, client)

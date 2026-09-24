@@ -37,6 +37,7 @@ import mermaid from "mermaid";
 import "easymde/dist/easymde.min.css";
 import "./styles.css";
 import { MockupEditor } from "./MockupEditor";
+import { StorageSettings } from "./StorageSettings";
 
 type DiagramKind = "mermaid" | "structurizr";
 type DesignLevel = "context" | "components" | "features";
@@ -453,6 +454,7 @@ type DashboardPayload = {
   projectName: string;
   projectFolder: string;
   revision: number;
+  changeCursor: string;
   workspaceName: string;
   workspaceDescription: string;
   structurizrDsl: string;
@@ -541,6 +543,7 @@ type DesignHealthResult = {
 type ProjectRevision = {
   projectId: string;
   revision: number;
+  changeCursor: string;
   updatedAt: string;
 };
 
@@ -731,7 +734,7 @@ function App() {
           if (
             !latestPayload ||
             latestPayload.projectId !== revision.projectId ||
-            revision.revision <= latestPayload.revision ||
+            revision.changeCursor === latestPayload.changeCursor ||
             refreshInFlightRef.current
           ) {
             return;
@@ -892,7 +895,7 @@ function App() {
           </div>
           <div className="metric">
             <Database size={18} />
-            <span>SQL data lives in project .adashi folders</span>
+            <span>Project data lives in .adashi folders</span>
           </div>
         </section>
       </aside>
@@ -919,6 +922,7 @@ function App() {
           <SettingsView
             key={`${payload.projectId}:settings`}
             activeProjectId={payload.projectId}
+            changeCursor={payload.changeCursor}
             architectureProjection={payload.architectureProjection}
             fixedHookPrompts={payload.fixedHookPrompts}
             promptWarnings={payload.promptWarnings}
@@ -3472,6 +3476,7 @@ function ProjectCreationForm({
 
 function SettingsView({
   activeProjectId,
+  changeCursor,
   architectureProjection,
   fixedHookPrompts,
   promptWarnings,
@@ -3483,6 +3488,7 @@ function SettingsView({
   onSettingsChange,
 }: {
   activeProjectId: string;
+  changeCursor: string;
   architectureProjection: ProjectionStatus;
   fixedHookPrompts: FixedHookPrompt[];
   promptWarnings: PromptWarning[];
@@ -3551,6 +3557,9 @@ function SettingsView({
 
   return (
     <section className="settings-grid">
+      <StorageSettings key={activeProjectId} projectId={activeProjectId} changeCursor={changeCursor} onChanged={async () => {
+        onDashboardChange(await invoke<DashboardPayload>("get_dashboard", { projectId: activeProjectId }));
+      }} />
       <section className="data-panel settings-panel settings-architecture-panel">
         <div className="rules-panel-heading">
           <h3>Architecture Projection</h3>

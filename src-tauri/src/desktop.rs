@@ -34,6 +34,9 @@ use crate::settings::{
 use crate::state as project_state;
 use crate::tasks::{FinishTask, NewTask, Task, TaskDesignSpecificationLinkInput, UpdateTask};
 
+#[path = "storage_commands.rs"]
+mod storage_commands;
+
 struct AppState {
     settings_path: PathBuf,
     settings: Arc<Mutex<AppSettings>>,
@@ -49,6 +52,7 @@ struct DashboardPayload {
     project_name: String,
     project_folder: String,
     revision: i64,
+    change_cursor: crate::storage::ChangeCursor,
     workspace_name: String,
     workspace_description: String,
     structurizr_dsl: String,
@@ -188,6 +192,7 @@ fn load_dashboard_payload(project:ProjectSettings,store:&mut dyn ProjectStorage,
     let design_health=recorded_design_health(db,Path::new(&project.folder))?;
     Ok(DashboardPayload {
         project_id:project.id,project_name:project.name,project_folder:project.folder,revision,
+        change_cursor:db.metadata().cursor.clone(),
         workspace_name:workspace.name,workspace_description:workspace.description,
         structurizr_dsl:workspace.structurizr_dsl,structurizr_workspace:workspace.structurizr_json,structurizr_view_key,
         design_elements:inventory.elements.into_iter().map(|v|DesignElement {id:v.id,version:v.value.version,external_id:v.value.external_id,parent_external_id:v.value.parent_external_id,element_type:v.value.element_type,name:v.value.name,description:v.value.description,technology:v.value.technology,tags:v.value.tags}).collect(),
@@ -359,6 +364,7 @@ fn load_rule_templates(state: &AppState) -> Result<Vec<RuleTemplate>, String> {
 struct ProjectRevisionPayload {
     project_id: String,
     revision: i64,
+    change_cursor: crate::storage::ChangeCursor,
     updated_at: String,
 }
 
@@ -371,7 +377,7 @@ fn get_project_revision(
     let mut store=open_project_store(&project).map_err(|e|e.to_string())?;
     let snapshot=store.snapshot().map_err(|e|e.to_string())?;
     let metadata=snapshot.metadata();
-    Ok(ProjectRevisionPayload {project_id:project.id,revision:metadata.revision,updated_at:metadata.updated_at.clone()})
+    Ok(ProjectRevisionPayload {project_id:project.id,revision:metadata.revision,change_cursor:metadata.cursor.clone(),updated_at:metadata.updated_at.clone()})
 }
 
 #[tauri::command]
@@ -1095,6 +1101,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            storage_commands::get_project_storage,
+            storage_commands::preview_storage_migration,
+            storage_commands::migrate_project_storage,
             add_project,
             close_app,
             close_task,
@@ -1658,7 +1667,7 @@ mod tests {
         let folder = root.path().join("project");
         fs::create_dir_all(folder.join(".adashi")).unwrap();
         fs::write(folder.join(".adashi/storage.json"),
-            r#"{"schemaVersion":1,"backend":{"kind":"text"}}"#).unwrap();
+            r#"{"schemaVersion":1,"backend":{"kind":"serverSql","connectionProfile":"team","namespace":"test"}}"#).unwrap();
         let state = AppState {
             settings_path: root.path().join("settings.json"),
             settings: Arc::new(Mutex::new(AppSettings {

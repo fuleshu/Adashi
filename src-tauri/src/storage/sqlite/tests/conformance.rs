@@ -54,7 +54,7 @@ fn mockup_guard(store: &mut dyn ProjectStorage, operation: &str) -> MockupMutati
         expected_working_version: m.working_version,
     }
 }
-fn populate(store: &mut dyn ProjectStorage) {
+pub(crate) fn populate(store: &mut dyn ProjectStorage) {
     commit(
         store,
         "model",
@@ -166,7 +166,7 @@ fn populate(store: &mut dyn ProjectStorage) {
         }))],
     );
 }
-fn contents(store: &mut dyn ProjectStorage) -> Value {
+pub(crate) fn contents(store: &mut dyn ProjectStorage) -> Value {
     let s = store.snapshot().unwrap();
     json!({"identity":s.metadata().identity,"design":s.design_inventory().unwrap(),"tasks":s.tasks(&tasks::ALL_TASK_STATES).unwrap(),"jobs":s.qa_jobs(&QaJobQuery::default()).unwrap(),"runs":s.qa_runs(100).unwrap(),"memory":s.memory().unwrap(),"retainedNotes":s.retained_memory_notes().unwrap(),"rules":s.rules().unwrap(),"prompts":s.fixed_prompts().unwrap(),"mockup":s.mockup("screen").unwrap(),"waivers":s.health_waivers("app").unwrap(),"legacy":s.legacy_content().unwrap(),"computers":s.computer_checkouts().unwrap()})
 }

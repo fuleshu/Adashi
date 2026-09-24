@@ -14,7 +14,7 @@ pub(super) struct Snapshot<'a> {
     pub(super) metadata: ProjectMetadata,
 }
 
-pub(super) fn metadata(db: &Connection, project_id: i64) -> StorageResult<ProjectMetadata> {
+pub(crate) fn metadata(db: &Connection, project_id: i64) -> StorageResult<ProjectMetadata> {
     let (id, name) = db
         .query_row(
             "SELECT slug,name FROM projects WHERE id=?1",
@@ -23,8 +23,19 @@ pub(super) fn metadata(db: &Connection, project_id: i64) -> StorageResult<Projec
         )
         .map_err(StorageError::backend)?;
     let state = state::load_project_revision(db, project_id).map_err(StorageError::backend)?;
+    let cursor = if db
+        .table_exists(Some("temp"), "adashi_text_context")
+        .map_err(StorageError::backend)?
+    {
+        db.query_row("SELECT cursor FROM temp.adashi_text_context", [], |r| {
+            r.get::<_, String>(0)
+        })
+        .map_err(StorageError::backend)?
+    } else {
+        format!("sqlite:{id}:{}", state.revision)
+    };
     Ok(ProjectMetadata {
-        cursor: ChangeCursor::from_token(format!("sqlite:{id}:{}", state.revision)),
+        cursor: ChangeCursor::from_token(cursor),
         identity: ProjectIdentity { id, name },
         record_id: project_id,
         schema_version: db
@@ -35,7 +46,7 @@ pub(super) fn metadata(db: &Connection, project_id: i64) -> StorageResult<Projec
     })
 }
 
-pub(super) fn receipt(
+pub(crate) fn receipt(
     db: &Connection,
     project_id: i64,
     operation_id: &str,
@@ -47,7 +58,7 @@ pub(super) fn receipt(
     }))
 }
 
-pub(super) fn all_versions(
+pub(crate) fn all_versions(
     db: &Connection,
     project_id: i64,
 ) -> StorageResult<Vec<ResourceVersion>> {

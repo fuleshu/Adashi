@@ -10,6 +10,9 @@ use crate::settings::{project_data_dir, ProjectSettings};
 pub struct StorageDescriptor {
     pub schema_version: u32,
     pub backend: BackendSelection,
+    /// Changes only on an explicit, verified backend activation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -35,6 +38,7 @@ impl Default for StorageDescriptor {
         Self {
             schema_version: 1,
             backend: BackendSelection::Sqlite {},
+            generation: None,
         }
     }
 }
@@ -51,6 +55,15 @@ impl BackendSelection {
 
 impl StorageDescriptor {
     fn validate(&self) -> StorageResult<()> {
+        if self
+            .generation
+            .as_ref()
+            .is_some_and(|g| uuid::Uuid::parse_str(g).is_err())
+        {
+            return Err(StorageError::InvalidConfiguration(
+                "Storage generation must be a UUID".into(),
+            ));
+        }
         if self.schema_version != 1 {
             return Err(StorageError::InvalidConfiguration(format!(
                 "Unsupported storage descriptor schemaVersion {}; this build supports 1",
@@ -83,7 +96,7 @@ impl StorageDescriptor {
 
     pub(super) fn require_available(&self) -> StorageResult<()> {
         match self.backend {
-            BackendSelection::Sqlite {} => Ok(()),
+            BackendSelection::Sqlite {} | BackendSelection::Text {} => Ok(()),
             _ => Err(StorageError::BackendUnavailable(self.backend.kind().into())),
         }
     }

@@ -108,7 +108,8 @@ operation IDs and memory budgets. It hashes the complete typed ordered request
 using recursively sorted JSON. It does not pretend that static checks can validate
 a live model. Each adapter must perform the following under its atomic write unit:
 
-1. Resolve the project-scoped receipt before guards. V1 receipts replay only an
+1. Resolve the backend's request receipt before guards. For text storage it is
+   scoped to the checkout and stored only in ignored local state. V1 receipts replay only an
    identical fingerprint and return the original typed result. Legacy receipt
    payloads cannot prove request equality and return OperationReused.
 2. Check expected versions, including frozen QA job dependencies and both mockup
@@ -123,7 +124,8 @@ a live model. Each adapter must perform the following under its atomic write uni
    discover the graph. Design correction results must abort the whole batch.
 4. Persist changed aggregates, ordered links, version/tombstone updates and one
    receipt together. Every Change has one ordered ChangeOutcome. For a no-op,
-   retain versions/cursor and persist only the receipt. Multiple note appends in
+   retain versions/cursor and persist only the runtime receipt. Text no-ops leave
+   all tracked files unchanged. Multiple note appends in
    one batch are rejected because retained notes have unique operation provenance.
 5. Commit before signaling changes. Failures publish no domain state, receipt or
    cursor. Return CommitUncertain when durability cannot be determined; clients
