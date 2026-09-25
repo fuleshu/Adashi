@@ -1,0 +1,42 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[]",
+    "completed_at": null,
+    "completion_memo": "",
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-09-25 07:51:37",
+    "created_files": "[]",
+    "description": {
+      "lines": [
+        "Execution order: Markdown step 2 of 12. Depends on Adashi task ID 25 (Markdown 01/12 — Extend the shared design document and storage API contract). Complete and verify that prerequisite before starting; all earlier Markdown steps are transitively required.\n",
+        "\n",
+        "Implement the shared Markdown contract in src-tauri/src/storage/sqlite and its schema, snapshot, mutations, design/documents, references and transfer inventories.\n",
+        "Scope:\n",
+        "- Add a supported transactional schema upgrade for documents and ordered typed associations. Preserve existing identities, task/QA evidence, drafts, receipts and unrelated data. Old projects must not receive invented design documents.\n",
+        "- Implement create/read/update/delete, metadata inventory, scoped lookup, bindings, title/body search and canonical snapshots/readTokens. Include markdown in the resource and reference graph.\n",
+        "- Compare tokens and validate the final reference graph in the same write transaction as body/title/link changes, resource versions, receipt and one committed change notification.\n",
+        "- Support guarded detachment for deletion; reject dangling task/QA/document links and preserve documents when architecture associations are removed.\n",
+        "- Preserve semantic no-ops and same-operation replay. Initialized read-only queries must not change project bytes, mtime or revision.\n",
+        "Acceptance:\n",
+        "- SQLite upgrade and regression tests preserve representative existing projects.\n",
+        "- Test multiline Unicode/code fences, long complete bodies, project isolation, duplicate identities, exact association ordering, stale updates/deletes, disjoint writes, invalid references, rollback, idempotent replay and changed-argument receipt rejection.\n",
+        "- Query and guarded write behavior satisfies the shared contract without direct database access in desktop or MCP.\n",
+        "\n",
+        "Formal design: retrieve the linked owner specifications. The Markdown extension saved on 2026-09-25 is approved design; implementation remains pending until this task is verified."
+      ]
+    },
+    "id": 26,
+    "number": 23,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "todo",
+    "title": "Markdown 02/12 — Implement SQLite persistence and guarded document mutations",
+    "updated_at": "2026-09-25 07:51:37"
+  },
+  "deleted": false,
+  "identity": "7e169b39-be42-448a-9efb-d27ff78bddbc",
+  "schemaVersion": 1
+}

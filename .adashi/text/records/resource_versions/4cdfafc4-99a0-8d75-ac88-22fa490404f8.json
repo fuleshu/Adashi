@@ -6,8 +6,8 @@
     },
     "resource_id": "storage-sqlite",
     "resource_kind": "design.element",
-    "updated_at": "2026-09-23 15:13:12",
-    "version": 2
+    "updated_at": "2026-09-25 08:16:24",
+    "version": 4
   },
   "deleted": false,
   "identity": "4cdfafc4-99a0-8d75-ac88-22fa490404f8",

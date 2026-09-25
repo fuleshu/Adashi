@@ -1292,9 +1292,6 @@ fn required_trimmed<'a>(value: &'a str, label: &str) -> Result<&'a str, String> 
 }
 
 fn next_job_number(db: &Connection, project_id: i64) -> Result<i64, String> {
-    if let Some(number) = crate::storage::text::random_number(db, "qa_jobs")? {
-        return Ok(number);
-    }
     db.query_row(
         "SELECT COALESCE(MAX(number), 0) + 1 FROM qa_jobs WHERE project_id = ?1",
         params![project_id],

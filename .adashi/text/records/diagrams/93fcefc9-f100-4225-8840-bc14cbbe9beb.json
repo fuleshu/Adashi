@@ -1,0 +1,47 @@
+{
+  "collection": "diagrams",
+  "data": {
+    "attached_to_external_id": "storage-core",
+    "created_at": "2026-09-25 07:48:42",
+    "diagram_type": "sequence",
+    "id": 3827773344,
+    "key": "MarkdownDesignAuthoringSequence",
+    "kind": "mermaid",
+    "sort_order": 30,
+    "source": {
+      "lines": [
+        "sequenceDiagram\n",
+        "  participant Author\n",
+        "  participant API as MCP or Desktop\n",
+        "  participant Store as Shared ProjectStore\n",
+        "  participant Backend as Selected Storage Adapter\n",
+        "  participant Projection\n",
+        "  participant Files as Generated Markdown\n",
+        "  Author->>API: Retrieve document\n",
+        "  API->>Store: Consistent snapshot\n",
+        "  Store->>Backend: Read canonical body and token\n",
+        "  Backend-->>Author: Complete document and readToken\n",
+        "  Author->>API: Save merged content with token and operationId\n",
+        "  API->>Store: Typed guarded mutation\n",
+        "  Store->>Backend: Validate references and token atomically\n",
+        "  alt Current token\n",
+        "    Backend-->>API: Committed identity and fresh token\n",
+        "    API-->>Author: Save succeeded\n",
+        "    Projection->>Store: Read committed snapshot\n",
+        "    Projection->>Files: Refresh full documents and short links\n",
+        "  else Stale token\n",
+        "    Backend-->>API: Current document and fresh token\n",
+        "    API-->>Author: Conflict with no stored changes\n",
+        "  end"
+      ]
+    },
+    "title": "Canonical Markdown authoring and generated discovery",
+    "updated_at": "2026-09-25 07:48:42",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "93fcefc9-f100-4225-8840-bc14cbbe9beb",
+  "schemaVersion": 1
+}

@@ -22,7 +22,10 @@
         "- Validate the destination before activation; coordinate concurrent writes and schema compatibility, retain recoverable source data, and reject unsafe migration into an existing populated destination.\n",
         "- Document connection setup, user provisioning, backups, restore, upgrades and behavior when the server is unavailable.\n",
         "\n",
-        "Acceptance: separate users configure local credentials for the same project and both clients resolve the correct store. Supported conversions and failure recovery preserve data; backend changes are project-specific and never silently fall back to another store."
+        "Acceptance: separate users configure local credentials for the same project and both clients resolve the correct store. Supported conversions and failure recovery preserve data; backend changes are project-specific and never silently fall back to another store.\n",
+        "\n",
+        "Markdown design artefact integration (approved 2026-09-25):\n",
+        "Extend the complete-domain conversion work delivered by Markdown 04/12 (task ID 28) to all supported SQL directions. Include Markdown bodies, stable identities, ordered associations, direct bindings, task/QA references and applicable deletion history in transfer inventories, staged counts/fingerprints, backup/restore and rollback/recovery. Test SQLite/text-to-SQL and SQL-to-SQLite/text without silent omissions. Never treat generated Markdown or checkout-local projection manifests as authoritative shared data. After activation, regenerate local outputs from the destination; preserve dirty document-editor drafts and report projection failures separately from successful conversion."
       ]
     },
     "id": 22,
@@ -32,7 +35,7 @@
     },
     "state": "todo",
     "title": "Storage 12/13 — Add secure SQL connection settings and backend migration",
-    "updated_at": "2026-09-23 13:27:33"
+    "updated_at": "2026-09-25 07:52:43"
   },
   "deleted": false,
   "identity": "ec126c6e-c3c0-8f28-87a9-d30cd806176c",

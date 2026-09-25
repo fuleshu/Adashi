@@ -1,0 +1,42 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[]",
+    "completed_at": null,
+    "completion_memo": "",
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-09-25 07:51:54",
+    "created_files": "[]",
+    "description": {
+      "lines": [
+        "Execution order: Markdown step 9 of 12. Depends on Adashi task ID 32 (Markdown 08/12 — Add desktop document commands, navigation and references). Complete and verify that prerequisite before starting; all earlier Markdown steps are transitively required.\n",
+        "\n",
+        "Implement the editable design document panel by reusing the existing EasyMDE MarkdownEditor/VersionedMarkdownEditor in src/main.tsx. Extract reusable code only as needed; do not add another editor library.\n",
+        "Scope:\n",
+        "- Provide title editing, Markdown formatting toolbar, Preview, complete body editing, architecture/document associations and create/save/delete controls consistent with existing UI.\n",
+        "- Adapt versioned drafts to canonical document readTokens. Capture the token corresponding to the body the user edited; never substitute a fresh token on an old draft.\n",
+        "- Show saving/saved/error/conflict states. On concurrent changes keep the draft and present explicit reload/reconciliation; failed saves, polling, navigation, project changes and backend migration must not silently discard content.\n",
+        "- Audit current blur/unmount commit behavior so reload/discard/delete/navigation cannot autosave stale or discarded text or resurrect deleted documents. Ensure clean external refresh does not create edits.\n",
+        "- Keep generated agent headers out of canonical content. Preserve Markdown code fences, links and Unicode; reuse/apply safe preview and link handling, accessible keyboard operation and usable resizing.\n",
+        "Acceptance:\n",
+        "- Native Tauri/WebView2 tests create/edit/preview/reopen documents on SQLite and text, format through the actual existing toolbar, and open the panel from task/QA references.\n",
+        "- Exercise MCP-versus-desktop conflicting writes, failed saves, explicit reload/discard, navigation/unmount, deletion and backend change with a dirty draft.\n",
+        "- Verify saved content through MCP and generated files, not only UI-local state or mocked tests.\n",
+        "\n",
+        "Formal design: retrieve the linked owner specifications. The Markdown extension saved on 2026-09-25 is approved design; implementation remains pending until this task is verified."
+      ]
+    },
+    "id": 33,
+    "number": 30,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "todo",
+    "title": "Markdown 09/12 — Reuse the existing editable Markdown panel with guarded drafts",
+    "updated_at": "2026-09-25 07:51:54"
+  },
+  "deleted": false,
+  "identity": "b039e1b5-fd0b-4b4f-9a5b-13019c7f3000",
+  "schemaVersion": 1
+}

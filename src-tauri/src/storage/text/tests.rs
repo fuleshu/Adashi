@@ -1,6 +1,8 @@
 use super::*;
 use api::{Change, ChangeOutcome, Mutation, ProjectStorage, RuleWrite, StorageClient};
 
+mod id_parity;
+mod task_numbers;
 mod upgrade;
 
 fn request(root: &Path) -> api::OpenRequest {
@@ -110,7 +112,7 @@ fn text_roundtrip_guards_replay_and_write_free_reads() {
     let request = request(dir.path());
     let mut a = store(&request);
     let rule = create(&mut a, "rule-one", "First");
-    assert!(rule.id > 1);
+    assert_eq!(rule.id, 1);
     assert!(rule.id <= MAX_SAFE);
     let before = journal::inventory(Path::new(&request.location)).unwrap();
     let mut b = store(&request);
@@ -234,7 +236,7 @@ fn portable(files: &Files) -> Files {
 }
 
 #[test]
-fn independent_clone_edits_and_additions_merge_without_common_files() {
+fn independent_clone_edits_merge_without_common_files() {
     let a_dir = tempfile::tempdir().unwrap();
     let b_dir = tempfile::tempdir().unwrap();
     let ar = request(a_dir.path());
@@ -248,11 +250,8 @@ fn independent_clone_edits_and_additions_merge_without_common_files() {
     let cursor = a.snapshot().unwrap().metadata().cursor.clone();
     a.commit(update(&first, "a-edit", "A edited first"))
         .unwrap();
-    let added_a = create(&mut a, "a-add", "A added");
     b.commit(update(&second, "b-edit", "B edited second"))
         .unwrap();
-    let added_b = create(&mut b, "b-add", "B added");
-    assert_ne!(added_a.id, added_b.id);
     let af = portable(&journal::inventory(Path::new(&ar.location)).unwrap());
     let bf = portable(&journal::inventory(Path::new(&br.location)).unwrap());
     for (p, bytes) in bf.iter().filter(|(p, v)| base.get(*p) != Some(*v)) {
@@ -264,7 +263,7 @@ fn independent_clone_edits_and_additions_merge_without_common_files() {
         api::ChangeNotification::Reset { .. }
     ));
     let rules = a.snapshot().unwrap().rules().unwrap();
-    assert_eq!(rules.len(), 4);
+    assert_eq!(rules.len(), 2);
     assert!(rules.iter().any(|r| r.prompt == "A edited first"));
     assert!(rules.iter().any(|r| r.prompt == "B edited second"));
 }

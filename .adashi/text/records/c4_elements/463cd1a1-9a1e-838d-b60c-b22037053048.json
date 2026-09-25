@@ -1,7 +1,15 @@
 {
   "collection": "c4_elements",
   "data": {
-    "description": "Project-local task persistence for numbered tasks, lifecycle state, title, description, ordered design specification links, AI completion evidence, timestamps, optional git confirmation ids, and a per-task resource version incremented transactionally with task and link changes.",
+    "description": {
+      "lines": [
+        "Project-local task persistence for numbered tasks, lifecycle state, title, description, ordered design specification links, AI completion evidence, timestamps, optional git confirmation ids, and a per-task resource version incremented transactionally with task and link changes.\n",
+        "\n",
+        "Approved Markdown extension (implementation pending): Add markdown as an official ordered task designSpecificationLinks target. Resolve title/stable identity/scope from canonical documents; enforce same-project existence and preserve links across title/output-path changes. Include Markdown in task pickers, direct navigation, opt-in design scopes and document backlinks. Deleting a referenced document is rejected with actionable dependency information until explicit guarded unlink/relink; do not convert references into plain description paths. Existing tasks and their links remain intact. Controlled adoption of legacy prose may replace reviewed path mentions with official links while preserving supporting task text.\n",
+        "\n",
+        "Task numbering correction (2026-09-25): Tasks use short increasing numeric API IDs and display numbers on every backend. In text storage, reserve task IDs above the maximum live or tombstoned task ID without a random gap; allocate task display numbers as the current project maximum plus one, matching SQLite. UUID record identities and UUID foreign-key references remain canonical. Independent offline clones can allocate the same task ID/number; detect and reject such merges, then explicitly reconcile numeric aliases and task resource-version keys while preserving UUID references. Never silently renumber during reads. The user-authorized correction of the twelve Markdown planning tasks maps API IDs to 25-36 and display numbers to 22-33, preserving their UUID identities, design links and updating saved textual dependency references. Historical local operation receipts remain original responses, not current task snapshots."
+      ]
+    },
     "element_type": "Component",
     "external_id": "store-taskqa-dummy",
     "id": 34,

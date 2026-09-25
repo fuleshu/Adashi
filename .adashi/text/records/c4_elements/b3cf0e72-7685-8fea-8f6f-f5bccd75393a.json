@@ -1,7 +1,13 @@
 {
   "collection": "c4_elements",
   "data": {
-    "description": "Narrow UI edit commands for C4 element facts, relationship facts, and simple relationship creation.",
+    "description": {
+      "lines": [
+        "Narrow UI edit commands for C4 element facts, relationship facts, and simple relationship creation.\n",
+        "\n",
+        "Approved Markdown extension (implementation pending): Add narrow Tauri commands and dashboard models for listing/opening/creating/updating/deleting/importing Markdown design documents and editing their associations through ProjectStore and the shared transaction boundary. Reuse canonical snapshot readTokens rather than a separate UI-only version scheme. Support coherent title/body/link edits, explicit reference detachment and backend conflict errors. No desktop command writes generated Markdown as authoritative content or opens raw driver connections. Cross-client updates refresh clean content while preserving dirty drafts; stale saves surface the current canonical document for user reconciliation. Trigger/report derived output refresh after canonical commits without misreporting commit success."
+      ]
+    },
     "element_type": "Component",
     "external_id": "desktop-direct-design-edit",
     "id": 19,

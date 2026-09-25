@@ -1,0 +1,42 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[]",
+    "completed_at": null,
+    "completion_memo": "",
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-09-25 07:51:52",
+    "created_files": "[]",
+    "description": {
+      "lines": [
+        "Execution order: Markdown step 7 of 12. Depends on Adashi task ID 30 (Markdown 06/12 — Extend MCP design APIs, schemas and operation help). Complete and verify that prerequisite before starting; all earlier Markdown steps are transitively required.\n",
+        "\n",
+        "Extend src-tauri/src/projection.rs and normal project settings to expose canonical Markdown documents naturally in the checkout.\n",
+        "Scope:\n",
+        "- Retain the existing per-project opt-in projection behavior. Default full-document output to docs/adashi, with a configurable project-relative directory; do not assume control of other docs.\n",
+        "- Generate complete bodies into deterministic, collision-safe identity-derived filenames. Title changes keep references stable. Include a root discovery index and bounded links in existing root/folder architecture shorts according to associations and direct code bindings; do not inline full bodies into instruction files.\n",
+        "- Prefix every generated document with the agreed notice: Generated from Adashi; do not edit directly; project and Design ID; agents retrieve current canonical content/readToken and save through the Adashi MCP API; direct file edits will be overwritten on regeneration. Include source fingerprint/revision metadata without unrelated edit churn. The notice is generated, never part of the canonical body.\n",
+        "- Use one consistent snapshot, atomic write-if-changed, local ownership/freshness tracking and owned-only cleanup. Validate paths, case collisions and symlink/junction escapes; never overwrite unowned files or delete unrelated docs on relocation/disable/removal.\n",
+        "- Refresh after observed committed MCP/desktop changes, open/settings changes and explicit regeneration. Detect externally edited generated content as drift; never import it.\n",
+        "- Keep current/stale/missing/drifted/error visible with retry. Saved canonical content remains saved if filesystem publication fails; unchanged regeneration preserves bytes and mtimes.\n",
+        "Acceptance:\n",
+        "- Verify root and nested relative links, project-level discovery, complete long bodies, rename/delete/relocation, opt-out, unowned collision, drift repair, interrupted output and permission failures.\n",
+        "- Validate full output and nearby shorts refer to the same stored document/version and retain existing managed-block user text.\n",
+        "\n",
+        "Formal design: retrieve the linked owner specifications and linked diagram(s). The Markdown extension saved on 2026-09-25 is approved design; implementation remains pending until this task is verified."
+      ]
+    },
+    "id": 31,
+    "number": 28,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "todo",
+    "title": "Markdown 07/12 — Generate full Markdown files and link existing architecture shorts",
+    "updated_at": "2026-09-25 07:51:52"
+  },
+  "deleted": false,
+  "identity": "aab89eae-c2b8-479f-85bb-c5277edd1b1a",
+  "schemaVersion": 1
+}

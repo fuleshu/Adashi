@@ -1,0 +1,52 @@
+{
+  "collection": "diagrams",
+  "data": {
+    "attached_to_external_id": "store-design-workspace",
+    "created_at": "2026-09-25 07:48:42",
+    "diagram_type": "class",
+    "id": 3827773343,
+    "key": "MarkdownDesignArtifactModel",
+    "kind": "mermaid",
+    "sort_order": 29,
+    "source": {
+      "lines": [
+        "classDiagram\n",
+        "  class MarkdownDesignDocument {\n",
+        "    String externalId\n",
+        "    String title\n",
+        "    String body\n",
+        "  }\n",
+        "  class DesignAssociation {\n",
+        "    String targetType\n",
+        "    String designExternalId\n",
+        "    Integer sortOrder\n",
+        "  }\n",
+        "  class CanonicalDocumentSnapshot {\n",
+        "    String documentId\n",
+        "    String readToken\n",
+        "  }\n",
+        "  class TaskSpecificationLink\n",
+        "  class QaSpecificationLink\n",
+        "  class CodeBinding\n",
+        "  class GeneratedMarkdown {\n",
+        "    String relativePath\n",
+        "    String sourceFingerprint\n",
+        "  }\n",
+        "  MarkdownDesignDocument \"1\" --> \"*\" DesignAssociation : associates\n",
+        "  CanonicalDocumentSnapshot --> MarkdownDesignDocument : contains\n",
+        "  TaskSpecificationLink --> MarkdownDesignDocument : references\n",
+        "  QaSpecificationLink --> MarkdownDesignDocument : references\n",
+        "  CodeBinding --> MarkdownDesignDocument : discovers\n",
+        "  GeneratedMarkdown --> MarkdownDesignDocument : projects"
+      ]
+    },
+    "title": "Markdown design document identity and references",
+    "updated_at": "2026-09-25 07:48:42",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "02fd4dd2-c03e-471f-900c-7fd9a9a87817",
+  "schemaVersion": 1
+}

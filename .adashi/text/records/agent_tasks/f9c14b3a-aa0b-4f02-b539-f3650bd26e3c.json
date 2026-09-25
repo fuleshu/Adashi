@@ -1,0 +1,41 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[]",
+    "completed_at": null,
+    "completion_memo": "",
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-09-25 07:51:18",
+    "created_files": "[]",
+    "description": {
+      "lines": [
+        "Execution order: Markdown step 1 of 12. Start from the existing completed SQLite/text storage foundation. Follow the Markdown tasks in order; finish and verify each prerequisite before beginning the next. This sequence does not require the still-planned server SQL backend.\n",
+        "\n",
+        "Implement the approved first-class Markdown artefact contract in src-tauri/storage-api and the shared ProjectStore boundary. This phase defines production API/data semantics; it is not a second documentation file.\n",
+        "Scope:\n",
+        "- Add MarkdownDesignDocument with stable externalId, title, complete body and ordered typed designLinks. Empty links are project scope; links are associations, not containment. Keep this DTO distinct from the existing generic DesignDocument snapshot/token envelope.\n",
+        "- Introduce target kind markdown and upsert_markdown/delete_markdown mutations. Cover inventory, metadata summaries, explicit complete reads, scope/by-id/binding lookup, body/title search, typed associations/backlinks, direct file/symbol bindings, validation, resource keys and canonical snapshot tokens.\n",
+        "- Reuse atomic Mutation/CommitResult, operation receipts, fresh-token conflict handling and no-op behavior. Tokens cover editable canonical data; generated paths/headers and unrelated project changes do not alter tokens.\n",
+        "- Define deletion as reject-while-referenced unless all affected references are explicitly removed/relinked in the same guarded transaction; deleting architecture must not cascade-delete prose.\n",
+        "- Extend the real driver-neutral trait, DTO serialization/schema exports, shared validators, facade dispatch and conformance fixtures. Do not leak SQLite types or add successful default methods that silently omit Markdown. Stage compilation changes explicitly; do not advertise backend support before adapter implementation.\n",
+        "Acceptance:\n",
+        "- Contract tests cover serialization, identity/project/reference validation, token stability and required guard semantics for Markdown while existing domains still compile and pass their contract tests.\n",
+        "- Subsequent adapters have one unambiguous shared contract, and get/list semantics distinguish bounded metadata from complete editable content.\n",
+        "\n",
+        "Formal design: retrieve the linked owner specifications and MarkdownDesignArtifactModel. All Markdown requirements saved on 2026-09-25 are approved design with implementation pending."
+      ]
+    },
+    "id": 25,
+    "number": 22,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "todo",
+    "title": "Markdown 01/12 — Extend the shared design document and storage API contract",
+    "updated_at": "2026-09-25 07:51:18"
+  },
+  "deleted": false,
+  "identity": "f9c14b3a-aa0b-4f02-b539-f3650bd26e3c",
+  "schemaVersion": 1
+}

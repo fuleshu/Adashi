@@ -1,0 +1,41 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[]",
+    "completed_at": null,
+    "completion_memo": "",
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-09-25 07:51:39",
+    "created_files": "[]",
+    "description": {
+      "lines": [
+        "Execution order: Markdown step 3 of 12. Depends on Adashi task ID 26 (Markdown 02/12 — Implement SQLite persistence and guarded document mutations). Complete and verify that prerequisite before starting; all earlier Markdown steps are transitively required.\n",
+        "\n",
+        "Implement the same Markdown domain in src-tauri/src/storage/text, using canonical JSON records and the existing multiline representation. Generated .md exports remain derived.\n",
+        "Scope:\n",
+        "- Extend closed collection lists, relational schema materialization, record encoding/decoding, UUID references and API aliases, ordered associations, tombstones, fingerprints, validators, snapshot/commit dispatch and transfer inventories.\n",
+        "- Define and implement any required format/schema upgrade. Existing compatible reads remain byte-stable; unsupported newer formats fail explicitly. Do not rewrite all records on a read or unchanged save.\n",
+        "- Include Markdown in before/after journal publication, rollback/recovery and same-checkout operation receipts. Preserve current separation of Git-tracked canonical data from local request history, machine paths and generated-output ownership state.\n",
+        "- Detect invalid references, conflict markers, identity collisions and stale content even when branch counters match; never silently import generated files or automatically resolve prose merge conflicts.\n",
+        "Acceptance:\n",
+        "- Run the shared contract against text storage, including exact body round trips, no-op/read mtime stability, stale tokens, failed publication and recovery.\n",
+        "- Use independent clone fixtures to verify disjoint documents/edits merge with valid references, overlapping edits remain explicit conflicts, and deletion tombstones do not resurrect documents.\n",
+        "- SQLite and text expose identical visible Markdown identity/content/reference semantics.\n",
+        "\n",
+        "Formal design: retrieve the linked owner specifications. The Markdown extension saved on 2026-09-25 is approved design; implementation remains pending until this task is verified."
+      ]
+    },
+    "id": 27,
+    "number": 24,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "todo",
+    "title": "Markdown 03/12 — Implement Markdown in Git text storage and recovery",
+    "updated_at": "2026-09-25 07:51:39"
+  },
+  "deleted": false,
+  "identity": "3c8ec8ce-fdbb-46ea-89e6-38e80c0c29ba",
+  "schemaVersion": 1
+}

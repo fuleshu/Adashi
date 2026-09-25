@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-09-25 07:51:54",
+    "design_external_id": "desktop-direct-design-edit",
+    "id": 20252589837,
+    "sort_order": 1,
+    "target_type": "element",
+    "task_id": {
+      "ref": "b039e1b5-fd0b-4b4f-9a5b-13019c7f3000"
+    }
+  },
+  "deleted": false,
+  "identity": "17323c30-7b45-4aa4-974e-d1bbfe359e38",
+  "schemaVersion": 1
+}

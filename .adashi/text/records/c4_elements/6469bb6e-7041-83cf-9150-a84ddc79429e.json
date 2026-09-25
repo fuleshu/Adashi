@@ -1,7 +1,15 @@
 {
   "collection": "c4_elements",
   "data": {
-    "description": "Planned tasks 20-23. Selected SQL engine behind the same domain contract, project isolation, authenticated user authorization and attribution, secure local credential resolution, atomic resource guards/receipts and committed change notifications. Reconnect/unknown commits resolve through durable operation identity; no silent local fallback. Engine and trust boundary are selected in task 20.",
+    "description": {
+      "lines": [
+        "Planned tasks 20-23. Selected SQL engine behind the same domain contract, project isolation, authenticated user authorization and attribution, secure local credential resolution, atomic resource guards/receipts and committed change notifications. Reconnect/unknown commits resolve through durable operation identity; no silent local fallback. Engine and trust boundary are selected in task 20.\n",
+        "\n",
+        "Approved Markdown requirement for pending tasks 20-23: The future server adapter must implement the full Markdown domain from the shared API, including bodies, stable identities, associations, bindings, typed task/QA references, backlinks, snapshots/search, content tokens, atomic receipts/conflicts, no-op semantics, notifications, migration and backup/restore. Enforce the selected project/user authorization and isolation policy on prose as on every other domain. Two clients editing the same document must not silently overwrite; disjoint documents can commit independently. Generated files are per-checkout projections of committed shared data and never synchronized back into SQL. Do not implement or pretend to support a server adapter before its separately planned engine/trust-boundary work.\n",
+        "\n",
+        "All-domain numeric ID compatibility (2026-09-25; supersedes the task-only allocator correction): Numeric IDs and human task/QA numbers must retain the pre-adapter SQL behavior in every adapter. Reference baseline is commit f96fca1. All AUTOINCREMENT-backed domains allocate after their highest live, deleted or consumed sequence ID without random gaps; task and QA numbers use the existing project MAX(number)+1 rule. The text adapter restores and retains those sequence high-water marks as existing-format minimal tombstones, including IDs consumed by upserts with no added row, on successful writes and both conversion directions. Centralized sequences.rs is shared by writes and migration; failed transactions, retries and no-ops retain existing semantics. UUID filenames/foreign-key record identities remain internal storage identities; caller-supplied design/note identifiers and opaque concurrency tokens keep their existing contracts. Existing persisted business IDs must not be bulk-renumbered implicitly. Independent clones can collide in any numeric collection; reads report collisions without silently remapping. Conformance compares actual domain allocations, continued writes after upserts and conversion, and every numeric table high-water mark. Future server SQL must implement the same contract instead of introducing a new allocation policy."
+      ]
+    },
     "element_type": "Component",
     "external_id": "storage-server-sql",
     "id": 163,

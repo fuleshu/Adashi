@@ -51,13 +51,16 @@ it with an explicit portability warning in migration results, never silently alt
 
 Record identity is a lowercase 128-bit UUID. Existing SQLite records receive a
 deterministic UUIDv8 from SHA-256 of the project identity, collection and primary key;
-new records receive UUIDv4 identities. Integer API IDs are immutable compatibility
+new records receive UUIDv4 identities. Integer API IDs are stable compatibility
 aliases, not the record's identity or its task/QA display number. Preserve every
-existing alias during migration. New aliases use positive JavaScript-safe random
-integers (at most 2^53-1), checking live and deleted aliases for collisions. The
-implementation reserves a random 32-bit gap above the maximum live/deleted alias
-per collection and transaction; there is no tracked sequence file. It rejects
-exhaustion instead of wrapping. Task/QA labels are independent random 31-bit integers.
+existing alias during migration. Every numeric collection retains SQL's original
+AUTOINCREMENT behavior, including deleted IDs and IDs consumed by upserts. Its
+next allocation follows the highest live, deleted or consumed ID, with no random
+gap. High-water marks without live rows are retained as minimal tombstone records,
+using the existing format; there is no tracked sequence file. All IDs are positive
+JavaScript-safe integers (at most 2^53-1). UUID identities and foreign-key references remain unchanged by an
+explicitly authorized numeric correction, which must also update task resource
+keys and textual dependencies. Corrections are never automatic on read.
 Different records claiming an alias are a merge error, never an automatic reassignment.
 
 Canonical foreign-key references contain the target record identity, e.g.
@@ -66,11 +69,11 @@ The loader resolves these to integer aliases only in its disposable projection.
 Named design identities remain their existing user-visible strings; polymorphic
 references also retain and validate the target kind.
 
-Task and QA numbers are separate human labels. Existing numbers remain intact;
-new text-backed numbers are independently allocated positive integers rather than
-a shared MAX+1 counter. A collision is rejected with the affected collection and
-records; clients must use API IDs for addressing. The format does not promise short,
-consecutive display numbers. Random row aliases do not define chronological order:
+Task and QA numbers are separate human labels. Both use the project's
+current maximum plus one, matching pre-adapter SQLite. Independent clones can
+allocate the same next numeric ID or number in any collection;
+a merged collision is rejected with the affected records and requires explicit
+reconciliation. Clients use API IDs for addressing. IDs do not replace chronological order:
 QA history and retention use timestamps with a stable identity tie-breaker.
 
 Multiline string values use `{ "lines": ["first line\n", "second line"] }`,
@@ -109,8 +112,11 @@ An identical request returns its previous result; reusing its ID with different
 content fails. Desktop and MCP share this protection in the same checkout.
 Fresh clones start with no request history, and retries must return to their
 original checkout. Git shares project state, not application request delivery.
-Reads, fresh no-op writes and repeated requests all leave tracked bytes and mtimes
-unchanged. Local results are journaled with the project changes but are never
+Reads, fresh writes with no persistent SQL effect and repeated requests leave
+tracked bytes and mtimes unchanged. A fresh SQL upsert can consume an ID even when
+its content is unchanged; preserving pre-adapter allocation requires persisting
+that sequence advance as a tombstone. An identical request retry does not consume
+another ID. Local results are journaled with the project changes but are never
 exported as project records, portable barriers or deletion tombstones.
 Clones coordinate only through committed files, not through intents from another
 computer. QA execution ownership is checkout-local; copied running reservations
@@ -151,8 +157,9 @@ mockup draft/proposal inconsistencies, invalid task/QA states and unsupported sc
 versions. Invalid projects remain inspectable as files but dependent writes fail
 with actionable paths. No automatic merge resolution, commit, checkout or push.
 
-* Two clones add different tasks: distinct identities, aliases and numbers merge
-  without a global counter or project revision file changing.
+* Two clones add different tasks: UUID identities and references remain distinct,
+  but sequential IDs/numbers can collide. Validation blocks the merge until an
+  explicit correction of numeric aliases and task resource keys; no task is lost.
 * Clone A edits task X; clone B edits task Y: only their record and guard provenance
   files change. Both survive a normal merge.
 * Both edit X: Git may report a conflict; if separate fields merge cleanly, the

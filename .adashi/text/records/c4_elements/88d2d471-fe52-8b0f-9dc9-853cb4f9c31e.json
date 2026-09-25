@@ -1,7 +1,13 @@
 {
   "collection": "c4_elements",
   "data": {
-    "description": "Hierarchy-first design browser with tree navigation, C4 level controls, breadcrumbs, local UML and UI mockup artifact tabs, source panels, inspector, and traceability navigation between linked artifacts.",
+    "description": {
+      "lines": [
+        "Hierarchy-first design browser with tree navigation, C4 level controls, breadcrumbs, local UML and UI mockup artifact tabs, source panels, inspector, and traceability navigation between linked artifacts.\n",
+        "\n",
+        "Approved Markdown extension (implementation pending): Add a discoverable project-level Documents entry and Markdown artefact entries within linked architecture scopes; project documents need no invented C4 parent. Open task/QA/document links directly in an editable Markdown panel showing title, content and relevant associations/backlinks. Reuse the existing EasyMDE MarkdownEditor/VersionedMarkdownEditor in src/main.tsx (extract shared code if appropriate); preserve its formatting toolbar and Preview capability rather than adding a second editor library. Adapt draft guarding to canonical design readTokens. Support create, edit, preview, rename title, associate, detach and guarded delete; show saving/saved/error/conflict states with accessible keyboard navigation. Keep raw agent-generation notices out of the canonical editable body. Preserve drafts during polling, navigation, backend changes, conflicts and failed saves; no cleanup/unmount autosave may overwrite or resurrect discarded/deleted content. Reuse the application's rendering/link policy and prevent executable HTML or unsafe URL navigation. Show official documents in task/QA pickers and backlinks; open stable typed identities, not file paths."
+      ]
+    },
     "element_type": "Component",
     "external_id": "ui-design-browser",
     "id": 20,

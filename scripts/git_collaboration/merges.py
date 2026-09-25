@@ -7,16 +7,45 @@ from .conflicts import assert_blocked, resolve_ours
 
 def additions(suite):
     with suite.pair("additions") as (a, b):
+        base_ids = {json.loads(p.read_bytes())["identity"] for p in (b.folder / ".adashi/text/records").rglob("*.json")}
         def add(peer, label):
             task = peer.mutate("adashi_tasks", operation="create", title="New " + label, designSpecificationLinks=[{"designExternalId": "app"}])["task"]
             job = peer.mutate("adashi_qa", operation="create_job", name="QA " + label, command="echo " + label, taskIds=[task["id"]], tags=[label])["job"]
             return task, job
         (ta, ja), (tb, jb) = together(lambda: add(a, "Alice"), lambda: add(b, "Bob"))
-        for left, right in ((ta, tb), (ja, jb)):
-            assert left["id"] != right["id"] and left["number"] != right["number"]
+        assert ta["id"] == tb["id"] and ta["number"] == tb["number"]
+        assert ja["id"] == jb["id"] and ja["number"] == jb["number"]
+        additions = [json.loads(p.read_bytes()) for p in (b.folder / ".adashi/text/records").rglob("*.json")
+                     if json.loads(p.read_bytes())["identity"] not in base_ids]
+        maxima = {}
+        for p in (a.folder / ".adashi/text/records").rglob("*.json"):
+            record = json.loads(p.read_bytes())
+            if isinstance(record["data"].get("id"), int):
+                maxima[record["collection"]] = max(maxima.get(record["collection"], 0), record["data"]["id"])
         a.commit("Alice creates task and linked QA")
         b.commit("Bob creates task and linked QA")
         a.merge_from(b, "additions-b")
+        assert_blocked(a, suite.seed_tasks[0], "duplicate")
+        corrected = {}
+        for record in additions:
+            collection, data = record["collection"], record["data"]
+            if isinstance(data.get("id"), int):
+                maxima[collection] = maxima.get(collection, 0) + 1
+                corrected[(collection, data["id"])] = maxima[collection]
+                data["id"] = maxima[collection]
+                if collection in ("agent_tasks", "qa_jobs"):
+                    data["number"] += 1
+        for record in additions:
+            data = record["data"]
+            if record["collection"] == "resource_versions":
+                collection = {"task": "agent_tasks", "qa.job": "qa_jobs"}.get(data["resource_kind"])
+                key = (collection, int(data["resource_id"])) if collection else None
+                if key in corrected:
+                    data["resource_id"] = str(corrected[key])
+            write_json(a.folder / ".adashi/text/records" / record["collection"] / (record["identity"] + ".json"), record)
+        tb["id"], tb["number"] = corrected[("agent_tasks", tb["id"])], tb["number"] + 1
+        jb["id"], jb["number"] = corrected[("qa_jobs", jb["id"])], jb["number"] + 1
+        a.commit("Explicitly reconcile numeric IDs in all added records, retaining UUID references")
         for task, job in ((ta, ja), (tb, jb)):
             current = a.call("adashi_tasks", operation="get", taskId=task["id"])["task"]
             assert current["number"] == task["number"] and current["designSpecificationLinks"][0]["designExternalId"] == "app"
@@ -35,7 +64,7 @@ def additions(suite):
             assert str(suite.root).encode() not in tracked and str(suite.root).replace("\\", "\\\\").encode() not in tracked
         finally:
             clean.close()
-        suite.passed("independent task/QA additions, stable aliases/numbers/UUID references and clean-clone reconstruction", taskIds=[ta["id"], tb["id"]], jobIds=[ja["id"], jb["id"]])
+        suite.passed("all sequential numeric collisions are explicit; reviewed correction preserves UUID task/QA links and clone reconstruction", taskIds=[ta["id"], tb["id"]], jobIds=[ja["id"], jb["id"]])
 
 
 def edits(suite):

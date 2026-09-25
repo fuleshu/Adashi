@@ -1,0 +1,41 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[]",
+    "completed_at": null,
+    "completion_memo": "",
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-09-25 07:51:53",
+    "created_files": "[]",
+    "description": {
+      "lines": [
+        "Execution order: Markdown step 8 of 12. Depends on Adashi task ID 31 (Markdown 07/12 — Generate full Markdown files and link existing architecture shorts). Complete and verify that prerequisite before starting; all earlier Markdown steps are transitively required.\n",
+        "\n",
+        "Wire Markdown documents into the actual desktop design workspace using the shared ProjectStore.\n",
+        "Scope:\n",
+        "- Add typed Tauri commands/models for summary listing, complete retrieval, create/update/delete and association editing. Use the same readToken and transaction semantics as MCP; no driver access or authoritative generated-file edits.\n",
+        "- Add a project-level Documents entry so standalone prose is visible, plus Markdown artefact entries in linked architecture scopes. Support stable selection, title display, breadcrumbs and navigation without fabricating C4 parents.\n",
+        "- Add Markdown to task/QA specification pickers and open links directly in the document panel. Display useful associations and reverse backlinks; preserve link order and existing artefact navigation.\n",
+        "- Update dashboard/revision refresh so external MCP or Git changes refresh clean content while preserving dirty selections/drafts and error state.\n",
+        "- Expose projection enablement/output directory/status/retry in the existing relevant settings/status UI without exposing storage internals in the editing flow.\n",
+        "Acceptance:\n",
+        "- Desktop commands and UI navigation work with both SQLite and text, including empty projects, standalone documents, linked documents, title changes, missing-reference diagnostics and backend changes.\n",
+        "- No new document path or title is treated as its authoritative identity, and existing C4/UML/mockup/task/QA navigation remains intact.\n",
+        "\n",
+        "Formal design: retrieve the linked owner specifications. The Markdown extension saved on 2026-09-25 is approved design; implementation remains pending until this task is verified."
+      ]
+    },
+    "id": 32,
+    "number": 29,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "todo",
+    "title": "Markdown 08/12 — Add desktop document commands, navigation and references",
+    "updated_at": "2026-09-25 07:51:53"
+  },
+  "deleted": false,
+  "identity": "1f20117a-1cc0-4e1a-b33e-0c8cdf2385ed",
+  "schemaVersion": 1
+}

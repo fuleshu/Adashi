@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-09-25 07:51:56",
+    "design_external_id": "mcp-lifecycle-rules",
+    "id": 24178381823,
+    "sort_order": 0,
+    "target_type": "element",
+    "task_id": {
+      "ref": "334a23d3-c2f7-4cac-84c7-6b126717e5cd"
+    }
+  },
+  "deleted": false,
+  "identity": "3f6d4fa2-852d-4f4f-a018-5caf6d591e14",
+  "schemaVersion": 1
+}

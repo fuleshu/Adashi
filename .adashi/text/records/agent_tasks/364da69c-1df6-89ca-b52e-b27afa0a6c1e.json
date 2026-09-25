@@ -22,7 +22,10 @@
         "- Complete native desktop and real MCP end-to-end workflows for each backend, including refresh without discarding unsaved work.\n",
         "- Update user documentation and formal architecture to match the implemented backend choices, setup, Git workflow and multi-user limitations.\n",
         "\n",
-        "Acceptance: recorded automated and native evidence shows that all three per-project backends work through the same adapter in desktop and MCP. Existing SQLite projects remain supported, Git collaboration retains valid edits, and server SQL provides reliable concurrent multi-user access."
+        "Acceptance: recorded automated and native evidence shows that all three per-project backends work through the same adapter in desktop and MCP. Existing SQLite projects remain supported, Git collaboration retains valid edits, and server SQL provides reliable concurrent multi-user access.\n",
+        "\n",
+        "Markdown design artefact integration (approved 2026-09-25):\n",
+        "Require the feature-wide baseline Markdown 12/12 (task ID 36) before completing this final all-backend gate. Run the same full Markdown conformance suite on server SQL, SQLite and text. Exercise two authenticated desktop/MCP users creating, linking, searching, editing and deleting documents; same-document conflicts and retry receipts; project isolation; exact body round trips; schema upgrades; all supported migration/backup directions; task/QA links and backlinks. In native desktop reuse the actual EasyMDE panel, preserve dirty drafts on remote refresh/conflict/backend change, and verify generated full files plus short discovery links follow committed canonical content. Only mark server Markdown parity verified after real SQL evidence; maintain the existing full-domain gate."
       ]
     },
     "id": 23,
@@ -32,7 +35,7 @@
     },
     "state": "todo",
     "title": "Storage 13/13 — Verify multi-user SQL and parity across all storage backends",
-    "updated_at": "2026-09-23 13:27:33"
+    "updated_at": "2026-09-25 07:52:44"
   },
   "deleted": false,
   "identity": "364da69c-1df6-89ca-b52e-b27afa0a6c1e",

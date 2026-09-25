@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-09-25 07:51:52",
+    "design_external_id": "desktop-architecture-projection",
+    "id": 15330734166,
+    "sort_order": 0,
+    "target_type": "element",
+    "task_id": {
+      "ref": "aab89eae-c2b8-479f-85bb-c5277edd1b1a"
+    }
+  },
+  "deleted": false,
+  "identity": "1611295f-f564-4445-b36d-485c46b33806",
+  "schemaVersion": 1
+}

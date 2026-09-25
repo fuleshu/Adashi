@@ -1,0 +1,36 @@
+{
+  "collection": "diagrams",
+  "data": {
+    "attached_to_external_id": "desktop-architecture-projection",
+    "created_at": "2026-09-25 07:48:42",
+    "diagram_type": "flow",
+    "id": 3827773345,
+    "key": "MarkdownDesignDiscoveryFlow",
+    "kind": "mermaid",
+    "sort_order": 31,
+    "source": {
+      "lines": [
+        "flowchart TD\n",
+        "  Store[Canonical Adashi Markdown document] --> Full[Full generated Markdown with MCP authoring notice]\n",
+        "  Store --> Short[Bounded architecture shorts with document links]\n",
+        "  Store --> Desktop[Design browser and existing editable Markdown panel]\n",
+        "  Short --> Full\n",
+        "  Full --> Agent[Agent reads local Markdown]\n",
+        "  Agent --> MCP[Retrieve fresh canonical content and save through MCP]\n",
+        "  Desktop --> Shared[Shared guarded storage API]\n",
+        "  MCP --> Shared\n",
+        "  Shared --> Store\n",
+        "  Task[Task and QA specification references] --> Desktop\n",
+        "  Full --> Drift[External file edits are drift and never canonical input]"
+      ]
+    },
+    "title": "Markdown design discovery and editing routes",
+    "updated_at": "2026-09-25 07:48:42",
+    "workspace_id": {
+      "ref": "09ea96a7-14b0-8e65-b7b9-387189f11eee"
+    }
+  },
+  "deleted": false,
+  "identity": "694c6465-5ae7-4351-a5e1-c711a4871c44",
+  "schemaVersion": 1
+}

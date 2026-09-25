@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-09-25 07:51:18",
+    "design_external_id": "MarkdownDesignArtifactModel",
+    "id": 3102735020,
+    "sort_order": 2,
+    "target_type": "uml",
+    "task_id": {
+      "ref": "f9c14b3a-aa0b-4f02-b539-f3650bd26e3c"
+    }
+  },
+  "deleted": false,
+  "identity": "02c958df-db3a-4c8e-86fa-1f6afd0fa805",
+  "schemaVersion": 1
+}

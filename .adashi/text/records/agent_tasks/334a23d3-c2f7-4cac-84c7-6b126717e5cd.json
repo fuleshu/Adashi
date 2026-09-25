@@ -1,0 +1,42 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[]",
+    "completed_at": null,
+    "completion_memo": "",
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-09-25 07:51:56",
+    "created_files": "[]",
+    "description": {
+      "lines": [
+        "Execution order: Markdown step 10 of 12. Depends on Adashi task ID 33 (Markdown 09/12 — Reuse the existing editable Markdown panel with guarded drafts). Complete and verify that prerequisite before starting; all earlier Markdown steps are transitively required.\n",
+        "\n",
+        "Update the real shared agent workflow so official narrative design is authored through Adashi and naturally discovered from files.\n",
+        "Scope:\n",
+        "- Change agents_template.md Formal design, generated content and search sections to include first-class Markdown alongside C4/UML/mockups, standalone project scope and task/QA specification references.\n",
+        "- Explicitly direct agents to create/update design prose through adashi_design, not ad hoc docs files or project memory. Agents may read generated full Markdown; they must retrieve fresh canonical content/readTokens before writes and use help for current operation schemas.\n",
+        "- Include valid create/update/retrieve examples for the implemented API, stale-token merge guidance and stable-ID navigation. Clarify that MCP-only authoring applies to agents; humans can edit through the desktop. Exported headers/revisions are not write tokens.\n",
+        "- Trace and update template distribution/copy/injection paths and relevant MCP help/user docs so both new projects and existing configured workflows receive consistent guidance while preserving user-authored/custom instruction text.\n",
+        "- Extend lifecycle startup discovery with bounded Markdown metadata/retrieval pointers, not full bodies or duplicated API manuals. Preserve all lifecycle hooks and existing custom rules.\n",
+        "Acceptance:\n",
+        "- Published examples execute against actual schemas; fixture tests demonstrate discovery from root/folder shorts and complete files followed by correct canonical read/save.\n",
+        "- No generated message tells agents to edit exported files or treats a prose artefact as an instruction overriding user intent.\n",
+        "- Check new/existing project guidance and custom text preservation. The source template change is part of this implementation task, not merely a note in task descriptions.\n",
+        "\n",
+        "Formal design: retrieve the linked owner specifications. The Markdown extension saved on 2026-09-25 is approved design; implementation remains pending until this task is verified."
+      ]
+    },
+    "id": 34,
+    "number": 31,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "todo",
+    "title": "Markdown 10/12 — Update agents_template.md and generated agent guidance",
+    "updated_at": "2026-09-25 07:51:56"
+  },
+  "deleted": false,
+  "identity": "334a23d3-c2f7-4cac-84c7-6b126717e5cd",
+  "schemaVersion": 1
+}

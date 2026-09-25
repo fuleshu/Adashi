@@ -5,7 +5,7 @@ never repair, discard or overwrite these conflicting records on its own.
 """
 import json
 import uuid
-from .common import raw_error, write_json
+from .common import raw_error, write_json, correct_task_numbers
 
 
 def assert_blocked(peer, old, reason=None):
@@ -76,6 +76,11 @@ def semantic(suite):
         tasks = []
         for peer, label in ((a, "Alice"), (b, "Bob")):
             task = peer.mutate("adashi_tasks", operation="create", title=label + " collision")["task"]
+            if label == "Bob":
+                _, task_record = peer.record("agent_tasks", id=task["id"])
+                _, version_record = peer.record("resource_versions", resource_kind="task", resource_id=str(task["id"]))
+                task["id"] += 1
+                correct_task_numbers(peer, task_record["identity"], version_record["identity"], task["id"], task["number"])
             tasks.append(task)
             path, record = peer.record("agent_tasks", id=task["id"])
             record["data"]["number"] = 987654321

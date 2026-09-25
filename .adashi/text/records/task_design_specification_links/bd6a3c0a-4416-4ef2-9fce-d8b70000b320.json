@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-09-25 07:51:37",
+    "design_external_id": "storage-sqlite",
+    "id": 5569706883,
+    "sort_order": 0,
+    "target_type": "element",
+    "task_id": {
+      "ref": "7e169b39-be42-448a-9efb-d27ff78bddbc"
+    }
+  },
+  "deleted": false,
+  "identity": "bd6a3c0a-4416-4ef2-9fce-d8b70000b320",
+  "schemaVersion": 1
+}

@@ -1,0 +1,42 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[]",
+    "completed_at": null,
+    "completion_memo": "",
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-09-25 07:51:49",
+    "created_files": "[]",
+    "description": {
+      "lines": [
+        "Execution order: Markdown step 6 of 12. Depends on Adashi task ID 29 (Markdown 05/12 — Integrate design references, search and scope discovery). Complete and verify that prerequisite before starting; all earlier Markdown steps are transitively required.\n",
+        "\n",
+        "Expose the completed shared domain through the existing grouped MCP surface; extend adashi_design rather than creating a parallel document service.\n",
+        "Scope:\n",
+        "- Add closed upsert_markdown and delete_markdown save variants with the approved canonical fields; extend Markdown code bindings and dependency protection. Use operationId/changeIntent/readTokens exactly like other design artefacts.\n",
+        "- Extend get_overview/get_scope/get_by_ids/get_documents/get_bindings/search and adashi_grep. Explicit reads return complete canonical editable objects and opaque tokens; metadata/search remains bounded and clearly non-editable.\n",
+        "- Extend task/QA target schemas, resolution and help examples for markdown links.\n",
+        "- Update adashi_help operation schema extraction, filtered changeTypes, tools/list publication, examples, error diagnostics and response schemas together. Do not accept historical guards or project revision as document tokens.\n",
+        "- Preserve fresh-token merge guidance, all-or-nothing multi-document saves, idempotency, protected generated artefacts and no-op semantics.\n",
+        "- Ensure postcommit projection status cannot turn a saved mutation into an ambiguous tool failure. MCP reads must not rewrite canonical storage.\n",
+        "Acceptance:\n",
+        "- Real stdio MCP tests on both available backends cover create, full retrieval, edit, body search, project scope, bindings, task/QA references, stale conflict/merge, delete dependencies, replay and malformed payloads.\n",
+        "- Help examples validate against the actual published schemas. Rebuilt MCP clients are reconnected before end-to-end evidence is claimed.\n",
+        "\n",
+        "Formal design: retrieve the linked owner specifications and linked diagram(s). The Markdown extension saved on 2026-09-25 is approved design; implementation remains pending until this task is verified."
+      ]
+    },
+    "id": 30,
+    "number": 27,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "todo",
+    "title": "Markdown 06/12 — Extend MCP design APIs, schemas and operation help",
+    "updated_at": "2026-09-25 07:51:49"
+  },
+  "deleted": false,
+  "identity": "6d8608b7-fbd8-4353-a368-05d7dc220dbb",
+  "schemaVersion": 1
+}

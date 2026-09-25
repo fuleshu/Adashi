@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-09-25 07:51:18",
+    "design_external_id": "store-design-workspace",
+    "id": 3102735019,
+    "sort_order": 1,
+    "target_type": "element",
+    "task_id": {
+      "ref": "f9c14b3a-aa0b-4f02-b539-f3650bd26e3c"
+    }
+  },
+  "deleted": false,
+  "identity": "d04090ac-6063-457b-9263-47ec5aa868ff",
+  "schemaVersion": 1
+}

@@ -1,0 +1,42 @@
+{
+  "collection": "agent_tasks",
+  "data": {
+    "changed_files": "[]",
+    "completed_at": null,
+    "completion_memo": "",
+    "confirmation_commit_id": null,
+    "confirmed_at": null,
+    "created_at": "2026-09-25 07:51:58",
+    "created_files": "[]",
+    "description": {
+      "lines": [
+        "Execution order: Markdown step 11 of 12. Depends on Adashi task ID 34 (Markdown 10/12 — Update agents_template.md and generated agent guidance). Complete and verify that prerequisite before starting; all earlier Markdown steps are transitively required.\n",
+        "\n",
+        "Provide a deliberate path for existing design .md files and task path mentions to become official Adashi artefacts after the new domain is available.\n",
+        "Scope:\n",
+        "- Reuse desktop document creation/editor commands for explicit file import and normal MCP upsert for agents that already read a source file; no automatic directory scanning/import on project open or bidirectional file watcher.\n",
+        "- Preview selected source content, title, intended identity and links; preserve complete prose and report the original source path in the import result without turning source paths into identity or adding generated headers to the canonical body.\n",
+        "- Detect duplicate identities/import attempts and resolve relative links deliberately. Leave original files untouched unless a separately authorized cleanup is requested; never silently replace a hand-authored docs file with generated output.\n",
+        "- Offer or document a reviewable conversion of selected task file mentions into typed markdown designSpecificationLinks with current task guards, keeping useful task descriptions and existing links.\n",
+        "- Ensure generated destination collisions are explicit. Import writes through the same canonical adapter boundary and receives normal tokens; desktop and agents see the same new artefact.\n",
+        "Acceptance:\n",
+        "- Import a representative legacy design on each backend, open it in the editable panel, link a task/QA job and verify generated discovery.\n",
+        "- Repeat/reject a duplicate import, preserve originals and untouched task text, handle Unicode/code fences and report unresolved relative assets/links.\n",
+        "- Do not bulk-import this repository's docs or rewrite existing live tasks automatically as part of developing the feature.\n",
+        "\n",
+        "Formal design: retrieve the linked owner specifications. The Markdown extension saved on 2026-09-25 is approved design; implementation remains pending until this task is verified."
+      ]
+    },
+    "id": 35,
+    "number": 32,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "state": "todo",
+    "title": "Markdown 11/12 — Add controlled adoption of existing design Markdown",
+    "updated_at": "2026-09-25 07:51:58"
+  },
+  "deleted": false,
+  "identity": "51258e32-4c81-4561-a668-c646374009d7",
+  "schemaVersion": 1
+}

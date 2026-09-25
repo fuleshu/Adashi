@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-09-25 07:51:58",
+    "design_external_id": "store-taskqa-dummy",
+    "id": 27786263121,
+    "sort_order": 2,
+    "target_type": "element",
+    "task_id": {
+      "ref": "51258e32-4c81-4561-a668-c646374009d7"
+    }
+  },
+  "deleted": false,
+  "identity": "739f2815-8717-4c97-9bb1-f22768f9f271",
+  "schemaVersion": 1
+}

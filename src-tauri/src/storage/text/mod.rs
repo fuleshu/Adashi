@@ -16,6 +16,7 @@ mod guards;
 pub(crate) mod journal;
 mod local;
 mod records;
+mod sequences;
 #[cfg(test)]
 mod tests;
 pub(crate) mod transfer;
@@ -220,35 +221,6 @@ fn context(
     Ok(())
 }
 
-/// Text labels are independent of immutable aliases and never use a shared counter.
-pub(crate) fn random_number(db: &rusqlite::Connection, table: &str) -> Result<Option<i64>, String> {
-    if !db
-        .table_exists(Some("temp"), "adashi_text_context")
-        .map_err(|e| e.to_string())?
-    {
-        return Ok(None);
-    }
-    if !["agent_tasks", "qa_jobs"].contains(&table) {
-        return Err("Invalid label collection".into());
-    }
-    for _ in 0..100 {
-        let random = uuid::Uuid::new_v4();
-        let b = random.as_bytes();
-        let number = ((u32::from_le_bytes([b[0], b[1], b[2], b[3]]) & 0x7fff_ffff) as i64).max(1);
-        let exists: bool = db
-            .query_row(
-                &format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE number=?1)"),
-                [number],
-                |r| r.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        if !exists {
-            return Ok(Some(number));
-        }
-    }
-    Err("Could not allocate an independent display number".into())
-}
-
 impl StorageBackend for TextStorage {
     fn snapshot(&mut self) -> StorageResult<Box<dyn ReadSnapshot + '_>> {
         let _lock = self.lock()?;
@@ -278,7 +250,7 @@ impl StorageBackend for TextStorage {
         loaded
             .local
             .require_owned_claims(&loaded.db, prepared.mutation())?;
-        validation::prepare_ids(&loaded.db, &loaded.tables, &loaded.records)?;
+        sequences::restore(&loaded.db, &loaded.tables, &loaded.records)?;
         context(
             &loaded.db,
             loaded.project,
@@ -311,6 +283,7 @@ impl StorageBackend for TextStorage {
         let rows = engine::dump(db, &loaded.tables)?;
         validation::validate(db, &rows)?;
         loaded.local.capture(db, loaded.project)?;
+        sequences::retain(db, &loaded.tables, &mut loaded.records)?;
         let mut interim =
             engine::export(&rows, &loaded.tables, &loaded.records, &loaded.rows, false)?;
         preserve_unchanged(&loaded.files, &mut interim)?;

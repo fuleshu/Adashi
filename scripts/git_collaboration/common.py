@@ -27,6 +27,20 @@ def raw_error(response, contains=None):
     return response
 
 
+def correct_task_numbers(peer, task_identity, version_identity, new_id, number):
+    """Explicit fixture-author correction; keep UUID-based links unchanged."""
+    root = peer.folder / ".adashi/text/records"
+    path = root / "agent_tasks" / (task_identity + ".json")
+    record = json.loads(path.read_bytes())
+    record["data"]["id"] = new_id
+    record["data"]["number"] = number
+    write_json(path, record)
+    path = root / "resource_versions" / (version_identity + ".json")
+    record = json.loads(path.read_bytes())
+    record["data"]["resource_id"] = str(new_id)
+    write_json(path, record)
+
+
 class Peer:
     def __init__(self, suite, folder, settings):
         self.suite, self.folder, self.settings = suite, folder, settings

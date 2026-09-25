@@ -26,11 +26,12 @@ query data directly from the tracked records.
    commit the resolution, and push.
 
 Adashi performs no Git commands and never chooses a conflict winner. Independent
-task/QA additions use separate UUID records, API aliases and display numbers.
-References keep the UUID identity. Numbers are deliberately nonconsecutive; use
-API IDs to address tasks/jobs. A rare collision is rejected, never silently
-renumbered. An explicitly reviewed display-label correction must preserve the
-record identity, API alias and all references.
+task/QA additions use separate UUID records. References keep the UUID identity.
+All numeric IDs retain SQL AUTOINCREMENT behavior; task and QA display numbers
+use the project maximum plus one. Use API IDs to address tasks/jobs. Offline clones
+can choose the same next ID/number: validation rejects the collision, never silently renumbering.
+An explicitly reviewed correction preserves UUID identities and references and
+updates the affected numeric resource keys and textual dependencies together.
 
 ## Resolving conflicts
 
@@ -70,8 +71,11 @@ with the journal's before/after images, and explicitly reconcile it before retry
 Do not delete a prepared journal or guess that a partial set of files is complete.
 These checks cover process interruption, not a universal power-loss guarantee.
 
-Reads, polling, **fresh no-op requests** and identical retries preserve all tracked
-bytes and mtimes. Request retry results live only in ignored `.adashi/local/`,
+Reads, polling, fresh requests with no persistent SQL effect and identical retries
+preserve all tracked bytes and mtimes. A fresh content-equivalent SQL upsert can
+consume an ID; its sequence tombstone is persisted to preserve the original SQL
+allocation behavior. Identical retries do not consume another ID.
+Request retry results live only in ignored `.adashi/local/`,
 shared by desktop and MCP in that checkout. A clone receives project content and
 starts with no request history. Cross-clone request replay is not guaranteed.
 

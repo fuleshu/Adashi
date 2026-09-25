@@ -227,54 +227,7 @@ pub(crate) fn from_sqlite(
         .map(|h| engine::parse_records(&h.files))
         .transpose()?
         .unwrap_or_default();
-    // SQLite's sequence can outlive deleted rows. Preserve its high-water alias
-    // as a minimal tombstone so a conversion never permits an old ID to recur.
-    let slug: String = db
-        .query_row("SELECT slug FROM projects", [], |r| r.get(0))
-        .map_err(StorageError::backend)?;
-    for table in &tables {
-        let primary = table.primary();
-        if primary.len() != 1 || primary[0].name != "id" {
-            continue;
-        }
-        let high: i64 = db
-            .query_row(
-                "SELECT COALESCE(MAX(seq),0) FROM sqlite_sequence WHERE name=?1",
-                [&table.name],
-                |r| r.get(0),
-            )
-            .map_err(StorageError::backend)?;
-        let live: i64 = db
-            .query_row(
-                &format!("SELECT COALESCE(MAX(id),0) FROM {}", table.name),
-                [],
-                |r| r.get(0),
-            )
-            .map_err(StorageError::backend)?;
-        if high > live
-            && !old.values().any(|r| {
-                r.collection == table.name
-                    && r.deleted
-                    && r.data
-                        .get("id")
-                        .and_then(Value::as_i64)
-                        .is_some_and(|id| id >= high)
-            })
-        {
-            if high > MAX_SAFE {
-                return Err(invalid(&table.name, "integer alias space exhausted"));
-            }
-            let identity =
-                codec::deterministic_identity(&format!("{slug}:{}:[{high}]", table.name));
-            old.entry(identity.clone()).or_insert(codec::Record {
-                schema_version: 1,
-                identity,
-                collection: table.name.clone(),
-                deleted: true,
-                data: BTreeMap::from([("id".into(), high.into())]),
-            });
-        }
-    }
+    sequences::retain(db, &tables, &mut old)?;
     let old_rows = if old.is_empty() {
         engine::Rows::new()
     } else {
@@ -312,32 +265,7 @@ pub(crate) fn write_sqlite(
     local.install(&db, project)?;
     validation::validate(&db, &rows)?;
     let records = engine::parse_records(&image.files)?;
-    for table in &tables {
-        let primary = table.primary();
-        if primary.len() != 1 || primary[0].name != "id" {
-            continue;
-        }
-        let max: i64 = db
-            .query_row(
-                &format!("SELECT COALESCE(MAX(id),0) FROM {}", table.name),
-                [],
-                |r| r.get(0),
-            )
-            .map_err(StorageError::backend)?;
-        let deleted = records
-            .values()
-            .filter(|r| r.deleted && r.collection == table.name)
-            .filter_map(|r| r.data.get("id").and_then(Value::as_i64))
-            .max()
-            .unwrap_or(0);
-        db.execute("DELETE FROM sqlite_sequence WHERE name=?1", [&table.name])
-            .map_err(StorageError::backend)?;
-        db.execute(
-            "INSERT INTO sqlite_sequence(name,seq) VALUES(?1,?2)",
-            params![table.name, max.max(deleted)],
-        )
-        .map_err(StorageError::backend)?;
-    }
+    sequences::restore(&db, &tables, &records)?;
     if let Some(generation) = generation {
         let mut seen = BTreeSet::new();
         for version in sqlite::snapshot::all_versions(&db, project)? {

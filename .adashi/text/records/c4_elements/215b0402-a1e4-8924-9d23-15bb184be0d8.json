@@ -1,7 +1,13 @@
 {
   "collection": "c4_elements",
   "data": {
-    "description": "Lifecycle contract v2 returns one canonical injectionPrompt plus metadata-only rules and addressable sections with stable ids, resource versions, UTF-8 byte ranges and rendered-content versions. All four hooks remain mandatory. run.start supplies applicable project-specific rules and custom memory/fixed-hook instructions, a bounded current memory summary and, for design/implementation, a metadata-only design index. Generic Adashi workflow and API manuals belong in agents_template.md and on-demand operation help, never built-in startup prompts. Known historical built-in prompts are migrated to empty defaults without deleting custom project instructions. Empty rules do not suppress other sections; status=empty identifies an empty hook. Clients cache sections only while their content remains in active context.",
+    "description": {
+      "lines": [
+        "Lifecycle contract v2 returns one canonical injectionPrompt plus metadata-only rules and addressable sections with stable ids, resource versions, UTF-8 byte ranges and rendered-content versions. All four hooks remain mandatory. run.start supplies applicable project-specific rules and custom memory/fixed-hook instructions, a bounded current memory summary and, for design/implementation, a metadata-only design index. Generic Adashi workflow and API manuals belong in agents_template.md and on-demand operation help, never built-in startup prompts. Known historical built-in prompts are migrated to empty defaults without deleting custom project instructions. Empty rules do not suppress other sections; status=empty identifies an empty hook. Clients cache sections only while their content remains in active context.\n",
+        "\n",
+        "Approved Markdown extension (implementation pending): Update agents_template.md Formal design, retrieval, search and generated-content guidance to recognize official Markdown documents alongside C4/UML/mockups. Narrative specifications and decisions belong in Adashi Markdown artefacts, not ad hoc docs files or memory. Agents may read complete generated .md files naturally but must author through MCP using fresh canonical snapshots/readTokens; humans may edit through the desktop. Include exact implemented help/discovery/create/update examples and conflict-merge guidance; never imply exported headers are valid write tokens. Keep lifecycle startup metadata-only, with bounded Markdown document discovery entries and retrieval pointers, and preserve existing hook/custom-rule behavior. Update actual template distribution/copy generation and relevant operation docs/tests so new and existing configured projects receive consistent instructions without overwriting user text. Add compact document links to generated shorts through the projection owner."
+      ]
+    },
     "element_type": "Component",
     "external_id": "mcp-lifecycle-rules",
     "id": 24,
