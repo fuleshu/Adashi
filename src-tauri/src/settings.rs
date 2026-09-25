@@ -27,6 +27,8 @@ pub struct AppSettings {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArchitectureProjectionSettings {
+    #[serde(default)]
+    pub project_markdown_directories: BTreeMap<String, String>,
     /// Instruction-file name for generated blocks, for example `AGENTS.md`.
     pub file_name: String,
     /// Project ids that opted in to in-tree projection. Empty means no project writes files.
@@ -40,6 +42,7 @@ pub struct ArchitectureProjectionSettings {
 impl Default for ArchitectureProjectionSettings {
     fn default() -> Self {
         Self {
+            project_markdown_directories: BTreeMap::new(),
             file_name: DEFAULT_ARCHITECTURE_FILE_NAME.to_string(),
             enabled_project_ids: Vec::new(),
             project_file_names: BTreeMap::new(),
@@ -338,6 +341,7 @@ fn normalize_architecture_projection(settings: &mut AppSettings) {
         .map(|project| project.id.clone())
         .collect::<Vec<_>>();
     let projection = &mut settings.architecture_projection;
+    projection.project_markdown_directories.retain(|id,_|known_projects.contains(id));
 
     projection.file_name = projection.file_name.trim().to_string();
     if !valid_instruction_file_name(&projection.file_name) {

@@ -164,8 +164,10 @@ pub fn build(
 
 /// Metadata-only SQL projection; never hydrates descriptions, DSL, relationships or artifacts.
 fn design_index(db: &dyn ReadSnapshot) -> Result<String, String> {
-    let mut elements = db.design_inventory().map_err(|e| e.to_string())?.elements;
-    let total = elements.len();
+    let inventory = db.design_inventory().map_err(|e| e.to_string())?;
+    let mut elements = inventory.elements;
+    let markdown = inventory.markdown;
+    let total = elements.len() + markdown.len();
     elements.sort_by_key(|e| {
         (
             e.value.parent_external_id.is_some(),
@@ -178,8 +180,8 @@ fn design_index(db: &dyn ReadSnapshot) -> Result<String, String> {
         )
     });
     let mut output = String::from("# Formal design index\n");
-    let footer = "\nIndex only: descriptions, relationships, artifacts, bindings and source require explicit retrieval.";
-    let rows = elements.into_iter().take(32);
+    let footer = "\nIndex only: descriptions, relationships, artifacts, bindings and source require explicit retrieval. Markdown: get_scope by id or get_documents with markdown:<id>.";
+    let rows = elements.into_iter().take(if markdown.is_empty() {32} else {24});
     let mut included = 0;
     for row in rows {
         let e = row.value;
@@ -205,7 +207,14 @@ fn design_index(db: &dyn ReadSnapshot) -> Result<String, String> {
         output.push_str(&line);
         included += 1;
     }
-    output.push_str(&format!("\nShowing {included} of {total} elements."));
+    for document in markdown.iter().take(32 - included) {
+        let line = format!("\n- {} Markdown {}", serde_json::to_string(&document.external_id).unwrap(), serde_json::to_string(&document.title).unwrap());
+        if output.len() + line.len() + footer.len() + 100 <= DESIGN_INDEX_BUDGET {
+            output.push_str(&line);
+            included += 1;
+        }
+    }
+    output.push_str(&format!("\nShowing {included} of {total} design entries."));
     output.push_str(footer);
     Ok(output)
 }

@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "13",
+    "resource_kind": "qa.job-run",
+    "updated_at": "2026-09-25 10:35:44",
+    "version": 3
+  },
+  "deleted": false,
+  "identity": "62f9b1c5-e52e-4da4-aa97-64aa84884d98",
+  "schemaVersion": 1
+}

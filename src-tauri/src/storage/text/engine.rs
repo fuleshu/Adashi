@@ -12,6 +12,8 @@ pub(super) const COLLECTIONS: &[&str] = &[
     "c4_elements",
     "c4_relationships",
     "design_bindings",
+    "markdown_design_documents",
+    "markdown_design_links",
     "agent_tasks",
     "task_design_specification_links",
     "task_qa_entries",

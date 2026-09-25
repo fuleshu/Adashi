@@ -31,9 +31,10 @@ fn reserve(store: &mut dyn ProjectStorage, id: &str) -> qa::QaRun {
     run
 }
 
-fn fixture() -> (tempfile::TempDir, ProjectRegistration) {
+pub(super) fn fixture() -> (tempfile::TempDir, ProjectRegistration) {
     let (root, request, mut store) = sqlite::tests::fixture();
     sqlite::tests::conformance::populate(&mut store);
+    super::markdown_tests::populate(&mut store);
     let m = store.snapshot().unwrap().mockup("screen").unwrap();
     commit(
         &mut store,

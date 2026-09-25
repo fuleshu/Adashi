@@ -17,6 +17,10 @@ pub(crate) mod migration;
 pub(crate) mod sqlite;
 pub(crate) mod text;
 pub(crate) mod transfer;
+#[cfg(test)]
+mod markdown_discovery_tests;
+#[cfg(test)]
+mod markdown_conformance;
 
 /// One project and one selected backend. No driver connection escapes this facade.
 pub struct ProjectStore {

@@ -1,0 +1,32 @@
+{
+  "collection": "qa_job_runs",
+  "data": {
+    "command_snapshot": "{\"command\":\"powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check_markdown_feature.ps1 -Suite Native -VerifyEvidence\",\"designSpecificationLinks\":[{\"designExternalId\":\"ui-design-browser\",\"id\":11,\"qaJobId\":7,\"sortOrder\":0,\"targetType\":\"element\",\"title\":\"Design Browser\"},{\"designExternalId\":\"desktop-architecture-projection\",\"id\":12,\"qaJobId\":7,\"sortOrder\":1,\"targetType\":\"element\",\"title\":\"Architecture Projection\"}],\"enabled\":true,\"name\":\"Markdown native desktop acceptance\",\"shell\":\"powershell\",\"tags\":[\"markdown\",\"native\"],\"taskLinks\":[{\"id\":2,\"number\":33,\"qaJobId\":7,\"sortOrder\":0,\"state\":\"active\",\"taskId\":36,\"title\":\"Markdown 12/12 — Verify complete native, MCP and storage parity\"}],\"timeoutSeconds\":900,\"workingDirectory\":\".\"}",
+    "duration_ms": 1029,
+    "exit_code": 1,
+    "finished_at": "2026-09-25 10:40:57",
+    "id": 14,
+    "output": {
+      "lines": [
+        "Source changed after acceptance; rerun the suite\r\n",
+        "At C:\\src\\Adashi\\scripts\\check_markdown_feature.ps1:20 char:96\r\n",
+        "+ ... Compress)) {throw 'Source changed after acceptance; rerun the suite'} ...\r\n",
+        "+                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n",
+        "    + CategoryInfo          : OperationStopped: (Source changed ...rerun the suite:String) [], RuntimeException\r\n",
+        "    + FullyQualifiedErrorId : Source changed after acceptance; rerun the suite\r\n",
+        " \r\n"
+      ]
+    },
+    "qa_job_id": {
+      "ref": "df19968f-9a84-43a7-9f29-b0de0f465efa"
+    },
+    "qa_run_id": {
+      "ref": "284e5b99-475b-4fc7-af0d-9b5992c365fd"
+    },
+    "started_at": "2026-09-25 10:40:52",
+    "status": "failed"
+  },
+  "deleted": false,
+  "identity": "b56df5c5-a765-4f61-ad41-05e15bfbcdde",
+  "schemaVersion": 1
+}

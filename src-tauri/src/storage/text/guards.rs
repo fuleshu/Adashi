@@ -19,6 +19,7 @@ fn text(data: &engine::Data, key: &str) -> String {
 
 pub(super) fn calculate(rows: &engine::Rows) -> StorageResult<Versions> {
     let mut groups = BTreeMap::<(String, String), Vec<Value>>::new();
+    let markdown=rows.iter().filter(|((t,_),_)|t=="markdown_design_documents").map(|(_,d)|(text(d,"id"),text(d,"external_id"))).collect::<BTreeMap<_,_>>();
     let mockups = rows
         .iter()
         .filter(|((t, _), _)| t == "ui_mockups")
@@ -27,6 +28,10 @@ pub(super) fn calculate(rows: &engine::Rows) -> StorageResult<Versions> {
     for ((table, _), data) in rows {
         let mut owners = Vec::<(&str, String)>::new();
         match table.as_str() {
+            "markdown_design_documents" => owners.push(("design.markdown", text(data,"external_id"))),
+            "markdown_design_links" => {
+                if let Some(id)=markdown.get(&text(data,"document_id")) { owners.push(("design.markdown",id.clone())); }
+            }
             "c4_elements" => owners.push(("design.element", text(data, "external_id"))),
             "c4_relationships" => owners.push(("design.relationship", text(data, "external_id"))),
             "diagrams" if data["kind"] == "mermaid" => {

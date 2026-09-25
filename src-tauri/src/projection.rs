@@ -9,6 +9,18 @@ use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+mod files;
+mod markdown;
+mod ownership;
+/// One bundled source for opted-in file distribution and on-demand MCP workflow help.
+pub const AGENT_WORKFLOW: &str = include_str!("../../agents_template.md");
+#[cfg(test)]
+mod markdown_tests;
+
+pub fn validate_markdown_directory(value: &str) -> Result<String,String> { files::relative(value) }
+pub fn markdown_directory(settings: &crate::settings::AppSettings, project: &str) -> String {
+    settings.architecture_projection.project_markdown_directories.get(project).cloned().unwrap_or_else(||"docs/adashi".into())
+}
 
 /// Managed-block markers. Text outside them is never rewritten.
 pub const BLOCK_BEGIN: &str = "<!-- adashi:architecture:begin -->";
@@ -688,6 +700,7 @@ fn walk_instruction_files(root: &Path, file_name: &str) -> Vec<PathBuf> {
         };
         for entry in entries.flatten() {
             let path = entry.path();
+            if files::checked(root,&relative_display(root,&path)).is_err() { continue; }
             let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
                 continue;
             };
@@ -729,8 +742,9 @@ fn write_block(
             directory.push(part);
         }
     }
-    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
     let path = directory.join(file_name);
+    let relative = relative_display(project_folder,&path);
+    files::checked(project_folder,&relative)?;
 
     let existing = fs::read_to_string(&path).unwrap_or_default();
     let repaired = match extract_block(&existing) {
@@ -740,7 +754,7 @@ fn write_block(
 
     let next = splice_block(&existing, block);
     if next != existing {
-        fs::write(&path, next).map_err(|error| error.to_string())?;
+        files::write(project_folder,&relative,next.as_bytes())?;
     }
     Ok((relative_display(project_folder, &path), repaired))
 }
@@ -757,7 +771,7 @@ fn remove_block(path: &Path) -> Result<bool, String> {
     if stripped.is_empty() {
         fs::remove_file(path).map_err(|error| error.to_string())?;
     } else {
-        fs::write(path, stripped).map_err(|error| error.to_string())?;
+        files::write(path.parent().ok_or("Missing projection parent")?,path.file_name().and_then(|s|s.to_str()).ok_or("Invalid projection filename")?,stripped.as_bytes())?;
     }
     Ok(true)
 }
@@ -769,14 +783,22 @@ pub fn regenerate(
     file_name: &str,
     enabled: bool,
 ) -> Result<ProjectionReport, String> {
+    regenerate_configured(db,project_folder,file_name,enabled,"docs/adashi")
+}
+
+pub fn regenerate_configured(db:&dyn adashi_storage_api::ReadSnapshot,project_folder:&Path,file_name:&str,enabled:bool,directory:&str)->Result<ProjectionReport,String> {
     let mut report = ProjectionReport::default();
+    let plan = markdown::Plan::load(db,project_folder,directory,enabled)?;
     if !enabled {
+        if project_folder.join(".adashi/local/markdown-projection.json").exists() { ownership::publish(project_folder,&plan,&mut report)?; }
         return Ok(report);
     }
 
     let snapshot = load_snapshot(db)?;
     let revision = db.metadata().revision;
-    let blocks = expected_blocks(&snapshot, project_folder, revision);
+    let mut blocks = expected_blocks(&snapshot, project_folder, revision);
+    plan.enrich(&mut blocks,revision);
+    ownership::publish(project_folder,&plan,&mut report)?;
 
     let mut expected_paths = BTreeSet::new();
     for (folder, block) in &blocks {
@@ -831,12 +853,24 @@ pub fn status(
     file_name: &str,
     enabled: bool,
 ) -> Result<ProjectionStatus, String> {
+    status_configured(db,project_folder,file_name,enabled,"docs/adashi")
+}
+
+pub fn status_configured(db:&dyn adashi_storage_api::ReadSnapshot,project_folder:&Path,file_name:&str,enabled:bool,directory:&str)->Result<ProjectionStatus,String> {
     let revision = db.metadata().revision;
     let mut files = Vec::new();
+    let mut error = None;
 
     if enabled {
         let snapshot = load_snapshot(db)?;
-        let blocks = expected_blocks(&snapshot, project_folder, revision);
+        let mut blocks = expected_blocks(&snapshot, project_folder, revision);
+        match markdown::Plan::load(db,project_folder,directory,true) {
+            Ok(plan) => {
+                plan.enrich(&mut blocks,revision);
+                match ownership::status(project_folder,&plan) {Ok(status)=>files.extend(status),Err(e)=>error=Some(e)}
+            },
+            Err(e)=>error=Some(e),
+        }
         for (folder, expected) in &blocks {
             let mut path = project_folder.to_path_buf();
             if !folder.is_empty() {
@@ -870,13 +904,14 @@ pub fn status(
         enabled,
         file_name: file_name.to_string(),
         revision,
-        error: None,
+        error,
         files,
     })
 }
 
 /// Drops per-project projection overrides for projects that no longer exist.
 pub(crate) fn forget_project(settings: &mut crate::settings::AppSettings, project_id: &str) {
+    settings.architecture_projection.project_markdown_directories.remove(project_id);
     settings
         .architecture_projection
         .enabled_project_ids
@@ -1185,7 +1220,7 @@ mod tests {
             true,
         )
         .unwrap();
-        assert_eq!(report.written, vec!["AGENTS.md", "src/AGENTS.md"]);
+        assert_eq!(report.written, vec!["AGENTS.md", "docs/adashi/agent-workflow.md", "src/AGENTS.md"]);
         assert!(report.repaired.is_empty() && report.removed.is_empty());
 
         let root_file = project_folder.join("AGENTS.md");
@@ -1257,8 +1292,8 @@ mod tests {
             true,
         )
         .unwrap();
-        assert_eq!(status.files.len(), 2);
-        assert!(status.files.iter().all(|file| file.state == "missing"));
+        assert_eq!(status.files.len(), 3);
+        assert!(status.files.iter().all(|file| file.state == if file.path == "docs/adashi/agent-workflow.md" { "current" } else { "missing" }));
 
         // The connection must close before Windows will release the project database file.
         drop(db);

@@ -2,6 +2,7 @@ use super::*;
 use api::{Change, ChangeOutcome, Mutation, ProjectStorage, RuleWrite, StorageClient};
 
 mod id_parity;
+mod markdown;
 mod task_numbers;
 mod upgrade;
 

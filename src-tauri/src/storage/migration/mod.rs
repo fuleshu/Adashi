@@ -14,6 +14,8 @@ use std::{
 mod journal;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod markdown_tests;
 
 fn invalid(message: &str) -> StorageError {
     StorageError::Validation(message.into())

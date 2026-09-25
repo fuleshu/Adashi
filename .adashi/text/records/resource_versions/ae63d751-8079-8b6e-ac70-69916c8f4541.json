@@ -6,8 +6,8 @@
     },
     "resource_id": "storage-migration",
     "resource_kind": "design.element",
-    "updated_at": "2026-09-25 08:16:24",
-    "version": 5
+    "updated_at": "2026-09-25 10:54:34",
+    "version": 6
   },
   "deleted": false,
   "identity": "ae63d751-8079-8b6e-ac70-69916c8f4541",

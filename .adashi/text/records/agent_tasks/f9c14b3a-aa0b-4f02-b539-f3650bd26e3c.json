@@ -1,13 +1,13 @@
 {
   "collection": "agent_tasks",
   "data": {
-    "changed_files": "[]",
-    "completed_at": null,
-    "completion_memo": "",
+    "changed_files": "[\"src-tauri/storage-api/src/lib.rs\",\"src-tauri/storage-api/src/design.rs\",\"src-tauri/storage-api/src/api.rs\",\"src-tauri/storage-api/src/validation.rs\",\"src-tauri/storage-api/tests/support/mod.rs\",\"src-tauri/src/storage/sqlite/snapshot.rs\",\"src-tauri/src/storage/sqlite/design.rs\",\"src-tauri/src/mcp/help.rs\",\"docs/storage-api-migration.md\"]",
+    "completed_at": "2026-09-25 08:37:22",
+    "completion_memo": "Implemented driver-neutral Markdown DTOs, typed associations/resource keys, complete canonical snapshots and tokens, bounded metadata/query contract, required snapshot methods and typed upsert/delete design changes. Shared static validation and final-graph/reference/token helpers cover Markdown; no SQL leaks or successful omission defaults. ProjectStore delegates through its existing complete snapshot/mutation boundary. Explicit unavailable staging in SQLite/text projection until adapter phase. Added schema examples to prevent MCP help panic. Verification: 13 storage API tests pass; application check passes; full library run 202 passed/2 help failures/5 ignored, then all 3 help tests passed after fixing new-variant examples. Body preservation, identity/project-field rejection, duplicate links/writes, token guards and reference/delete semantics covered.",
     "confirmation_commit_id": null,
     "confirmed_at": null,
     "created_at": "2026-09-25 07:51:18",
-    "created_files": "[]",
+    "created_files": "[\"src-tauri/storage-api/src/markdown.rs\",\"src-tauri/storage-api/tests/markdown.rs\"]",
     "description": {
       "lines": [
         "Execution order: Markdown step 1 of 12. Start from the existing completed SQLite/text storage foundation. Follow the Markdown tasks in order; finish and verify each prerequisite before beginning the next. This sequence does not require the still-planned server SQL backend.\n",
@@ -31,9 +31,9 @@
     "project_id": {
       "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
     },
-    "state": "todo",
+    "state": "finished",
     "title": "Markdown 01/12 — Extend the shared design document and storage API contract",
-    "updated_at": "2026-09-25 07:51:18"
+    "updated_at": "2026-09-25 08:37:22"
   },
   "deleted": false,
   "identity": "f9c14b3a-aa0b-4f02-b539-f3650bd26e3c",

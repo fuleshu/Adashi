@@ -34,6 +34,21 @@ Two consequences drive the rest of this contract: the projection must be **small
 
 ## Artifacts
 
+### Complete Markdown and shared agent workflow
+
+Official Markdown designs generate complete files under `docs/adashi` or the configured
+project-relative directory. Filenames derive from stable identity, not title. An index
+and bounded root/folder links provide discovery. Each full file identifies its project
+and design and directs agents to fresh canonical MCP retrieval before edits. Export
+fingerprints are freshness metadata, never write tokens. The stored body excludes the notice.
+
+The same opt-in publication bundles `agents_template.md` as `agent-workflow.md`, including
+when a project has no Markdown documents yet. Existing configured projects receive the
+current workflow when regenerated. Original custom templates and non-managed text remain
+untouched. The workflow file follows the full-file ownership manifest, atomic write-if-changed,
+collision checks and owned-only cleanup. Without file projection, selected lifecycle operation
+help exposes the same template on demand; startup remains a bounded metadata index.
+
 ### Root projection
 
 One managed block in the project-root instruction file. Carries only what is shared by every task:

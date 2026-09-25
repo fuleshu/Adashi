@@ -15,6 +15,7 @@ mod error;
 pub mod fixed_hooks;
 pub mod health;
 pub mod memory;
+pub mod markdown;
 pub mod mockups;
 pub mod qa;
 pub mod rules;

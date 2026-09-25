@@ -3231,6 +3231,23 @@ code {
 
 
 @media (max-width: 1180px) {
+  .task-workspace,
+  .qa-workspace {
+    overflow: auto;
+    grid-template-rows: auto auto;
+    align-content: start;
+  }
+
+  .task-workspace > .task-list-panel,
+  .qa-workspace > .qa-list-panel {
+    min-height: 480px;
+  }
+
+  .task-workspace > .task-detail-panel,
+  .qa-workspace > .qa-detail-panel {
+    overflow: visible;
+  }
+
   .workspace-grid,
   .design-browser,
   .lower-grid,

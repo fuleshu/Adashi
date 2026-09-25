@@ -8,6 +8,7 @@ from git_collaboration.common import Suite, write_json
 from git_collaboration.merges import additions, edits, local_processes_and_reads, legacy_request_cleanup
 from git_collaboration.conflicts import textual, semantic, ordering
 from git_collaboration.recovery import interrupted, prepare_native
+from git_collaboration.markdown import markdown
 
 
 def main():
@@ -20,6 +21,7 @@ def main():
         if not args.native_only:
             additions(suite)
             edits(suite)
+            markdown(suite)
             local_processes_and_reads(suite)
             legacy_request_cleanup(suite)
             textual(suite)

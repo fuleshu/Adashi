@@ -1,0 +1,18 @@
+{
+  "collection": "qa_runs",
+  "data": {
+    "finished_at": "2026-09-25 10:35:45",
+    "id": 10,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "query_snapshot": "{\"jobIds\":[6],\"states\":null,\"tags\":null,\"taskIds\":null,\"designExternalIds\":null,\"enabled\":null}",
+    "started_at": "2026-09-25 10:33:37",
+    "status": "failed",
+    "summary": "0 passed, 1 failed, 0 timed out",
+    "trigger_source": "task36-native-markdown-acceptance"
+  },
+  "deleted": false,
+  "identity": "fd75fa09-e3d9-4bc2-b7ec-595438686556",
+  "schemaVersion": 1
+}

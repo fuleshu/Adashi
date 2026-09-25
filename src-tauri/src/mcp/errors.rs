@@ -11,6 +11,7 @@ fn schema<T: rmcp::schemars::JsonSchema>() -> Value {
 fn operation_schema(tool: &str, operation: &str) -> Option<Value> {
     Some(match (tool, operation) {
         ("adashi_design", "save") => schema::<DesignSaveParams>(),
+        ("adashi_design", "list_markdown") => schema::<markdown::ListMarkdownParams>(),
         ("adashi_design", "get_scope") => schema::<DesignScopeParams>(),
         ("adashi_design", "get_by_ids" | "get_documents") => schema::<DesignByIdsParams>(),
         ("adashi_design", "search") => schema::<DesignSearchParams>(),

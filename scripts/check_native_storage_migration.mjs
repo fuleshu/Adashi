@@ -7,6 +7,9 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 
 export async function verifyMigration({ page, call, request, getTask, updateTask, taskIds, until, passed, project, fixture, evidence }) {
+  const markdownBody = "# Migration design\r\n\r\nGrüße 日本語 📝\r\n```rust\r\nlet preserved = true;\r\n```\r\n";
+  await call("adashi_design", { operation: "save", changeIntent: "Verify native Markdown migration", operationId: randomUUID(), readTokens: [], changes: [{ op: "upsert_markdown", externalId: "migration-prose", title: "Migration prose", body: markdownBody, designLinks: [] }] });
+  const markdownBefore = await call("adashi_design", { operation: "get_documents", ids: ["markdown:migration-prose"] });
   const selection = async () => JSON.parse(await fs.readFile(path.join(project, ".adashi/storage.json"), "utf8"));
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   const panel = page.getByRole("region", { name: "Project storage", exact: true });
@@ -20,6 +23,7 @@ export async function verifyMigration({ page, call, request, getTask, updateTask
   await panel.getByText("Converted and switched to Git text files.", { exact: true }).waitFor();
   assert.equal((await selection()).backend.kind, "text");
   assert.equal((await getTask(1)).title, before.title);
+  assert.deepEqual(await call("adashi_design", { operation: "get_documents", ids: ["markdown:migration-prose"] }), markdownBefore);
   const stale = await request("tools/call", { name: "adashi_tasks", arguments: { projectName: "fixture", operation: "update", taskId: before.id, expectedVersion: before.version, operationId: randomUUID(), title: "Must not overwrite after migration" } });
   assert.ok(stale.error || stale.result.isError, "pre-migration MCP guard rejected");
   const created = await call("adashi_tasks", { operation: "create", operationId: randomUUID(), title: "Created by MCP in text storage" });
@@ -38,6 +42,7 @@ export async function verifyMigration({ page, call, request, getTask, updateTask
   await panel.getByRole("button", { name: "Convert and switch", exact: true }).click();
   await panel.getByText("Converted and switched to SQLite database.", { exact: true }).waitFor();
   assert.equal((await selection()).backend.kind, "sqlite");
+  assert.deepEqual(await call("adashi_design", { operation: "get_documents", ids: ["markdown:migration-prose"] }), markdownBefore);
   assert.equal((await call("adashi_tasks", { operation: "get", taskId: created.task.id })).task.title, created.task.title);
   await updateTask(2, "MCP update after reverse conversion");
   assert.ok(await panel.evaluate(element => element.scrollWidth <= element.clientWidth), "backup path must wrap inside the settings panel");

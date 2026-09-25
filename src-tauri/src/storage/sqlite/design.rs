@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
 pub mod documents;
+mod markdown_retrieval;
 
 pub use adashi_storage_api::design::*;
 
@@ -27,6 +28,7 @@ pub fn load_overview(
     let elements = filter_elements_by_depth(load_elements(db, workspace.id)?, max_depth);
 
     Ok(DesignOverviewResult {
+        markdown: markdown_retrieval::page(db, project_id, None)?,
         revision,
         workspace_name: workspace.name,
         workspace_description: workspace.description,
@@ -48,6 +50,9 @@ pub fn load_scope(
     children_depth: Option<usize>,
     include_source: bool,
 ) -> Result<DesignScopeResult, String> {
+    if let Some(scope) = markdown_retrieval::scope(db, project_id, element_id)? {
+        return Ok(scope);
+    }
     let workspace = load_workspace(db)?;
     let revision = state::load_project_revision(db, project_id)?.revision;
     let elements = load_elements(db, workspace.id)?;
@@ -115,7 +120,13 @@ pub fn load_scope(
         .filter(|mockup| scope_ids.contains(mockup.attached_to_external_id.as_str()))
         .collect::<Vec<_>>();
 
+    let mut associated_ids = scope_ids.clone();
+    associated_ids.extend(scoped_relationships.iter().map(|r|r.external_id.clone()));
+    associated_ids.extend(scoped_diagrams.iter().map(|d|d.key.clone()));
+    associated_ids.extend(scoped_mockups.iter().map(|m|m.external_id.clone()));
     Ok(DesignScopeResult {
+        markdown: markdown_retrieval::associated(db, project_id, &associated_ids)?,
+        backlinks: Vec::new(),
         revision,
         root_external_id: element_id.to_string(),
         uml_artifact_types: supported_uml_artifact_types(),
@@ -245,8 +256,12 @@ pub fn search(
         }
     }
 
-    hits.truncate(limit.max(1));
-    Ok(DesignSearchResult { revision, hits })
+    if any_kind || allowed.contains("markdown") {
+        hits.extend(markdown_retrieval::search(db, project_id, &terms)?);
+    }
+    let total_count = hits.len();
+    hits.truncate(limit.clamp(1, 100));
+    Ok(DesignSearchResult { revision, truncated: hits.len() < total_count, total_count, hits })
 }
 
 pub fn load_by_ids(
@@ -259,6 +274,7 @@ pub fn load_by_ids(
     let ids = ids.iter().map(String::as_str).collect::<HashSet<_>>();
 
     Ok(DesignByIdsResult {
+        markdown: markdown_retrieval::page(db, project_id, Some(&ids))?,
         revision,
         uml_artifact_types: supported_uml_artifact_types(),
         elements: load_elements(db, workspace.id)?
@@ -307,6 +323,7 @@ pub fn load_by_bindings(
         .collect::<HashSet<_>>();
 
     Ok(DesignBindingsResult {
+        markdown: markdown_retrieval::page(db, project_id, Some(&design_ids))?,
         revision,
         uml_artifact_types: supported_uml_artifact_types(),
         elements: load_elements(db, workspace.id)?
@@ -707,21 +724,7 @@ fn finish_design_transaction(
         });
     }
 
-    let dsl = build_structurizr_dsl(&tx, workspace_id)?;
-    let json_source = build_structurizr_json_source(&tx, workspace_id)?;
-    tx.execute(
-        "UPDATE design_workspaces
-         SET structurizr_dsl=?1, structurizr_json=?2, updated_at=CURRENT_TIMESTAMP
-         WHERE id=?3",
-        params![dsl, json_source, workspace_id],
-    )
-    .map_err(|error| error.to_string())?;
-    tx.execute(
-        "UPDATE diagrams SET source=?1, updated_at=CURRENT_TIMESTAMP
-         WHERE workspace_id=?2 AND kind='structurizr'",
-        params![json_source, workspace_id],
-    )
-    .map_err(|error| error.to_string())?;
+    refresh_sources(&tx, workspace_id, changed_resources)?;
 
     let mut seen = HashSet::new();
     for resource in changed_resources {
@@ -979,21 +982,7 @@ fn finish_design_apply(
         });
     }
 
-    let dsl = build_structurizr_dsl(&tx, workspace_id)?;
-    let json_source = build_structurizr_json_source(&tx, workspace_id)?;
-    tx.execute(
-        "UPDATE design_workspaces
-         SET structurizr_dsl=?1, structurizr_json=?2, updated_at=CURRENT_TIMESTAMP
-         WHERE id=?3",
-        params![dsl, json_source, workspace_id],
-    )
-    .map_err(|error| error.to_string())?;
-    tx.execute(
-        "UPDATE diagrams SET source=?1, updated_at=CURRENT_TIMESTAMP
-         WHERE workspace_id=?2 AND kind='structurizr'",
-        params![json_source, workspace_id],
-    )
-    .map_err(|error| error.to_string())?;
+    refresh_sources(&tx, workspace_id, changed_resources)?;
 
     let mut seen = HashSet::new();
     for resource in changed_resources {
@@ -1068,6 +1057,7 @@ pub(crate) fn required_guard(
                 Some((external_id.trim().to_string(), "design.relationship"))
             }
             DesignChange::UpsertUml { key, .. } => Some((key.trim().to_string(), "design.uml")),
+            DesignChange::UpsertMarkdown { external_id, .. } => Some((external_id.clone(), "design.markdown")),
             _ => None,
         })
         .collect::<HashMap<_, _>>();
@@ -1131,6 +1121,13 @@ fn required_resources(
         }
     };
     match change {
+        DesignChange::UpsertMarkdown { external_id, design_links, .. } => {
+            writes.push(target("design.markdown", external_id, false));
+            reads.extend(design_links.iter().map(|l| (l.target_type.resource_kind().to_string(), l.design_external_id.clone())));
+        }
+        DesignChange::DeleteMarkdown { external_id } => {
+            writes.push(target("design.markdown", external_id, true));
+        }
         DesignChange::UpsertElement {
             external_id,
             parent_external_id,
@@ -1345,6 +1342,9 @@ fn resolve_design_identity(
     external_id: &str,
 ) -> Result<Option<(String, String)>, String> {
     let id = external_id.trim();
+    if db.query_row("SELECT EXISTS(SELECT 1 FROM markdown_design_documents d JOIN design_workspaces w ON w.project_id=d.project_id WHERE w.id=?1 AND d.external_id=?2)",params![workspace_id,id],|r|r.get::<_,bool>(0)).map_err(|e|e.to_string())? {
+        return Ok(Some(("design.markdown".into(),id.into())));
+    }
     if db
         .query_row(
             "SELECT 1 FROM c4_elements WHERE workspace_id=?1 AND external_id=?2",
@@ -1391,6 +1391,8 @@ fn apply_change(
     change: &DesignChange,
 ) -> Result<bool, String> {
     let changed = match change {
+        DesignChange::UpsertMarkdown { external_id, title, body, design_links } => super::markdown::upsert(db,project_id,&adashi_storage_api::markdown::MarkdownDesignDocument { external_id:external_id.clone(),title:title.clone(),body:body.clone(),design_links:design_links.clone() })?,
+        DesignChange::DeleteMarkdown { external_id } => super::markdown::delete(db,project_id,external_id)?,
         DesignChange::UpsertElement {
             external_id,
             parent_external_id,
@@ -2045,6 +2047,7 @@ pub(crate) fn validate_workspace(
                 .iter()
                 .any(|diagram| diagram.key == binding.design_external_id)
             && !mockup_ids.contains(&binding.design_external_id)
+            && !db.query_row("SELECT EXISTS(SELECT 1 FROM markdown_design_documents d JOIN design_workspaces w ON w.project_id=d.project_id WHERE w.id=?1 AND d.external_id=?2)",params![workspace_id,binding.design_external_id],|r|r.get::<_,bool>(0)).map_err(|e|e.to_string())?
         {
             errors.push(correction(
                 "binding.unknown_design_id",
@@ -2839,6 +2842,17 @@ fn failed_save(
     }
 }
 
+/// Markdown-only edits cannot alter C4 source or its timestamps. Keeping these
+/// common records untouched allows independent prose edits to merge in Git.
+fn refresh_sources(db: &Connection, workspace_id: i64, changes: &[ResourceChangeTarget]) -> Result<(), String> {
+    if changes.iter().all(|r| r.kind == "design.markdown") { return Ok(()); }
+    let dsl=build_structurizr_dsl(db,workspace_id)?;
+    let json=build_structurizr_json_source(db,workspace_id)?;
+    db.execute("UPDATE design_workspaces SET structurizr_dsl=?1,structurizr_json=?2,updated_at=CURRENT_TIMESTAMP WHERE id=?3",params![dsl,json,workspace_id]).map_err(|e|e.to_string())?;
+    db.execute("UPDATE diagrams SET source=?1,updated_at=CURRENT_TIMESTAMP WHERE workspace_id=?2 AND kind='structurizr'",params![json,workspace_id]).map_err(|e|e.to_string())?;
+    Ok(())
+}
+
 fn no_changes_save(
     revision: i64,
     message: impl Into<String>,
@@ -3447,6 +3461,7 @@ mod tests {
 
     fn setup_design_workspace() -> (Connection, i64, i64) {
         let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(include_str!("markdown_schema.sql")).unwrap();
         db.execute_batch(include_str!("../../schema.sql")).unwrap();
         db.execute_batch(include_str!("../../concurrency_schema.sql"))
             .unwrap();

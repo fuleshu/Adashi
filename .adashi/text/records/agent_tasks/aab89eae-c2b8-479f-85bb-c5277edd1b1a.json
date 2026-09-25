@@ -1,13 +1,13 @@
 {
   "collection": "agent_tasks",
   "data": {
-    "changed_files": "[]",
-    "completed_at": null,
-    "completion_memo": "",
+    "changed_files": "[\"src-tauri/src/projection.rs\",\"src-tauri/src/settings.rs\",\"src-tauri/src/desktop.rs\",\"src-tauri/src/mcp.rs\",\"src-tauri/src/mcp/markdown.rs\",\"src/main.tsx\",\"scripts/check_markdown_mcp.py\",\"scripts/check_native_storage.mjs\"]",
+    "completed_at": "2026-09-25 09:31:31",
+    "completion_memo": "Implemented full one-way Markdown projection from consistent canonical snapshots: opt-in per-project docs/adashi default/configurable directory, identity-hashed filenames, generated MCP authoring notice/content fingerprint, full exact bodies, root index and bounded relative links beside bound code. Added atomic write-if-changed, local ownership manifest/lock, drift detection/repair, owned cleanup on delete/relocation/disable, case/path/symlink/junction validation and separate postcommit MCP projection status. Desktop settings expose directory/status/regeneration. 17 projection/settings tests pass (1 existing manual test ignored), including long Unicode bodies, stable mtimes, rename, relocation, unowned collisions, interrupted output and Windows permission/junction checks. Real MCP SQLite/text tests prove publication failure retains committed content. Native WebView2 settings, MCP-triggered refresh, drift retry and opt-out passed; evidence target/native-storage/90b06759-261b-4d6b-8882-925a60ce57c4. TypeScript and frontend/native builds pass.",
     "confirmation_commit_id": null,
     "confirmed_at": null,
     "created_at": "2026-09-25 07:51:52",
-    "created_files": "[]",
+    "created_files": "[\"src-tauri/src/projection/files.rs\",\"src-tauri/src/projection/markdown.rs\",\"src-tauri/src/projection/ownership.rs\",\"src-tauri/src/projection/markdown_tests.rs\",\"scripts/check_native_markdown_projection.mjs\"]",
     "description": {
       "lines": [
         "Execution order: Markdown step 7 of 12. Depends on Adashi task ID 30 (Markdown 06/12 — Extend MCP design APIs, schemas and operation help). Complete and verify that prerequisite before starting; all earlier Markdown steps are transitively required.\n",
@@ -32,9 +32,9 @@
     "project_id": {
       "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
     },
-    "state": "todo",
+    "state": "finished",
     "title": "Markdown 07/12 — Generate full Markdown files and link existing architecture shorts",
-    "updated_at": "2026-09-25 07:51:52"
+    "updated_at": "2026-09-25 09:31:31"
   },
   "deleted": false,
   "identity": "aab89eae-c2b8-479f-85bb-c5277edd1b1a",

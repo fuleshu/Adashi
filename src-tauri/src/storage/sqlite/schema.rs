@@ -3,7 +3,7 @@ use rusqlite::Connection;
 
 // Bump when adding a schema/data migration. Never replay migrations during reads:
 // even an ignored AUTOINCREMENT insert can change sqlite_sequence and the file.
-pub(crate) const SCHEMA_VERSION: i64 = 14;
+pub(crate) const SCHEMA_VERSION: i64 = 15;
 
 pub fn migrate(db: &mut Connection) -> rusqlite::Result<()> {
     db.pragma_update(None, "foreign_keys", true)?;
@@ -35,6 +35,7 @@ fn migrate_schema(db: &Connection) -> rusqlite::Result<()> {
     db.execute_batch(include_str!("../../schema.sql"))?;
     db.execute_batch(include_str!("../../concurrency_schema.sql"))?;
     db.execute_batch(include_str!("../../design_health_schema.sql"))?;
+    db.execute_batch(include_str!("markdown_schema.sql"))?;
     ensure_rules_name_column(db)?;
     ensure_diagram_attachment_columns(db)?;
     ensure_design_bindings_table(db)?;
@@ -69,14 +70,15 @@ fn ensure_mockup_design_link_targets(db: &Connection) -> rusqlite::Result<()> {
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='task_design_specification_links'",
         [], |row| row.get(0),
     )?;
-    if !task_sql.contains("'mockup'") {
+    if !task_sql.contains("'markdown'") {
+        let high:i64=db.query_row("SELECT COALESCE(MAX(seq),0) FROM sqlite_sequence WHERE name='task_design_specification_links'",[],|r|r.get(0))?;
         db.execute_batch(
             "ALTER TABLE task_design_specification_links RENAME TO task_design_specification_links_legacy;
              CREATE TABLE task_design_specification_links (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 task_id INTEGER NOT NULL REFERENCES agent_tasks(id) ON DELETE CASCADE,
                 sort_order INTEGER NOT NULL DEFAULT 0,
-                target_type TEXT NOT NULL CHECK(target_type IN ('element', 'relationship', 'uml', 'mockup')),
+                target_type TEXT NOT NULL CHECK(target_type IN ('element', 'relationship', 'uml', 'mockup', 'markdown')),
                 design_external_id TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(task_id, design_external_id)
@@ -86,6 +88,7 @@ fn ensure_mockup_design_link_targets(db: &Connection) -> rusqlite::Result<()> {
              DROP TABLE task_design_specification_links_legacy;
              CREATE INDEX idx_task_design_links_task_order ON task_design_specification_links(task_id, sort_order);",
         )?;
+        db.execute("UPDATE sqlite_sequence SET seq=MAX(seq,?1) WHERE name='task_design_specification_links'",[high])?;
     }
 
     let qa_sql: String = db.query_row(
@@ -93,14 +96,15 @@ fn ensure_mockup_design_link_targets(db: &Connection) -> rusqlite::Result<()> {
         [],
         |row| row.get(0),
     )?;
-    if !qa_sql.contains("'mockup'") {
+    if !qa_sql.contains("'markdown'") {
+        let high:i64=db.query_row("SELECT COALESCE(MAX(seq),0) FROM sqlite_sequence WHERE name='qa_job_design_links'",[],|r|r.get(0))?;
         db.execute_batch(
             "ALTER TABLE qa_job_design_links RENAME TO qa_job_design_links_legacy;
              CREATE TABLE qa_job_design_links (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 qa_job_id INTEGER NOT NULL REFERENCES qa_jobs(id) ON DELETE CASCADE,
                 sort_order INTEGER NOT NULL DEFAULT 0,
-                target_type TEXT NOT NULL CHECK(target_type IN ('element', 'relationship', 'uml', 'mockup')),
+                target_type TEXT NOT NULL CHECK(target_type IN ('element', 'relationship', 'uml', 'mockup', 'markdown')),
                 design_external_id TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(qa_job_id, design_external_id)
@@ -111,6 +115,7 @@ fn ensure_mockup_design_link_targets(db: &Connection) -> rusqlite::Result<()> {
              CREATE INDEX idx_qa_job_design_links_job_order ON qa_job_design_links(qa_job_id, sort_order);
              CREATE INDEX idx_qa_job_design_links_target ON qa_job_design_links(design_external_id);",
         )?;
+        db.execute("UPDATE sqlite_sequence SET seq=MAX(seq,?1) WHERE name='qa_job_design_links'",[high])?;
     }
     Ok(())
 }

@@ -72,6 +72,7 @@ pub struct Workspace {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesignInventory {
+    pub markdown: Vec<crate::markdown::MarkdownSummary>,
     pub workspace: Workspace,
     pub elements: Vec<Identified<DesignElementRecord>>,
     pub relationships: Vec<Identified<DesignRelationshipRecord>>,
@@ -172,6 +173,9 @@ pub struct LegacyContent {
 /// Drop releases the read transaction/pin; reads never modify persisted content.
 /// No method has an "unsupported" default: a full adapter provides every domain.
 pub trait ReadSnapshot {
+    fn markdown_documents(&self, query: &crate::markdown::MarkdownQuery) -> StorageResult<crate::markdown::MarkdownPage>;
+    fn markdown_document(&self, external_id: &str) -> StorageResult<crate::markdown::MarkdownDesignDocument>;
+    fn markdown_backlinks(&self, external_id: &str) -> StorageResult<Vec<crate::markdown::MarkdownBacklink>>;
     fn metadata(&self) -> &ProjectMetadata;
     fn computer_checkouts(&self) -> StorageResult<Vec<ComputerCheckout>>;
     fn design_inventory(&self) -> StorageResult<DesignInventory>;

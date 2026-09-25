@@ -86,6 +86,16 @@ pub struct DesignBindingRecord {
     deny_unknown_fields
 )]
 pub enum DesignChange {
+    UpsertMarkdown {
+        external_id: String,
+        title: String,
+        body: String,
+        #[serde(default)]
+        design_links: Vec<crate::markdown::DesignAssociation>,
+    },
+    DeleteMarkdown {
+        external_id: String,
+    },
     UpsertElement {
         external_id: String,
         parent_external_id: Option<String>,
@@ -198,6 +208,7 @@ pub struct ElementDescriptionUpdate {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(schemars::JsonSchema)]
 pub struct DesignOverviewResult {
+    pub markdown: crate::markdown::MarkdownPage,
     pub revision: i64,
     pub workspace_name: String,
     pub workspace_description: String,
@@ -214,6 +225,8 @@ pub struct DesignOverviewResult {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(schemars::JsonSchema)]
 pub struct DesignScopeResult {
+    pub markdown: crate::markdown::MarkdownPage,
+    pub backlinks: Vec<crate::markdown::MarkdownBacklink>,
     pub revision: i64,
     pub root_external_id: String,
     pub uml_artifact_types: Vec<DesignArtifactTypeRecord>,
@@ -230,6 +243,8 @@ pub struct DesignScopeResult {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(schemars::JsonSchema)]
 pub struct DesignSearchResult {
+    pub total_count: usize,
+    pub truncated: bool,
     pub revision: i64,
     pub hits: Vec<DesignSearchHit>,
 }
@@ -248,6 +263,7 @@ pub struct DesignSearchHit {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(schemars::JsonSchema)]
 pub struct DesignByIdsResult {
+    pub markdown: crate::markdown::MarkdownPage,
     pub revision: i64,
     pub uml_artifact_types: Vec<DesignArtifactTypeRecord>,
     pub elements: Vec<DesignElementRecord>,
@@ -261,6 +277,7 @@ pub struct DesignByIdsResult {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(schemars::JsonSchema)]
 pub struct DesignBindingsResult {
+    pub markdown: crate::markdown::MarkdownPage,
     pub revision: i64,
     pub uml_artifact_types: Vec<DesignArtifactTypeRecord>,
     pub bindings: Vec<DesignBindingRecord>,

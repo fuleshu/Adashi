@@ -19,7 +19,16 @@ pub(crate) fn validate(db: &Connection, project: i64) -> StorageResult<()> {
         resources.insert(item.map_err(StorageError::backend)?);
     }
     let mut edges = Vec::new();
+    let mut markdown = db.prepare("SELECT external_id FROM markdown_design_documents WHERE project_id=?1").map_err(StorageError::backend)?;
+    for id in markdown.query_map([project],|r|r.get::<_,String>(0)).map_err(StorageError::backend)? {
+        let id=id.map_err(StorageError::backend)?;
+        if resources.iter().any(|r|r.id==id && r.kind!="task") {
+            return Err(StorageError::Validation(format!("Markdown identity '{id}' is already used by another design artefact")));
+        }
+        resources.insert(ResourceKey {kind:"markdown".into(),id});
+    }
     for sql in [
+        "SELECT 'markdown',d.external_id,l.target_type,l.design_external_id FROM markdown_design_links l JOIN markdown_design_documents d ON d.id=l.document_id WHERE d.project_id=?1",
         "SELECT 'task',CAST(t.id AS TEXT),l.target_type,l.design_external_id FROM task_design_specification_links l JOIN agent_tasks t ON t.id=l.task_id WHERE t.project_id=?1",
         "SELECT 'qa.job',CAST(j.id AS TEXT),l.target_type,l.design_external_id FROM qa_job_design_links l JOIN qa_jobs j ON j.id=l.qa_job_id WHERE j.project_id=?1",
         "SELECT 'qa.job',CAST(j.id AS TEXT),'task',CAST(l.task_id AS TEXT) FROM qa_job_task_links l JOIN qa_jobs j ON j.id=l.qa_job_id WHERE j.project_id=?1",
@@ -27,6 +36,15 @@ pub(crate) fn validate(db: &Connection, project: i64) -> StorageResult<()> {
     ] {
         let mut stmt=db.prepare(sql).map_err(StorageError::backend)?;
         for row in stmt.query_map([project],|r|Ok(MissingReference {source:ResourceKey{kind:r.get(0)?,id:r.get(1)?},target:ResourceKey{kind:r.get(2)?,id:r.get(3)?}})).map_err(StorageError::backend)? { edges.push(row.map_err(StorageError::backend)?); }
+    }
+    // Bindings have a file/symbol target type, so resolve their design identity
+    // against the final project graph. A deleted document must not orphan one.
+    let mut bindings=db.prepare("SELECT b.design_external_id,b.target_type||':'||b.target FROM design_bindings b JOIN design_workspaces w ON w.id=b.workspace_id WHERE w.project_id=?1").map_err(StorageError::backend)?;
+    for row in bindings.query_map([project],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).map_err(StorageError::backend)? {
+        let (id,binding)=row.map_err(StorageError::backend)?;
+        if !resources.iter().any(|r|r.id==id && r.kind!="task") {
+            edges.push(MissingReference {source:ResourceKey {kind:"binding".into(),id:binding},target:ResourceKey {kind:"design".into(),id}});
+        }
     }
     check_references(&edges, &resources)
 }

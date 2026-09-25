@@ -5,7 +5,7 @@ If the Adashi MCP server is available in this workspace read the agents_template
 If the Adashi MCP server is not present, unavailable, or the tool call fails because the MCP surface is not configured, continue without Adashi rule injection and mention the limitation only when it affects the requested outcome.
 
 <!-- adashi:architecture:begin -->
-<!-- adashi:generated revision=3137752568632651 -->
+<!-- adashi:generated revision=8754970345988861 -->
 # Architecture — `` (generated)
 Generated from the Adashi design model; do not edit, change the model.
 These responsibilities are already owned here: extend them, do not duplicate.

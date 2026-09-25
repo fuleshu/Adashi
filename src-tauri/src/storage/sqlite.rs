@@ -11,6 +11,7 @@ pub(crate) mod design;
 pub(crate) mod fixed_hooks;
 pub(crate) mod health;
 pub(crate) mod memory;
+pub(crate) mod markdown;
 pub(crate) mod mockups;
 pub(crate) mod prompt_hygiene;
 pub(crate) mod qa;

@@ -85,6 +85,21 @@ See [the compact MCP contract and migration guide](docs/context-efficiency.md) f
 
 ### Architecture Projection
 
+Markdown is an official design artefact alongside C4, UML and mockups. Open **Design →
+Documents** to create, format, preview and edit a standalone specification or associate it
+with architecture. Task and QA references open the same document; a title rename preserves
+its identity. Conflicts retain your draft for explicit reload or reconciliation.
+
+Agents author design prose through MCP. Opted-in projections include complete Markdown
+under `docs/adashi`, a document index, and the current shared `agent-workflow.md`; generated
+root/folder shorts link to the documents. These files are read-only discovery output.
+Configure their directory, inspect output status, or retry generation in Settings.
+The [agent workflow](agents_template.md) documents retrieval and guarded writes.
+Use [controlled Markdown adoption](docs/markdown-adoption.md) to preview existing files,
+import through the same editor and convert selected task/QA references without deleting originals.
+See the [Markdown implementation and validation report](docs/markdown-validation.md) for
+storage, MCP, native desktop and Git acceptance coverage and execution limits.
+
 Adashi keeps the formal design database as the single source of truth, and can additionally project it into the project tree so coding agents read the architecture where they already work. When enabled for a project, Adashi generates a bounded block into the instruction file of the project root and of every folder that contains design-bound files. The block carries the responsibilities and boundaries of the elements that own code there — the information that stops an agent inventing a parallel mechanism that already exists.
 
 Projections are marked as generated, wrapped in `adashi:architecture` markers, and overwritten on regeneration, so the design is edited in Adashi and never in the file. The instruction-file name is configurable in settings and defaults to `AGENTS.md`. Generation is opt-in per project, and disabling it removes every block Adashi wrote. See [the architecture projection contract](docs/architecture-projection.md).

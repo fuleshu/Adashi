@@ -15,6 +15,8 @@ const typingDuringSave = { ...dirty, value: "continued typing" };
 assert.deepEqual(savedDraft(typingDuringSave, dirty.value, { value: dirty.value, version: 4 }),
   { value: "continued typing", baseValue: dirty.value, version: 4 });
 const normalized = savedDraft({ ...base, value: " trimmed " }, " trimmed ", { value: "trimmed", version: 4 });
+assert.deepEqual(savedDraft(typingDuringSave, dirty.value, { value: "peer won after commit", version: 5 }),
+  typingDuringSave, "a late readback must not give continued typing a peer's guard");
 assert.equal(normalized.value, "trimmed");
 assert.equal(normalized.baseValue, "trimmed");
 console.log("Versioned draft regression: stale guard, dirty/clean refresh, save acknowledgment and typing during save passed.");

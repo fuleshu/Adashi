@@ -40,6 +40,7 @@ use serde_json::{json, Value};
 mod context;
 mod errors;
 mod help;
+mod markdown;
 use base64::Engine as _;
 use context::{MemoryContext, RuleInjectionResult};
 use std::path::PathBuf;
@@ -561,6 +562,8 @@ struct TaskReadResult {
 #[derive(Debug, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TaskDesignSpecificationBranch {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    documents: Vec<adashi_storage_api::documents::DesignDocument>,
     link: TaskDesignSpecificationLink,
     scope: Option<DesignScopeResult>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -713,6 +716,7 @@ const QA_JOB_LIST_MAX_LIMIT: i64 = 100;
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 enum DesignOperation {
+    ListMarkdown,
     Save,
     GetScope,
     GetByIds,
@@ -787,6 +791,8 @@ enum IntentsOperation {
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DesignParams {
+    /// list_markdown: bounded metadata, filters and nextAfterId continuation.
+    markdown_query: Option<adashi_storage_api::markdown::MarkdownQuery>,
     operation: DesignOperation,
     /// Configured project name (case-insensitive) or project id.
     project_name: String,
@@ -794,7 +800,7 @@ struct DesignParams {
     #[serde(default)]
     #[schemars(schema_with = "nonnegative_count_schema")]
     max_depth: Option<usize>,
-    /// get_scope: root element id.
+    /// get_scope: root element or Markdown external id.
     element_id: Option<String>,
     /// get_scope: include ancestors.
     include_ancestors: Option<bool>,
@@ -1904,8 +1910,8 @@ impl AdashiMcpServer {
     fn design_save(
         &self,
         Parameters(params): Parameters<DesignSaveParams>,
-    ) -> Result<Json<DesignSaveResult>, ErrorData> {
-        let (_project, mut store) =
+    ) -> Result<Json<Value>, ErrorData> {
+        let (project, mut store) =
             self.open_project_storage(Some(params.project_name.as_str()))?;
         let result = match store.commit(Mutation {
             operation_id: params.operation_id,
@@ -1916,13 +1922,18 @@ impl AdashiMcpServer {
             })],
         }) {
             Ok(result) => result,
-            Err(StorageError::DesignRejected(result)) => return Ok(Json(result)),
+            Err(StorageError::DesignRejected(result)) => return Ok(Json(json!(result))),
             Err(error) => return Err(storage_error(error)),
         };
         let Some(ChangeOutcome::Design(saved)) = result.outcomes.into_iter().next() else {
             return Err(internal_error("Storage returned an unexpected outcome"));
         };
-        Ok(Json(saved))
+        let mut response = json!(saved);
+        if saved.stored {
+            // Canonical commit already succeeded. Publication errors are separate status.
+            response["projection"] = markdown::refresh(self, &project, &mut store);
+        }
+        Ok(Json(response))
     }
 
     fn design_set_element_descriptions(
@@ -2019,7 +2030,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_design",
-        description = "Read and edit formal C4/UML design, bindings and UI mockups. Use adashi_help with tool and operation for exact requirements and examples before an unfamiliar call.",
+        description = "Read and edit formal C4/UML, Markdown designs, bindings and UI mockups. Use adashi_help with tool and operation for exact requirements and examples before an unfamiliar call.",
         annotations(read_only_hint = true, destructive_hint = false)
     )]
     fn design(
@@ -2027,6 +2038,12 @@ impl AdashiMcpServer {
         Parameters(params): Parameters<DesignParams>,
     ) -> Result<CallToolResult, ErrorData> {
         match params.operation {
+            DesignOperation::ListMarkdown => {
+                let (_, mut store) = self.open_project_storage(Some(&params.project_name))?;
+                let snapshot = store.snapshot().map_err(storage_error)?;
+                let page = snapshot.markdown_documents(&params.markdown_query.unwrap_or_default()).map_err(storage_error)?;
+                Ok(CallToolResult::structured(json!({"markdown":page,"guidance":"Metadata only. Continue with markdownQuery.afterId=nextAfterId; retrieve markdown:<externalId> using get_documents before editing."})))
+            }
             DesignOperation::Save => {
                 let operation_id = required(params.operation_id, "operationId")?;
                 let change_intent = required(params.change_intent, "changeIntent")?;
@@ -2598,6 +2615,7 @@ fn task_link_branches(task: &Task) -> Vec<TaskDesignSpecificationBranch> {
     task.design_specification_links
         .iter()
         .map(|link| TaskDesignSpecificationBranch {
+            documents: Vec::new(),
             link: link.clone(),
             scope: None,
             mockup: None,
@@ -2627,7 +2645,7 @@ fn load_task_design_specifications(
                 None
             };
             let root = match link.target_type.as_str() {
-                "element" => Some(link.design_external_id.clone()),
+                "element" | "markdown" => Some(link.design_external_id.clone()),
                 "uml" => db
                     .design_by_ids(&[link.design_external_id.clone()])
                     .map_err(|e| e.to_string())?
@@ -2658,7 +2676,11 @@ fn load_task_design_specifications(
             } else {
                 None
             };
+            let documents = if let Some(scope) = &scope {
+                db.design_documents(&scope.markdown.documents.iter().map(|d|format!("markdown:{}",d.external_id)).collect::<Vec<_>>()).map_err(|e|e.to_string())?
+            } else { Vec::new() };
             Ok(TaskDesignSpecificationBranch {
+                documents,
                 link: link.clone(),
                 scope,
                 mockup,
@@ -2807,6 +2829,7 @@ mod tests {
             (
                 serde_json::to_value(rmcp::schemars::schema_for!(DesignParams)).unwrap(),
                 vec![
+                    "list_markdown",
                     "save",
                     "get_scope",
                     "get_by_ids",

@@ -20,6 +20,9 @@ pub(crate) trait SourceSnapshot {
 }
 
 pub(crate) trait MigrationAdapter {
+    // Every adapter, including future server SQL, transfers the closed canonical
+    // vocabulary: Markdown documents/ordered links, bindings, task/QA references
+    // and retained deletion identities. Generated files/manifests are excluded.
     fn capture(
         &self,
         project: &super::ProjectRegistration,

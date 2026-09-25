@@ -1,0 +1,18 @@
+{
+  "collection": "qa_runs",
+  "data": {
+    "finished_at": "2026-09-25 10:54:29",
+    "id": 14,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "query_snapshot": "{\"jobIds\":[6],\"states\":null,\"tags\":null,\"taskIds\":null,\"designExternalIds\":null,\"enabled\":null}",
+    "started_at": "2026-09-25 10:54:25",
+    "status": "passed",
+    "summary": "1 passed, 0 failed, 0 timed out",
+    "trigger_source": "task36 final rebuilt core workspace evidence verification"
+  },
+  "deleted": false,
+  "identity": "56f90386-3f86-409c-8866-7a57753e6837",
+  "schemaVersion": 1
+}

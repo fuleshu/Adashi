@@ -12,7 +12,16 @@ serialized bytes before publishing; never rewrite unchanged files. JSON was
 selected for strict types and the existing Rust/TypeScript tooling. YAML's implicit
 types and a single project-wide JSON document add avoidable merge problems.
 
-`.adashi/text/format.json` declares format version 2 and relational schema 14.
+`.adashi/text/format.json` declares format version 2 and relational schema 15.
+Schema 14 remains readable without file changes. A successful new write upgrades
+the format marker to 15; unrelated records retain their bytes. Newer unsupported
+schemas fail explicitly. Markdown records are forbidden under a schema-14 marker.
+The `markdown_design_documents` and `markdown_design_links` collections retain
+complete multiline bodies, stable external identities and ordered typed links.
+Their SQL foreign keys use the same UUID record-reference encoding as other
+domains. Content tokens are derived from canonical fields, never stored as a
+second copy that could cause spurious Git conflicts. Generated `.md` files are
+not part of this record vocabulary and are never imported during reads.
 Record envelopes remain version 1. Version 2 removes application request history
 from project files; request retry results belong to ignored local runtime state.
 `.adashi/text/records/<collection>/<identity>.json` stores one record per immutable

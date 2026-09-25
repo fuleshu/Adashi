@@ -16,6 +16,9 @@ pub fn with_documents(
 ) -> Result<Value, String> {
     let mut result = serde_json::to_value(result).map_err(|error| error.to_string())?;
     let mut ids = BTreeSet::new();
+    for record in result["markdown"]["documents"].as_array().into_iter().flatten() {
+        if let Some(id) = record["externalId"].as_str() { ids.insert(format!("markdown:{id}")); }
+    }
     for (field, kind, identity) in [
         ("elements", "design.element", "externalId"),
         ("ancestors", "design.element", "externalId"),

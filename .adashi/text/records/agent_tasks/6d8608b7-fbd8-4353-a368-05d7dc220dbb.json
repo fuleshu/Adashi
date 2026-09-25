@@ -1,13 +1,13 @@
 {
   "collection": "agent_tasks",
   "data": {
-    "changed_files": "[]",
-    "completed_at": null,
-    "completion_memo": "",
+    "changed_files": "[\"src-tauri/src/mcp.rs\",\"src-tauri/src/mcp/context.rs\",\"src-tauri/src/mcp/errors.rs\",\"src-tauri/src/mcp/help.rs\",\"src-tauri/storage-api/src/tasks.rs\",\"src-tauri/storage-api/src/qa.rs\"]",
+    "completed_at": "2026-09-25 09:18:51",
+    "completion_memo": "Extended grouped adashi_design with Markdown save/delete variants, paginated list_markdown discovery, typed target schemas, complete read response schemas, operation help/examples and Markdown-aware startup metadata. Task/QA help and schema contracts now publish markdown references. Existing operationId/readToken, atomic conflict, protected deletion, replay and no-op behavior remain unchanged. 23 MCP Rust tests pass. Rebuilt source MCP and connected fresh independent stdio clients on both SQLite and text: schema validation, Unicode/full-body retrieval, scopes/bindings/body search, task expansion/QA links, stale-token merge and atomic rollback, dependency deletion, malformed legacy/unknown fields, replay and unchanged canonical read bytes/mtime all pass. Evidence target/markdown-mcp/832fde0c-6831-4abc-a265-e18d0a90a49c. Installed MCP process was not replaced; projection publication will be integrated by the next ordered task.",
     "confirmation_commit_id": null,
     "confirmed_at": null,
     "created_at": "2026-09-25 07:51:49",
-    "created_files": "[]",
+    "created_files": "[\"src-tauri/src/mcp/markdown.rs\",\"scripts/check_markdown_mcp.py\"]",
     "description": {
       "lines": [
         "Execution order: Markdown step 6 of 12. Depends on Adashi task ID 29 (Markdown 05/12 — Integrate design references, search and scope discovery). Complete and verify that prerequisite before starting; all earlier Markdown steps are transitively required.\n",
@@ -32,9 +32,9 @@
     "project_id": {
       "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
     },
-    "state": "todo",
+    "state": "finished",
     "title": "Markdown 06/12 — Extend MCP design APIs, schemas and operation help",
-    "updated_at": "2026-09-25 07:51:49"
+    "updated_at": "2026-09-25 09:18:51"
   },
   "deleted": false,
   "identity": "6d8608b7-fbd8-4353-a368-05d7dc220dbb",

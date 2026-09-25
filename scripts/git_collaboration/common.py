@@ -140,6 +140,7 @@ class Suite:
                                          designSpecificationLinks=[{"designExternalId": key} for key in ("app", "peer", "third")])["task"]
                                for title in ("Git desktop task", "Disjoint task")]
             self.seed_job = peer.mutate("adashi_qa", operation="create_job", name="Base QA", command="echo base", tags=["base"], taskIds=[self.seed_tasks[0]["id"]])["job"]
+            peer.save([{"op":"upsert_markdown", "externalId":key, "title":key, "body":"# Design\n\nFirst\nMiddle\nLast\n", "designLinks":[]} for key in ("markdown-a", "markdown-b")])
             self.base = peer.commit("Shared text fixture")
             peer.publish("main")
         finally:

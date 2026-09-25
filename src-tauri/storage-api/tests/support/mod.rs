@@ -30,6 +30,9 @@ impl Frame {
     }
 }
 impl ReadSnapshot for Frame {
+    fn markdown_documents(&self, query: &adashi_storage_api::markdown::MarkdownQuery) -> StorageResult<adashi_storage_api::markdown::MarkdownPage> { self.reply("markdown_documents", json!([query])) }
+    fn markdown_document(&self, id: &str) -> StorageResult<adashi_storage_api::markdown::MarkdownDesignDocument> { self.reply("markdown_document", json!([id])) }
+    fn markdown_backlinks(&self, id: &str) -> StorageResult<Vec<adashi_storage_api::markdown::MarkdownBacklink>> { self.reply("markdown_backlinks", json!([id])) }
     fn metadata(&self) -> &ProjectMetadata {
         &self.metadata
     }

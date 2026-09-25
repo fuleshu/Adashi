@@ -52,11 +52,16 @@ pub(super) fn validate(db: &Connection, rows: &engine::Rows) -> StorageResult<i6
             )
             .map_err(|e| invalid(path, &e))?;
         }
+        if collection == "markdown_design_documents" {
+            let document=sqlite::markdown::get(db,project,data["external_id"].as_str().unwrap()).map_err(StorageError::Validation)?.ok_or_else(||invalid(path,"missing Markdown document"))?;
+            document.validate()?;
+        }
         if [
             "task_design_specification_links",
             "qa_job_design_links",
             "qa_job_task_links",
             "ui_mockup_annotations",
+            "markdown_design_links",
         ]
         .contains(&path)
             && data["sort_order"].as_i64().unwrap_or(-1) < 0
@@ -67,6 +72,7 @@ pub(super) fn validate(db: &Connection, rows: &engine::Rows) -> StorageResult<i6
         // can move different entries into the same position; an ID tie-breaker
         // would silently invent an order neither author selected.
         let owner = match path {
+            "markdown_design_links" => Some("document_id"),
             "task_design_specification_links" => Some("task_id"),
             "qa_job_design_links" | "qa_job_task_links" => Some("qa_job_id"),
             _ => None,

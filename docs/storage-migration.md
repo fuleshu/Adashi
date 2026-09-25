@@ -14,6 +14,12 @@ current project's data; it does not merge the two datasets.
 Conversion preserves task IDs/numbers, design relationships and bindings, UML,
 rules, fixed prompts, memory and note-resolution history, QA definitions and
 completed evidence, mockup drafts/annotations/proposals and legacy content.
+It also preserves complete Markdown design bodies, stable document identities,
+ordered typed associations, direct bindings, task/QA links and deletion history.
+The staged counts and semantic fingerprint include both Markdown collections.
+Generated Markdown and local output-ownership manifests are excluded; they can
+be regenerated from the newly selected store. Output-refresh errors must be
+reported separately from an already committed storage conversion.
 Request retry results survive conversion within the same checkout as local runtime
 state; they are not exported to Git. Numeric guards are refreshed when needed to
 reject drafts opened before the switch. Local retries keep their original responses.

@@ -1,5 +1,5 @@
 use super::*;
-use super::{design, fixed_hooks, health as design_health, memory, mockups, qa, rules, tasks};
+use super::{design, fixed_hooks, health as design_health, markdown, memory, mockups, qa, rules, tasks};
 use crate::grep;
 use adashi_storage_api::{self as api, *};
 use api::{
@@ -77,6 +77,15 @@ pub(crate) fn all_versions(
 }
 
 impl ReadSnapshot for Snapshot<'_> {
+    fn markdown_documents(&self, query: &api::markdown::MarkdownQuery) -> StorageResult<api::markdown::MarkdownPage> {
+        markdown::list(&self.tx, self.metadata.record_id, query)
+    }
+    fn markdown_document(&self, id: &str) -> StorageResult<api::markdown::MarkdownDesignDocument> {
+        markdown::get(&self.tx, self.metadata.record_id, id).map_err(StorageError::backend)?.ok_or_else(|| StorageError::ResourceNotFound(ResourceKey { kind: "design.markdown".into(), id: id.into() }))
+    }
+    fn markdown_backlinks(&self, id: &str) -> StorageResult<Vec<api::markdown::MarkdownBacklink>> {
+        markdown::backlinks(&self.tx, self.metadata.record_id, id)
+    }
     fn metadata(&self) -> &ProjectMetadata {
         &self.metadata
     }
@@ -136,6 +145,7 @@ impl ReadSnapshot for Snapshot<'_> {
             })
             .collect::<StorageResult<_>>()?;
         Ok(DesignInventory {
+            markdown: markdown::all_summaries(&self.tx, self.metadata.record_id).map_err(StorageError::backend)?,
             workspace,
             elements,
             relationships,

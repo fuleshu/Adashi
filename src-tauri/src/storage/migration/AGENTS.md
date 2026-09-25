@@ -1,5 +1,5 @@
 <!-- adashi:architecture:begin -->
-<!-- adashi:generated revision=3137752568632651 -->
+<!-- adashi:generated revision=8754970345988861 -->
 # Architecture — `src-tauri/src/storage/migration` (generated)
 Generated from the Adashi design model; do not edit, change the model.
 These responsibilities are already owned here: extend them, do not duplicate.

@@ -137,6 +137,7 @@ pub struct TaskDesignSpecificationLink {
     pub id: i64,
     pub task_id: i64,
     pub sort_order: i64,
+    #[schemars(with = "crate::markdown::DesignTargetKind")]
     pub target_type: String,
     pub design_external_id: String,
     pub title: String,
@@ -146,6 +147,7 @@ pub struct TaskDesignSpecificationLink {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(schemars::JsonSchema)]
 pub struct TaskDesignSpecificationLinkInput {
+    #[schemars(with = "Option<crate::markdown::DesignTargetKind>")]
     pub target_type: Option<String>,
     pub design_external_id: String,
 }

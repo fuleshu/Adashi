@@ -1,13 +1,13 @@
 {
   "collection": "agent_tasks",
   "data": {
-    "changed_files": "[]",
-    "completed_at": null,
-    "completion_memo": "",
+    "changed_files": "[\"src-tauri/src/storage/text/records.rs\",\"src-tauri/src/storage/text/guards.rs\",\"src-tauri/src/storage/text/validation.rs\",\"src-tauri/src/storage/text/tests.rs\",\"src-tauri/src/storage/sqlite/markdown.rs\",\"src-tauri/src/storage/sqlite/markdown_schema.sql\",\"src-tauri/src/storage/sqlite/design.rs\",\"scripts/git_collaboration/common.py\",\"scripts/git_collaboration/merges.py\",\"scripts/check_git_collaboration.py\",\"docs/storage-text-format.md\"]",
+    "completed_at": "2026-09-25 08:55:09",
+    "completion_memo": "Implemented text Markdown vocabulary, ordered UUID-linked associations, resource aggregate fingerprints, semantic validation and schema-14 read compatibility. Supported writes upgrade format relational schema to 15; reads preserve bytes, unknown newer schemas and Markdown under old marker fail. Body/title/link tokens are derived from canonical content (removed duplicate persisted token), preserving Git merges; Markdown-only saves avoid C4 source/timestamp updates. Existing journal/receipt machinery includes all Markdown changes and tombstones. Tests: full Rust suite 210 passed, 5 ignored; focused Markdown tests passed after final source-isolation refinement. Real Git/MCP 18 scenarios passed including independent Markdown edits with stale-token rejection, overlap conflict blocking, deletion/tombstone and fresh clone. Evidence target/git-collaboration/e1446228-e070-4fbe-a47e-6e4b45aad474. Recovery and external-edit preservation tested, body CRLF/Unicode exact, read/fresh-noop/replay bytes and mtimes stable, references and deletes validated. No generated .md imports or tracked local receipts.",
     "confirmation_commit_id": null,
     "confirmed_at": null,
     "created_at": "2026-09-25 07:51:39",
-    "created_files": "[]",
+    "created_files": "[\"src-tauri/src/storage/text/tests/markdown.rs\",\"scripts/git_collaboration/markdown.py\"]",
     "description": {
       "lines": [
         "Execution order: Markdown step 3 of 12. Depends on Adashi task ID 26 (Markdown 02/12 — Implement SQLite persistence and guarded document mutations). Complete and verify that prerequisite before starting; all earlier Markdown steps are transitively required.\n",
@@ -31,9 +31,9 @@
     "project_id": {
       "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
     },
-    "state": "todo",
+    "state": "finished",
     "title": "Markdown 03/12 — Implement Markdown in Git text storage and recovery",
-    "updated_at": "2026-09-25 07:51:39"
+    "updated_at": "2026-09-25 08:55:09"
   },
   "deleted": false,
   "identity": "3c8ec8ce-fdbb-46ea-89e6-38e80c0c29ba",

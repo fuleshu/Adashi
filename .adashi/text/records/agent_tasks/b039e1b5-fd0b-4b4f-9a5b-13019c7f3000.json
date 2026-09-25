@@ -1,13 +1,13 @@
 {
   "collection": "agent_tasks",
   "data": {
-    "changed_files": "[]",
-    "completed_at": null,
-    "completion_memo": "",
+    "changed_files": "[\"src/main.tsx\",\"src/markdown/DocumentsBrowser.tsx\",\"src/markdown/documents.css\",\"package.json\",\"package-lock.json\",\"scripts/check_native_storage.mjs\"]",
+    "completed_at": "2026-09-25 09:58:43",
+    "completion_memo": "Reused and extracted existing EasyMDE MarkdownEditor without another editor library. Document panel supports create, title/full body edits, existing formatting toolbar and Preview, ordered architecture/document associations and detach, explicit guarded save/delete, saved/saving/error/conflict state, explicit reload/discard and reviewed reconciliation. Session drafts are keyed by project and stable identity and retain original canonical readTokens across polling, document/project navigation and backend conversion. Removed shared editor cleanup autosave and suppressed synthetic edits on clean refresh; document blur never commits. DOMPurify (already in dependency lock, now explicit dependency) sanitizes preview, executable/embedded content and unsafe link navigation are blocked, keyboard save and accessible input labels/resizing retained. Native screenshots reviewed and document workspace controls/layout matched app. TypeScript/Vite/desktop builds and diff check passed. Actual native WebView+MCP acceptance passed with SQLite (target/native-storage/3b2f0bb7-b8ad-4aac-8417-2814f94ee7e4) and text (5c57d530-360d-40ca-883e-4f994c9c47b3), including toolbar bold/Preview, task/QA opening, Unicode/fences, exact saved body via MCP and generated files, stale write rejection/draft retention, explicit reload/discard, associate/detach, document unmount, project changes, both backend conversions while dirty, and deletion without cleanup resurrection. Existing editor/resource conflict baselines passed. No installation or live storage upgrade.",
     "confirmation_commit_id": null,
     "confirmed_at": null,
     "created_at": "2026-09-25 07:51:54",
-    "created_files": "[]",
+    "created_files": "[\"src/markdown/MarkdownEditor.tsx\",\"src/markdown/DocumentEditor.tsx\",\"src/markdown/drafts.ts\",\"scripts/check_native_markdown_editor.mjs\"]",
     "description": {
       "lines": [
         "Execution order: Markdown step 9 of 12. Depends on Adashi task ID 32 (Markdown 08/12 — Add desktop document commands, navigation and references). Complete and verify that prerequisite before starting; all earlier Markdown steps are transitively required.\n",
@@ -32,9 +32,9 @@
     "project_id": {
       "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
     },
-    "state": "todo",
+    "state": "finished",
     "title": "Markdown 09/12 — Reuse the existing editable Markdown panel with guarded drafts",
-    "updated_at": "2026-09-25 07:51:54"
+    "updated_at": "2026-09-25 09:58:43"
   },
   "deleted": false,
   "identity": "b039e1b5-fd0b-4b4f-9a5b-13019c7f3000",

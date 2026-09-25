@@ -72,7 +72,7 @@ pub fn scan_snapshot(
             connected.insert(parent.clone());
         }
     }
-    let model = Model {
+    let mut model = Model {
         elements: content
             .elements
             .into_iter()
@@ -92,6 +92,12 @@ pub fn scan_snapshot(
             .collect(),
         connected,
     };
+    // A Markdown design is project-owned even without architecture associations.
+    // Validate claimed code bindings without inventing a C4 parent requirement.
+    for document in content.markdown {
+        model.connected.insert(document.external_id.clone());
+        model.elements.push((document.external_id, document.title, "Markdown".into(), None));
+    }
     let result = scan(project_folder, model)?;
     let key = HealthCacheKey {
         project_id: snapshot.metadata().identity.id.clone(),
@@ -157,6 +163,8 @@ pub(crate) fn scan(project_folder: &Path, model: Model) -> Result<DesignHealthRe
                 ElementHealth::Orphaned,
                 "No parent and no relationship names it, so the model cannot place it.".to_string(),
             )
+        } else if element_type == "Markdown" && file_targets.is_empty() && symbol_targets.is_empty() {
+            (ElementHealth::Resolved, "Project-level Markdown design; no code binding is claimed.".into())
         } else if file_targets.is_empty() && symbol_targets.is_empty() {
             (
                 ElementHealth::Unmapped,

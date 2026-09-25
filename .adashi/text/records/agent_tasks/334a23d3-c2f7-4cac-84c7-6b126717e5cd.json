@@ -1,9 +1,9 @@
 {
   "collection": "agent_tasks",
   "data": {
-    "changed_files": "[]",
-    "completed_at": null,
-    "completion_memo": "",
+    "changed_files": "[\"agents_template.md\",\"src-tauri/src/projection.rs\",\"src-tauri/src/projection/markdown.rs\",\"src-tauri/src/projection/markdown_tests.rs\",\"src-tauri/src/mcp/help.rs\",\"src-tauri/src/mcp/context.rs\",\"docs/operation-help.md\",\"docs/architecture-projection.md\",\"README.md\",\"scripts/check_markdown_mcp.py\"]",
+    "completed_at": "2026-09-25 10:05:26",
+    "completion_memo": "Updated source agents_template.md with official standalone/associated Markdown designs, task/QA identities, exact create/retrieve/update/help examples, canonical readToken merge workflow, MCP-only authoring for agents versus human desktop editing, generated-file discovery/freshness and no-authority-override guidance. Traced distribution: previously manual copies only. Binary now bundles the source template; existing opt-in projection publishes owned agent-workflow.md with a managed root link for both new and existing projects, while preserving custom root templates/text. On-demand lifecycle operation help returns the same template for projects without projection. Startup still contains only bounded metadata plus compact Markdown retrieval pointers. Updated operation help, architecture projection docs and README. Verified 16 projection tests passed (one existing manual live-workspace test ignored), 23 MCP tests passed, MCP binary built and diff check passed. Real fresh-process SQLite/text acceptance executed exact published examples against schema and actual handlers, checked help/template distribution equality and 3000-byte startup limit, then followed folder-short -> full generated file -> fresh canonical retrieval -> guarded save. Evidence target/markdown-mcp/e66224e8-3af2-4758-b45c-fa25f1bb775e. Custom text preservation, ownership/collisions and opt-out tested. No unrelated project instruction files or installed server changed.",
     "confirmation_commit_id": null,
     "confirmed_at": null,
     "created_at": "2026-09-25 07:51:56",
@@ -32,9 +32,9 @@
     "project_id": {
       "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
     },
-    "state": "todo",
+    "state": "finished",
     "title": "Markdown 10/12 — Update agents_template.md and generated agent guidance",
-    "updated_at": "2026-09-25 07:51:56"
+    "updated_at": "2026-09-25 10:05:26"
   },
   "deleted": false,
   "identity": "334a23d3-c2f7-4cac-84c7-6b126717e5cd",

@@ -1,0 +1,46 @@
+{
+  "collection": "qa_job_runs",
+  "data": {
+    "command_snapshot": "{\"command\":\"powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check_markdown_feature.ps1 -Suite Native -VerifyEvidence\",\"designSpecificationLinks\":[{\"designExternalId\":\"ui-design-browser\",\"id\":11,\"qaJobId\":7,\"sortOrder\":0,\"targetType\":\"element\",\"title\":\"Design Browser\"},{\"designExternalId\":\"desktop-architecture-projection\",\"id\":12,\"qaJobId\":7,\"sortOrder\":1,\"targetType\":\"element\",\"title\":\"Architecture Projection\"}],\"enabled\":true,\"name\":\"Markdown native desktop acceptance\",\"shell\":\"powershell\",\"tags\":[\"markdown\",\"native\"],\"taskLinks\":[{\"id\":2,\"number\":33,\"qaJobId\":7,\"sortOrder\":0,\"state\":\"active\",\"taskId\":36,\"title\":\"Markdown 12/12 — Verify complete native, MCP and storage parity\"}],\"timeoutSeconds\":900,\"workingDirectory\":\".\"}",
+    "duration_ms": 1239,
+    "exit_code": 0,
+    "finished_at": "2026-09-25 10:54:08",
+    "id": 16,
+    "output": {
+      "lines": [
+        "Verified Native acceptance completed 2026-09-25T10:53:34.9318797Z\r\n",
+        "Executed by the workspace runner; installed QA host verifies matching source, binaries and retained logs.\r\n",
+        "Evidence: C:\\src\\Adashi\\target\\markdown-acceptance\\3b9e1bb3-f784-4469-8b89-84d2bf2ea75c\r\n",
+        "C:\\src\\Adashi\\target\\markdown-acceptance\\3b9e1bb3-f784-4469-8b89-84d2bf2ea75c\\native-sqlite.log\r\n",
+        "PASS Markdown editor mounts, retains dirty content and rejects a stale save\r\n",
+        "PASS rules, memory, settings, QA and restored design views render without JavaScript errors\r\n",
+        "PASS desktop document commands, full canonical reads, rename refresh, task/QA pickers, direct links, backlinks and guarded deletion\r\n",
+        "PASS native EasyMDE create, toolbar/preview safety, canonical MCP/output parity, stale-save recovery, discard/unmount/project/backend draft preservation and deletion without resurrection\r\n",
+        "PASS native explicit import, complete CRLF/Unicode/fences, unresolved links, duplicate rejection, source preservation, output collision diagnostics and reviewed task/QA adoption\r\n",
+        "PASS native output settings, complete Markdown, stable mtimes, MCP refresh, drift repair and opt-out\r\n",
+        "PASS large MCP/native/short/full-file roundtrip (560063 bytes; open 1711ms; edit 630ms), preview, stable regeneration\r\n",
+        "Evidence: C:\\src\\Adashi\\target\\native-storage\\33c5fa81-353b-4eee-affd-c00387c9e7f2\r\n",
+        "C:\\src\\Adashi\\target\\markdown-acceptance\\3b9e1bb3-f784-4469-8b89-84d2bf2ea75c\\native-text.log\r\n",
+        "PASS Markdown editor mounts, retains dirty content and rejects a stale save\r\n",
+        "PASS rules, memory, settings, QA and restored design views render without JavaScript errors\r\n",
+        "PASS desktop document commands, full canonical reads, rename refresh, task/QA pickers, direct links, backlinks and guarded deletion\r\n",
+        "PASS native EasyMDE create, toolbar/preview safety, canonical MCP/output parity, stale-save recovery, discard/unmount/project/backend draft preservation and deletion without resurrection\r\n",
+        "PASS native explicit import, complete CRLF/Unicode/fences, unresolved links, duplicate rejection, source preservation, output collision diagnostics and reviewed task/QA adoption\r\n",
+        "PASS native output settings, complete Markdown, stable mtimes, MCP refresh, drift repair and opt-out\r\n",
+        "PASS large MCP/native/short/full-file roundtrip (560063 bytes; open 1809ms; edit 642ms), preview, stable regeneration\r\n",
+        "Evidence: C:\\src\\Adashi\\target\\native-storage\\2d146a36-2301-4edf-97d2-3e1c2efc801a\r\n"
+      ]
+    },
+    "qa_job_id": {
+      "ref": "df19968f-9a84-43a7-9f29-b0de0f465efa"
+    },
+    "qa_run_id": {
+      "ref": "ad3d1f25-a6d8-49b3-8e55-df9ff0d8ea8e"
+    },
+    "started_at": "2026-09-25 10:54:03",
+    "status": "passed"
+  },
+  "deleted": false,
+  "identity": "425883d5-42ca-4d81-a2e6-88e8c6d36d4e",
+  "schemaVersion": 1
+}

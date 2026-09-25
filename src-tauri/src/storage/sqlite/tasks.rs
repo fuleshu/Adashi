@@ -539,8 +539,10 @@ fn load_design_links(
                 l.sort_order,
                 l.target_type,
                 l.design_external_id,
-                COALESCE(e.name, r.description, d.title, m.title, l.design_external_id) AS title
+                COALESCE(md.title, e.name, r.description, d.title, m.title, l.design_external_id) AS title
              FROM task_design_specification_links l
+             JOIN agent_tasks owner ON owner.id=l.task_id
+             LEFT JOIN markdown_design_documents md ON md.project_id=owner.project_id AND md.external_id=l.design_external_id AND l.target_type='markdown'
              LEFT JOIN c4_elements e ON e.external_id = l.design_external_id
              LEFT JOIN c4_relationships r ON r.external_id = l.design_external_id
              LEFT JOIN diagrams d ON d.key = l.design_external_id
@@ -603,6 +605,7 @@ fn replace_design_links(
 }
 
 fn infer_design_target_type(db: &Connection, design_external_id: &str) -> Result<String, String> {
+    if db.query_row("SELECT EXISTS(SELECT 1 FROM markdown_design_documents WHERE external_id=?1)",[design_external_id],|r|r.get::<_,bool>(0)).map_err(|e|e.to_string())? { return Ok("markdown".into()); }
     let element_exists = db
         .query_row(
             "SELECT 1 FROM c4_elements WHERE external_id = ?1 LIMIT 1",
@@ -671,7 +674,7 @@ fn next_task_number(db: &Connection, project_id: i64) -> Result<i64, String> {
 
 /// Design link target kinds, from one list so the schema, the error text and the storage check
 /// cannot disagree.
-pub const DESIGN_TARGET_TYPES: [&str; 4] = ["element", "relationship", "uml", "mockup"];
+pub const DESIGN_TARGET_TYPES: [&str; 5] = ["element", "relationship", "uml", "mockup", "markdown"];
 
 pub fn invalid_design_target_type_error(value: &str) -> String {
     format!(

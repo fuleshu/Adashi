@@ -1,0 +1,16 @@
+{
+  "collection": "qa_job_design_links",
+  "data": {
+    "created_at": "2026-09-25 10:22:25",
+    "design_external_id": "desktop-architecture-projection",
+    "id": 10,
+    "qa_job_id": {
+      "ref": "61a7a7f9-0c24-48bc-9673-9208b394015f"
+    },
+    "sort_order": 1,
+    "target_type": "element"
+  },
+  "deleted": false,
+  "identity": "2c11ec37-a830-4f7e-856f-78c8c48f4c55",
+  "schemaVersion": 1
+}

@@ -1,5 +1,6 @@
 use super::*;
 pub(crate) mod conformance;
+mod markdown;
 use adashi_storage_api::{
     qa::QaJobQuery,
     rules::NewRule,

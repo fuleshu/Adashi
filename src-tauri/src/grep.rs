@@ -409,6 +409,7 @@ struct RelationshipFields {
 }
 
 struct ProjectContent {
+    markdown: Vec<adashi_storage_api::markdown::MarkdownDesignDocument>,
     elements: Vec<DesignElementRecord>,
     relationships: Vec<RelationshipFields>,
     diagrams: Vec<DesignDiagramRecord>,
@@ -460,6 +461,7 @@ fn load_content(
 ) -> Result<ProjectContent, String> {
     let domains = scope.domains();
     let mut content = ProjectContent {
+        markdown: Vec::new(),
         elements: Vec::new(),
         relationships: Vec::new(),
         diagrams: Vec::new(),
@@ -472,6 +474,10 @@ fn load_content(
 
     if domains.contains(&GrepDomain::Design) {
         let design = db.design_inventory().map_err(|e| e.to_string())?;
+        for chunk in design.markdown.chunks(100) {
+            let ids = chunk.iter().map(|d|format!("markdown:{}",d.external_id)).collect::<Vec<_>>();
+            content.markdown.extend(db.design_documents(&ids).map_err(|e|e.to_string())?.into_iter().map(|d|serde_json::from_value(d.document).map_err(|e|e.to_string())).collect::<Result<Vec<_>,_>>()?);
+        }
         content.elements = design.elements.into_iter().map(|v| v.value).collect();
         content.relationships = relationship_fields(
             design.relationships.into_iter().map(|v| v.value).collect(),
@@ -653,6 +659,13 @@ fn candidates(content: &ProjectContent, query: &Query) -> Vec<Candidate> {
             );
         }
 
+        for document in &content.markdown {
+            if element_type.as_deref().is_some_and(|kind| kind != "markdown") { continue; }
+            if file.is_some() && !bound_to_file(&document.external_id) && !document.design_links.iter().any(|link|bound_to_file(&link.design_external_id)) { continue; }
+            let locator = format!("design:{}", document.external_id);
+            out.push(Candidate::new(GrepDomain::Design, &locator, "title", WEIGHT_NAME, &document.title));
+            out.push(Candidate::new(GrepDomain::Design, locator, "body", WEIGHT_DESCRIPTION, &document.body).windowed());
+        }
         for mockup in &content.mockups {
             let locator = format!("design:{}", mockup.external_id);
             for (kind, weight, value) in [
@@ -1023,12 +1036,13 @@ fn overview(content: &ProjectContent, scope: GrepScope, limit: usize) -> GrepRes
             }
         }
         lines.push(format!(
-            "design: {} elements, {} relationships, {} diagrams, {} mockups, {} bindings",
+            "design: {} elements, {} relationships, {} diagrams, {} mockups, {} bindings, {} Markdown documents",
             content.elements.len(),
             content.relationships.len(),
             content.diagrams.len(),
             content.mockups.len(),
-            content.bindings.len()
+            content.bindings.len(),
+            content.markdown.len()
         ));
     }
 
@@ -1097,6 +1111,7 @@ fn overview(content: &ProjectContent, scope: GrepScope, limit: usize) -> GrepRes
                     + content.relationships.len()
                     + content.diagrams.len()
                     + content.mockups.len()
+                    + content.markdown.len()
                     + content.bindings.len()
             } else {
                 0

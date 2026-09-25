@@ -31,8 +31,21 @@ The server never suppresses a help response because another call already request
 
 `agents_template.md` contains shared Adashi workflow: lifecycle hooks, operation help,
 targeted design retrieval, document-token writes and merge recovery, memory and search.
-Project copies of this template must be updated by their owners; changing the template
-does not rewrite unrelated projects' instruction files.
+The binary bundles this exact template. Opted-in architecture projection publishes it
+as `docs/adashi/agent-workflow.md` (or the configured output directory), linked from
+the managed root block. New and existing projects receive it on regeneration; unchanged
+copies retain their mtime. Ownership, collisions, relocation and opt-out follow the
+same rules as other generated Markdown. Custom root templates and instruction text
+outside managed blocks are never replaced. For projects without file projection,
+`adashi_help` for `adashi_rules/get_rule_injections` returns the same `agentWorkflow`
+on demand. Standalone manually copied templates remain owner-maintained.
+
+Markdown specifications are first-class designs, including standalone project documents.
+Use `list_markdown` for paged discovery, then `get_documents` with `markdown:<externalId>`
+for complete content and its readToken. Agents use `save` with `upsert_markdown` or
+`delete_markdown`; humans may use the desktop editor. The source template includes
+create/retrieve/update examples executed by the Markdown stdio acceptance fixture.
+No export header or revision substitutes for a canonical readToken.
 
 Startup injections contain applicable project-specific rules, custom memory/fixed-hook
 instructions, a bounded current summary and a bounded design index. Known old built-in

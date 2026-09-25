@@ -32,6 +32,10 @@ pub fn load_documents(
     let workspace = load_workspace(db)?;
     let requested = ids.iter().map(String::as_str).collect::<BTreeSet<_>>();
     let mut documents = BTreeMap::new();
+    let markdown_ids = requested.iter().filter_map(|id| id.strip_prefix("markdown:").map(str::to_string)).collect::<Vec<_>>();
+    for document in super::super::markdown::get_many(db, project_id, &markdown_ids)? {
+        documents.insert(format!("markdown:{}", document.external_id), serde_json::to_value(document).map_err(|e|e.to_string())?);
+    }
     for element in load_elements(db, workspace.id)? {
         let id = document_id("design.element", &element.external_id);
         if requested.contains(id.as_str()) {
@@ -103,7 +107,7 @@ pub fn load_documents(
             if identity.is_empty()
                 || !matches!(
                     kind,
-                    "element" | "relationship" | "uml" | "binding" | "mockup"
+                    "element" | "relationship" | "uml" | "binding" | "mockup" | "markdown"
                 )
             {
                 return Err(format!(
@@ -130,6 +134,9 @@ pub fn with_documents(
 ) -> Result<Value, String> {
     let mut result = serde_json::to_value(result).map_err(|error| error.to_string())?;
     let mut ids = BTreeSet::new();
+    for record in result["markdown"]["documents"].as_array().into_iter().flatten() {
+        if let Some(id) = record["externalId"].as_str() { ids.insert(format!("markdown:{id}")); }
+    }
     for (field, kind, identity) in [
         ("elements", "design.element", "externalId"),
         ("ancestors", "design.element", "externalId"),

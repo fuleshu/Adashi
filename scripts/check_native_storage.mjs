@@ -28,7 +28,7 @@ const settings = { window: { width: 1440, height: 940, x: null, y: null },
   projects: [{ id: "fixture", name: "Native storage fixture", folder: project }],
   lastActiveProjectId: "fixture", ruleTemplates: [],
   architectureProjection: { enabled: false, fileName: "AGENTS.md" } };
-if (checkMigration) settings.projects.push({ id: "independent", name: "Independent project", folder: path.join(fixture, "independent") });
+if (checkMigration || process.env.ADASHI_TEST_MARKDOWN_EDITOR === "1") settings.projects.push({ id: "independent", name: "Independent project", folder: path.join(fixture, "independent") });
 if (textBackend) {
   await fs.mkdir(path.join(project, ".adashi"), { recursive: true });
   await fs.writeFile(path.join(project, ".adashi/storage.json"), JSON.stringify({ schemaVersion: 1, backend: { kind: "text" } }));
@@ -215,6 +215,27 @@ try {
   await delay(250);
   assert.deepEqual(pageErrors, []);
   passed("rules, memory, settings, QA and restored design views render without JavaScript errors");
+  if (process.env.ADASHI_TEST_MARKDOWN_DOCUMENTS === "1") {
+    const { verifyMarkdownDocuments } = await import("./check_native_markdown_documents.mjs");
+    await verifyMarkdownDocuments({ page, call, until, passed, fixture });
+  }
+  if (process.env.ADASHI_TEST_MARKDOWN_EDITOR === "1") {
+    const { verifyMarkdownEditor } = await import("./check_native_markdown_editor.mjs");
+    await verifyMarkdownEditor({ page, call, until, passed, fixture, project, backend: textBackend ? "text" : "sqlite" });
+    textBackend = !textBackend;
+  }
+  if (process.env.ADASHI_TEST_MARKDOWN_IMPORT === "1") {
+    const { verifyMarkdownImport } = await import("./check_native_markdown_import.mjs");
+    await verifyMarkdownImport({ page, call, until, passed, fixture, project });
+  }
+  if (process.env.ADASHI_TEST_MARKDOWN_PROJECTION === "1") {
+    const { verifyMarkdownProjection } = await import("./check_native_markdown_projection.mjs");
+    await verifyMarkdownProjection({ page, call, until, passed, project, fixture });
+  }
+  if (process.env.ADASHI_TEST_MARKDOWN_LARGE === "1") {
+    const { verifyLargeMarkdown } = await import("./check_native_markdown_large.mjs");
+    await verifyLargeMarkdown({ page, call, until, passed, fixture, project });
+  }
   if (checkMigration) {
     const { verifyMigration } = await import("./check_native_storage_migration.mjs");
     await verifyMigration({ page, call, request, getTask, updateTask, taskIds, until, passed, project, fixture, evidence });

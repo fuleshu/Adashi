@@ -1,0 +1,18 @@
+{
+  "collection": "qa_runs",
+  "data": {
+    "finished_at": "2026-09-25 10:54:10",
+    "id": 13,
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "query_snapshot": "{\"jobIds\":[7],\"states\":null,\"tags\":null,\"taskIds\":null,\"designExternalIds\":null,\"enabled\":null}",
+    "started_at": "2026-09-25 10:54:03",
+    "status": "passed",
+    "summary": "1 passed, 0 failed, 0 timed out",
+    "trigger_source": "task36 final rebuilt native workspace evidence verification"
+  },
+  "deleted": false,
+  "identity": "ad3d1f25-a6d8-49b3-8e55-df9ff0d8ea8e",
+  "schemaVersion": 1
+}

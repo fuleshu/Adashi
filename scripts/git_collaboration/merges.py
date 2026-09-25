@@ -170,7 +170,10 @@ def legacy_request_cleanup(suite):
         write_json(history_path, {"schemaVersion": 1, "collection": "mutation_operations", "identity": identity, "deleted": False,
                                  "data": {"project_id": {"ref": project["identity"]}, "operation_id": operation,
                                           "result_json": json.dumps(result), "created_at": "2026-09-23 12:00:00"}})
-        write_json(a.folder / ".adashi/text/format.json", {"schemaVersion": 1, "relationalSchema": 14})
+        format_path = a.folder / ".adashi/text/format.json"
+        old_format = json.loads(format_path.read_bytes())
+        old_format["schemaVersion"] = 1
+        write_json(format_path, old_format)
         local["receipts"] = {}
         write_json(local_path, local)
         a.commit("Older project with tracked application request history")

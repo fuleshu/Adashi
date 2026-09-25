@@ -121,6 +121,14 @@ pub fn prepare_mutation(mut mutation: Mutation) -> StorageResult<PreparedMutatio
                 tokens(read_tokens)?;
                 for item in changes {
                     let key = match item {
+                        DesignChange::UpsertMarkdown { external_id, title, body, design_links } => {
+                            crate::markdown::MarkdownDesignDocument { external_id: external_id.clone(), title: title.clone(), body: body.clone(), design_links: design_links.clone() }.validate()?;
+                            format!("design.markdown:{external_id}")
+                        }
+                        DesignChange::DeleteMarkdown { external_id } => {
+                            crate::markdown::validate_identity(external_id)?;
+                            format!("design.markdown:{external_id}")
+                        }
                         DesignChange::UpsertElement { external_id, .. }
                         | DesignChange::DeleteElement { external_id } => {
                             format!("design.element:{external_id}")

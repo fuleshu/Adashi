@@ -1,13 +1,21 @@
 {
   "collection": "agent_tasks",
   "data": {
-    "changed_files": "[]",
-    "completed_at": null,
-    "completion_memo": "",
+    "changed_files": "[\"README.md\",\"scripts/check_markdown_mcp.py\",\"scripts/check_native_storage.mjs\",\"scripts/check_native_markdown_editor.mjs\",\"scripts/check_native_markdown_import.mjs\",\"scripts/check_native_markdown_projection.mjs\",\"scripts/check_versioned_draft.mjs\",\"scripts/git_collaboration/markdown.py\",\"src-tauri/src/storage/mod.rs\",\"src-tauri/storage-api/tests/contract.rs\",\"src/markdown/DocumentsBrowser.tsx\",\"src/markdown/DocumentEditor.tsx\",\"src/markdown/MarkdownEditor.tsx\",\"src/versionedDraft.ts\"]",
+    "completed_at": "2026-09-25 10:55:47",
+    "completion_memo": {
+      "lines": [
+        "Completed Markdown step 12/12 after tasks 25-35 were finished and verified in order. Read this task and all three attached design scopes completely before implementation; earlier tasks likewise read only their own required specifications before starting. Added identical SQLite/text Markdown conformance, real concurrent stdio writes/deletes/replay, independent-clone association/binding/task/QA preservation, native combined acceptance and a 560,063-byte exact MCP -> editor -> MCP -> nearby architecture short -> full generated file round-trip. Critical audit found and fixed out-of-order document readback, post-delete projection diagnostics, editing during an in-flight Markdown save, and continued typing adopting a peer guard from a late dashboard readback. Added deterministic regression coverage for both save races.\n",
+        "\n",
+        "Final rebuilt validation: npm run build and cargo build --bins succeeded; storage-api 13 tests passed; Rust library 228 passed, five existing live/manual tests intentionally ignored; versioned-draft regression passed; real SQLite/text MCP, adapter parity, 45 write-free reads, and 19 independent-Git-clone scenarios passed. Fresh native Tauri/WebView2 and MCP processes passed the same complete user path from both initial backends, including both conversion directions, toolbar/preview safety, conflicts and draft retention, reference navigation/deletion protection, import/source preservation, projection collisions/drift/retry/no-op, and full content retrieval. Large-document open/edit timings: 1711/630 ms and 1809/642 ms. Final Core evidence target/markdown-acceptance/d58aa61b-e79a-441d-ba51-23173ddd7d36; Native evidence target/markdown-acceptance/3b9e1bb3-f784-4469-8b89-84d2bf2ea75c. Adashi QA jobs 6/7 are green via runs 14/13. The installed QA host stalls nested Node/Python startup, so the suites execute through the workspace runner and those QA runs explicitly verify matching source/binary/log hashes and retain the output; earlier failures remain recorded. This is not a claim that the old QA host re-executed the whole suite.\n",
+        "\n",
+        "Updated 13 formal owner descriptions from pending to implemented only for verified SQLite/text behavior. Server SQL remains unavailable/unvalidated and its tasks 20-23 full parity gate remains intact; no future-server capability is claimed. Canonical data remains selected-backend owned; generated Markdown remains one-way read output. Detailed report, exact binary hashes and reproducible commands: docs/markdown-validation.md. Fresh debug builds were tested in isolated fixtures; installed Program Files executables and the real project schema were not upgraded by the new build. Changes remain uncommitted. Final task-end audit and git diff --check passed."
+      ]
+    },
     "confirmation_commit_id": null,
     "confirmed_at": null,
     "created_at": "2026-09-25 07:52:01",
-    "created_files": "[]",
+    "created_files": "[\"docs/markdown-validation.md\",\"scripts/check_markdown_feature.ps1\",\"scripts/check_native_markdown_large.mjs\",\"src-tauri/src/storage/markdown_conformance.rs\"]",
     "description": {
       "lines": [
         "Execution order: Markdown step 12 of 12. Depends on Adashi task ID 35 (Markdown 11/12 — Add controlled adoption of existing design Markdown). Complete and verify that prerequisite before starting; all earlier Markdown steps are transitively required.\n",
@@ -33,9 +41,9 @@
     "project_id": {
       "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
     },
-    "state": "todo",
+    "state": "finished",
     "title": "Markdown 12/12 — Verify complete native, MCP and storage parity",
-    "updated_at": "2026-09-25 07:52:01"
+    "updated_at": "2026-09-25 10:55:47"
   },
   "deleted": false,
   "identity": "60d9d382-0d6a-45d4-a376-106aef6d15fa",

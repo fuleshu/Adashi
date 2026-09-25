@@ -1,13 +1,13 @@
 {
   "collection": "agent_tasks",
   "data": {
-    "changed_files": "[]",
-    "completed_at": null,
-    "completion_memo": "",
+    "changed_files": "[\"src-tauri/src/desktop.rs\",\"src-tauri/src/markdown_commands.rs\",\"src/markdown/types.ts\",\"src/markdown/drafts.ts\",\"src/markdown/DocumentEditor.tsx\",\"src/markdown/DocumentsBrowser.tsx\",\"src/markdown/documents.css\",\"package.json\",\"package-lock.json\",\"README.md\",\"scripts/check_native_storage.mjs\"]",
+    "completed_at": "2026-09-25 10:14:55",
+    "completion_memo": "Added explicit native Markdown import with file chooser or project-relative/absolute path, complete read-only preview, editable proposed title/stable content-based identity, duplicate body/identity detection and normal guarded-editor handoff. Parsed Markdown/reference/HTML links are listed for explicit relative/unsupported-target review; no assets copied or links silently rewritten. Generated exports are rejected as import sources. A source fingerprint guards changes after preview, import result reports original path, and save uses existing ProjectStore canonical commit/readToken/projection boundary. Source files remain untouched. Documented reviewed selected-task/QA conversion preserving descriptions and ordered links under current resource versions; no bulk imports or live task rewrites performed. TypeScript/Vite, cargo check/desktop build, two source/import guard tests and diff check passed. Native SQLite acceptance target/native-storage/e0ef5953-07b5-431d-a00b-aa9deec6e2ee and text acceptance 9c5926d9-18db-41bb-b73d-5b2e6e2a7835 passed: UI preview/import/editor, complete Unicode/CRLF/fences via MCP and generated output, relative asset/reference-link warnings, duplicate rejection, original-byte preservation, unowned output collision kept separate from successful canonical save, selected task link conversion with unchanged description/existing links, QA backlink and direct task opening. Text additionally verified source changes reject save and successful result reports source path. No repository docs imported or installed application upgraded.",
     "confirmation_commit_id": null,
     "confirmed_at": null,
     "created_at": "2026-09-25 07:51:58",
-    "created_files": "[]",
+    "created_files": "[\"src-tauri/src/markdown_import.rs\",\"src/markdown/ImportPanel.tsx\",\"docs/markdown-adoption.md\",\"scripts/check_native_markdown_import.mjs\"]",
     "description": {
       "lines": [
         "Execution order: Markdown step 11 of 12. Depends on Adashi task ID 34 (Markdown 10/12 — Update agents_template.md and generated agent guidance). Complete and verify that prerequisite before starting; all earlier Markdown steps are transitively required.\n",
@@ -32,9 +32,9 @@
     "project_id": {
       "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
     },
-    "state": "todo",
+    "state": "finished",
     "title": "Markdown 11/12 — Add controlled adoption of existing design Markdown",
-    "updated_at": "2026-09-25 07:51:58"
+    "updated_at": "2026-09-25 10:14:55"
   },
   "deleted": false,
   "identity": "51258e32-4c81-4561-a668-c646374009d7",

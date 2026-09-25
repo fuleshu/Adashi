@@ -10,7 +10,7 @@ pub(super) fn parse_records(files: &Files) -> StorageResult<BTreeMap<String, cod
         "format.json",
     )?;
     if ![1, 2].contains(&format.schema_version)
-        || format.relational_schema != sqlite::schema::SCHEMA_VERSION
+        || ![14, sqlite::schema::SCHEMA_VERSION].contains(&format.relational_schema)
     {
         return Err(invalid(
             "format.json",
@@ -23,6 +23,9 @@ pub(super) fn parse_records(files: &Files) -> StorageResult<BTreeMap<String, cod
         .filter(|(p, _)| p.as_str() != "format.json" && !p.starts_with("$local/"))
     {
         let r: codec::Record = codec::parse(bytes, path)?;
+        if format.relational_schema < 15 && r.collection.starts_with("markdown_design_") {
+            return Err(invalid(path, "Markdown records require relational schema 15"));
+        }
         if format.schema_version == 2 && r.collection == "mutation_operations" {
             return Err(invalid(
                 path,

@@ -1,0 +1,26 @@
+.documents-workspace{display:grid;grid-template-columns:minmax(170px,240px) minmax(0,1fr);gap:16px;grid-column:span 2;min-height:500px;overflow:auto}
+.documents-list,.document-panel{background:var(--panel-bg,#fff);border:1px solid #d7dedb;border-radius:8px;padding:16px;min-width:0}
+.documents-list{display:flex;flex-direction:column;gap:8px;align-self:start}
+.documents-list button{text-align:left}.documents-list [aria-current=page]{background:#e8f1ed;border-color:#53816e}
+.document-panel section{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}.document-panel h4{width:100%;margin:8px 0}
+.document-source{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.6}
+.document-artifacts{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+@media(max-width:800px){.documents-workspace{grid-template-columns:1fr}}
+.document-panel .document-editor{display:block}
+.document-editor>label{display:grid;gap:6px}.document-editor input{padding:8px;width:100%;box-sizing:border-box}
+.document-body-field{border:0;padding:0;margin:12px 0;min-width:0}
+.document-body-field .markdown-editor-host{resize:vertical;overflow:auto;max-height:900px}
+.document-editor ol{width:100%;padding-left:24px}.document-editor li button{margin-left:8px}
+.document-editor pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}
+.document-editor select{max-width:100%;min-width:180px}
+.document-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.documents-workspace{height:100%;box-sizing:border-box}
+.documents-workspace button{background:#2f6f6d;color:#fff;border:0;border-radius:7px;padding:8px 12px;cursor:pointer;font:inherit;font-size:14px}
+.documents-workspace button:hover{background:#255957}.documents-workspace button:disabled{opacity:.5;cursor:default}
+.documents-workspace input,.documents-workspace select{border:1px solid #c6cec9;border-radius:6px;padding:8px;font:inherit;font-size:14px}
+.documents-list h3{margin:4px 0}.documents-list h3 button{background:transparent;color:#1f2933;font-size:20px;padding:0}
+.documents-list [aria-current=page]{color:#163434;box-shadow:inset 3px 0 #2f6f6d}
+.document-panel{overflow:auto}.document-panel>nav{font-size:14px;overflow-wrap:anywhere}.document-panel h2{font-size:24px}
+.document-panel .import-panel{display:block}.import-panel>label{display:grid;gap:6px;margin:12px 0}
+.import-panel pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;overflow:auto;padding:12px;background:#f4f1e9}
+.import-panel p{overflow-wrap:anywhere}.import-panel input[type=checkbox]{width:auto}

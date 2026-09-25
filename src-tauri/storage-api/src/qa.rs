@@ -32,6 +32,7 @@ pub struct QaJobDesignLink {
     pub id: i64,
     pub qa_job_id: i64,
     pub sort_order: i64,
+    #[schemars(with = "crate::markdown::DesignTargetKind")]
     pub target_type: String,
     pub design_external_id: String,
     pub title: String,
@@ -154,6 +155,7 @@ pub struct QaJobQuery {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[derive(schemars::JsonSchema)]
 pub struct QaDesignLinkInput {
+    #[schemars(with = "Option<crate::markdown::DesignTargetKind>")]
     pub target_type: Option<String>,
     pub design_external_id: String,
 }

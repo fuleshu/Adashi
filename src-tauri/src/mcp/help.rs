@@ -141,6 +141,12 @@ pub(super) fn get(params: HelpParams) -> Result<CallToolResult, ErrorData> {
             "All change types."
         });
     }
+    if params.tool == "adashi_design" {
+        if let Some(schema) = markdown::response_schema(operation) { result["responseSchema"] = schema; }
+    }
+    if params.tool == "adashi_rules" && operation == "get_rule_injections" {
+        result["agentWorkflow"] = json!(crate::projection::AGENT_WORKFLOW);
+    }
     result["contentVersion"] = json!(context::content_version(&result.to_string()));
     Ok(CallToolResult::structured(result))
 }
@@ -211,6 +217,7 @@ fn example(tool: &str, operation: &str) -> Value {
             return json!({"projectName":"Your project","pattern":"concurrency in:design"})
         }
         ("adashi_design", "get_scope") => json!({"elementId":"element-id"}),
+        ("adashi_design", "list_markdown") => json!({"markdownQuery":{"limit":25}}),
         ("adashi_design", "get_by_ids") => json!({"ids":["element-id"]}),
         ("adashi_design", "get_documents") => json!({"ids":["<documentId from a complete read>"]}),
         ("adashi_design", "search") => json!({"query":"authentication"}),
@@ -267,6 +274,9 @@ fn example(tool: &str, operation: &str) -> Value {
 fn change_example(operation: &str) -> Value {
     let svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"60\" viewBox=\"0 0 100 60\"><rect data-adashi-id=\"background\" width=\"100\" height=\"60\" fill=\"white\"/></svg>";
     let mut fields = match operation {
+        "upsert_markdown" => {
+            json!({"externalId":"decision-id","title":"Design decision","body":"# Decision\n\nRationale.","designLinks":[]})
+        }
         "upsert_element" => {
             json!({"externalId":"new-container","parentExternalId":"system-id","elementType":"Container","name":"New container"})
         }
@@ -286,7 +296,7 @@ fn change_example(operation: &str) -> Value {
             json!({"externalId":"mockup-id","baseRevision":1,"proposedSvg":svg,"proposedManifest":{"schemaVersion":1,"key":"mockup-id","attachedToExternalId":"element-id","viewportWidth":100,"viewportHeight":60,"screen":"Home","state":"default","fidelity":"wireframe"}})
         }
         "delete_uml" => json!({"key":"diagram-key"}),
-        "delete_element" | "delete_relationship" | "delete_mockup" => {
+        "delete_element" | "delete_relationship" | "delete_mockup" | "delete_markdown" => {
             json!({"externalId":"existing-id"})
         }
         _ => unreachable!("DesignChange example missing: {operation}"),
@@ -317,7 +327,8 @@ fn workflow(tool: &str, operation: &str) -> Vec<&'static str> {
     }
     match tool {
         "adashi_design" => {
-            notes.push("Overview, search and the startup index are navigation. get_by_ids/get_scope/get_bindings return complete editable documents with documentId/readToken; get_documents takes those opaque documentIds. A scope includes ancestors by default; childrenDepth omitted is unlimited and includeSource defaults false. Search kinds are element, relationship, uml, source, mockup; limit defaults 20.");
+            notes.push("Overview, list_markdown, search and the startup index are navigation only. get_by_ids/get_scope/get_bindings return complete editable documents with documentId/readToken; get_documents takes those documentIds, including markdown:<externalId>. A Markdown scope needs no C4 parent. A C4 scope includes ancestors by default; childrenDepth omitted is unlimited and includeSource defaults false. Search kinds are element, relationship, uml, source, mockup, markdown; limit defaults 20 (maximum 100). Markdown metadata pages include totalCount and nextAfterId; use list_markdown with markdownQuery.afterId to continue. Full bodies are never truncated in documents entries.");
+            notes.push("Official Markdown designs are canonical storage artefacts. Agents author them only with upsert_markdown/delete_markdown through this API. Supply externalId, title, exact body and ordered designLinks (empty for project-level prose); targetType is element, relationship, uml, mockup or markdown. Titles and generated paths are not identity. Referenced documents cannot be deleted until guarded dependencies are explicitly unlinked. Generated Markdown is discovery output, never an editable input.");
             if operation == "set_element_descriptions" {
                 notes.push("This narrow operation requires projectName, operation, operationId, readTokens and updates. Each update contains externalId and a nonempty description; it preserves other element fields. Read the complete elements first and copy their documentId/readToken pairs. Use a unique operationId; reuse it only for an identical retry. On out_of_date nothing is saved: merge the intended descriptions with currentDocument, then retry using the new tokens and a new operationId. Do not send changes, changeIntent, expectedRevision or guard to this operation.");
             }
@@ -327,8 +338,9 @@ fn workflow(tool: &str, operation: &str) -> Vec<&'static str> {
                 notes.push("UML uses language=mermaid and diagramType=class, sequence, flow or state with a matching header (classDiagram, sequenceDiagram, flowchart, stateDiagram-v2). Attach it to an existing C4 element or relationship. Source must parse and round-trip through the supported semantic model; rejected source includes correction details. Mockups are separate SVG artifacts; viewport dimensions must be positive, visual elements need stable data-adashi-id attributes, and external resources/scripts are forbidden. Before proposing a mockup revision, read mockup_get_revision_context and copy mockup.acceptedRevision into baseRevision.");
             }
         }
-        "adashi_tasks" => notes.push("create starts in todo. update may set active from any state, including reopening closed work. Returning to todo is forbidden. finish records active -> finished with a nonempty completionMemo; close records finished -> closed after review. A state may be re-set to itself. Lists default to todo/active/finished, limit 25 (1..100); states=[] selects nothing. Copy version from get/list. get returns full evidence; linked scopes are opt-in with includeDesignScopes. Design links use targetType element, relationship, uml or mockup and an existing target id."),
+        "adashi_tasks" => notes.push("create starts in todo. update may set active from any state, including reopening closed work. Returning to todo is forbidden. finish records active -> finished with a nonempty completionMemo; close records finished -> closed after review. A state may be re-set to itself. Lists default to todo/active/finished, limit 25 (1..100); states=[] selects nothing. Copy version from get/list. get returns full evidence; linked scopes are opt-in with includeDesignScopes and include complete Markdown documents/tokens. Design links use targetType element, relationship, uml, mockup or markdown and an existing target id."),
         "adashi_qa" => {
+            notes.push("designSpecificationLinks supports targetType element, relationship, uml, mockup or markdown with an existing stable designExternalId. Markdown titles resolve from canonical storage; designExternalIds filters use those identities, never generated file paths.");
             notes.push("create_job stores a definition; run_jobs executes it. name and command must be nonempty. workingDirectory defaults to the project folder; relative paths resolve under it. shell defaults to the platform shell. timeoutSeconds defaults 120, allowed 1..86400. enabled defaults true. Lists return metadata; get_job/get_run return full evidence. Job lists default limit 25 (1..100); preserve query when following a cursor. Copy expectedVersion from job.version.");
             if matches!(operation,"run_jobs"|"list_jobs") { notes.push("query is an object, not a string. run_jobs requires it: {jobIds:[1]} selects matching enabled jobs; {} selects all enabled jobs. No matches is an error for execution. Check list_jobs before a broad run. Query filters combine with AND: jobIds is membership (an empty list matches nothing); states is any listed derived state (green, red, running, needs-rerun); tags, taskIds and designExternalIds must all be present on the job (empty lists impose no restriction). States and tags are case-insensitive. enabled filters definitions but run_jobs always excludes disabled jobs."); }
         }

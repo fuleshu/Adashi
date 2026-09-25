@@ -1,8 +1,10 @@
 import React from "react";
+import { DocumentsBrowser } from "./markdown/DocumentsBrowser";
+import type { MarkdownSummary, DesignAssociation, Backlink } from "./markdown/types";
 import { VersionedField, DraftConflict, useVersionedDraft, savedField, type SaveDraft } from "./VersionedField";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
-import EasyMDE from "easymde";
+import { MarkdownEditor } from "./markdown/MarkdownEditor";
 import {
   Activity,
   ArrowDown,
@@ -215,7 +217,7 @@ type TaskDesignSpecificationLink = {
   id: number;
   taskId: number;
   sortOrder: number;
-  targetType: "element" | "relationship" | "uml" | "mockup";
+  targetType: DesignAssociation["targetType"];
   designExternalId: string;
   title: string;
 };
@@ -246,7 +248,7 @@ type QaJobDesignLink = {
   id: number;
   qaJobId: number;
   sortOrder: number;
-  targetType: "element" | "relationship" | "uml" | "mockup";
+  targetType: DesignAssociation["targetType"];
   designExternalId: string;
   title: string;
 };
@@ -412,6 +414,7 @@ type ProjectSettings = {
 };
 
 type ArchitectureProjectionSettings = {
+  projectMarkdownDirectories: Record<string, string>;
   fileName: string;
   enabledProjectIds: string[];
   projectFileNames: Record<string, string>;
@@ -432,7 +435,7 @@ type AppSettings = {
 
 type ProjectionFileStatus = {
   path: string;
-  state: "current" | "stale" | "drifted" | "missing";
+  state: "current" | "stale" | "drifted" | "missing" | "error";
 };
 
 type ProjectionStatus = {
@@ -450,6 +453,7 @@ type PromptWarning = {
 };
 
 type DashboardPayload = {
+  markdownDocuments: MarkdownSummary[];
   projectId: string;
   projectName: string;
   projectFolder: string;
@@ -548,6 +552,7 @@ type ProjectRevision = {
 };
 
 const PROJECTION_STATE_TITLES: Record<ProjectionFileStatus["state"], string> = {
+  error: "Output is blocked by an unowned file or filesystem error",
   current: "Matches the current design revision",
   stale: "Rendered from an older design revision",
   drifted: "Block was edited outside Adashi",
@@ -650,6 +655,8 @@ function ErrorDialog({ message, onClose }: { message: string; onClose: () => voi
 }
 
 function App() {
+  const [requestedTaskId, setRequestedTaskId] = React.useState<{id:number; sequence:number} | null>(null);
+  const [requestedQaId, setRequestedQaId] = React.useState<{id:number; sequence:number} | null>(null);
   const [settings, setSettings] = React.useState<AppSettings | null>(null);
   const [payload, setPayload] = React.useState<DashboardPayload | null>(null);
   const [activeDesignLevel, setActiveDesignLevel] = React.useState<DesignLevel>("components");
@@ -754,6 +761,10 @@ function App() {
 
   const switchProject = React.useCallback(
     (projectId: string) => {
+      setRequestedTaskId(null);
+      setRequestedQaId(null);
+      setSelectedDesignEntity(null);
+      setDesignNavigationRequest(current => ({artifactKey:null,requestId:current.requestId+1}));
       invoke<AppSettings>("set_active_project", { projectId })
         .then((updatedSettings) => {
           setSettings(updatedSettings);
@@ -768,6 +779,12 @@ function App() {
   const openDesignLink = React.useCallback(
     (link: Pick<TaskDesignSpecificationLink | QaJobDesignLink, "targetType" | "designExternalId">) => {
       if (!payload) {
+        return;
+      }
+
+      if (link.targetType === "markdown") {
+        setDesignNavigationRequest(current => ({artifactKey: `markdown:${link.designExternalId}`, requestId: current.requestId + 1}));
+        setActiveView("design");
         return;
       }
 
@@ -979,6 +996,8 @@ function App() {
         </div>
         <div className="workspace-tab" hidden={activeView !== "tasks"}>
           <TasksView
+            markdownDocuments={payload.markdownDocuments}
+            requestedId={requestedTaskId}
             key={`${payload.projectId}:tasks`}
             projectId={payload.projectId}
             tasks={payload.tasks}
@@ -998,6 +1017,8 @@ function App() {
         </div>
         <div className="workspace-tab" hidden={activeView !== "qa"}>
           <QaView
+            markdownDocuments={payload.markdownDocuments}
+            requestedId={requestedQaId}
             key={`${payload.projectId}:qa`}
             projectId={payload.projectId}
             qaChecks={payload.qaChecks}
@@ -1018,6 +1039,13 @@ function App() {
         </div>
         <div className="workspace-tab" hidden={activeView !== "design"}>
           <DesignBrowser
+            onNavigate={openDesignLink}
+            onBacklink={(link) => {
+              if (link.sourceKind === "markdown") openDesignLink({targetType:"markdown",designExternalId:link.sourceId});
+              else if (link.sourceKind === "task") {setRequestedTaskId(current => ({id:Number(link.sourceId),sequence:(current?.sequence??0)+1}));setActiveView("tasks");}
+              else if (link.sourceKind === "qa.job") {setRequestedQaId(current => ({id:Number(link.sourceId),sequence:(current?.sequence??0)+1}));setActiveView("qa");}
+              else if (link.sourceKind === "binding" && link.sourceId.startsWith("file:")) invoke("open_bound_file", {projectId:payload.projectId,relativePath:link.sourceId.slice(5)}).catch(reason => setError(String(reason)));
+            }}
             key={`${payload.projectId}:design`}
             activeLevel={activeDesignLevel}
             payload={payload}
@@ -1141,6 +1169,8 @@ function shallowEqualRecord(left: object, right: object): boolean {
 }
 
 function DesignBrowser({
+  onNavigate,
+  onBacklink,
   activeLevel,
   payload,
   selectedEntity,
@@ -1151,6 +1181,8 @@ function DesignBrowser({
   onLevelChange,
   onSelect,
 }: {
+  onNavigate: (link: DesignAssociation) => void;
+  onBacklink: (link: Backlink) => void;
   activeLevel: DesignLevel;
   payload: DashboardPayload;
   selectedEntity: { type: DesignEntityType; externalId: string } | null;
@@ -1161,6 +1193,9 @@ function DesignBrowser({
   onLevelChange: (level: DesignLevel) => void;
   onSelect: (entity: { type: DesignEntityType; externalId: string } | null) => void;
 }) {
+  const [documentsOpen, setDocumentsOpen] = React.useState(false);
+  const [selectedDocument, setSelectedDocument] = React.useState<string | null>(null);
+  const openDocument = (id: string | null) => {setSelectedDocument(id);setDocumentsOpen(true);};
   const [query, setQuery] = React.useState("");
   const [isResizingSource, setIsResizingSource] = React.useState(false);
   const [sourcePanelHeight, setSourcePanelHeight] = React.useState(200);
@@ -1276,6 +1311,12 @@ function DesignBrowser({
   React.useEffect(() => {
     setQuery("");
 
+    if (requestedArtifactKey?.startsWith("markdown:")) {
+      openDocument(requestedArtifactKey.slice("markdown:".length));
+      return;
+    }
+    setDocumentsOpen(false);
+
     if (requestedArtifactKey) {
       setActiveArtifactKey(requestedArtifactKey);
     }
@@ -1290,6 +1331,7 @@ function DesignBrowser({
   }, [activeArtifactKey, mockupArtifacts, umlArtifacts]);
 
   function selectLevel(level: DesignLevel) {
+    setDocumentsOpen(false);
     // A level is a statement about the tree, so choosing one leaves the state listing.
     setHealthFilter(null);
     onLevelChange(level);
@@ -1308,6 +1350,7 @@ function DesignBrowser({
   }
 
   function selectTreeElement(element: DesignElement) {
+    setDocumentsOpen(false);
     onSelect({ type: "element", externalId: element.externalId });
 
     if (hasChildElements(element, payload.designElements)) {
@@ -1340,7 +1383,8 @@ function DesignBrowser({
 
   return (
     <section id="design" className="design-browser">
-      <aside className="design-index-panel">
+      <aside className="design-index-panel" style={{display:documentsOpen ? "none" : undefined}}>
+        <button type="button" className="design-list-item" title="Browse project Markdown designs" onClick={() => openDocument(selectedDocument)}>Documents ({payload.markdownDocuments.length})</button>
         <div className="design-level-tabs" role="tablist" aria-label="C4 design level">
           {DESIGN_LEVELS.map((level) => (
             <button
@@ -1431,7 +1475,7 @@ function DesignBrowser({
                     .filter(Boolean)
                     .join(" ")}
                   key={element.designExternalId}
-                  onClick={() => onSelect({ type: "element", externalId: element.designExternalId })}
+                  onClick={() => element.elementType === "Markdown" ? openDocument(element.designExternalId) : onSelect({ type: "element", externalId: element.designExternalId })}
                   type="button"
                 >
                   <strong>{element.name}</strong>
@@ -1455,16 +1499,29 @@ function DesignBrowser({
             roots={designTree}
             selectedEntity={selectedEntity}
             onSelectElement={selectTreeElement}
-            onSelectRelationship={(relationship) => onSelect({ type: "relationship", externalId: relationship.externalId })}
+            onSelectRelationship={(relationship) => {setDocumentsOpen(false);onSelect({ type: "relationship", externalId: relationship.externalId });}}
           />
         )}
       </aside>
 
+      <div hidden={!documentsOpen} style={{gridColumn:"1 / -1",minHeight:0,overflow:"auto"}}>
+        <DocumentsBrowser projectId={payload.projectId} changeCursor={payload.changeCursor} documents={payload.markdownDocuments}
+          options={[
+            ...payload.designElements.map(d => ({targetType:"element" as const,designExternalId:d.externalId,title:d.name})),
+            ...payload.designRelationships.map(d => ({targetType:"relationship" as const,designExternalId:d.externalId,title:d.description || d.externalId})),
+            ...payload.diagrams.map(d => ({targetType:"uml" as const,designExternalId:d.key,title:d.title})),
+            ...payload.mockups.map(d => ({targetType:"mockup" as const,designExternalId:d.externalId,title:d.title})),
+            ...payload.markdownDocuments.map(d => ({targetType:"markdown" as const,designExternalId:d.externalId,title:d.title})),
+          ]} selectedId={selectedDocument} onSelect={openDocument} onNavigate={onNavigate} onBacklink={onBacklink} onClose={() => setDocumentsOpen(false)} />
+      </div>
       <section
         className={isResizingSource ? "design-main resizing-source" : "design-main"}
         ref={designMainRef}
-        style={{ "--design-source-height": `${sourcePanelHeight}px` } as React.CSSProperties}
+        style={{ "--design-source-height": `${sourcePanelHeight}px`, display: documentsOpen ? "none" : undefined } as React.CSSProperties}
       >
+        <div className="document-artifacts" aria-label="Linked Markdown designs">
+          {payload.markdownDocuments.filter(d => d.designLinks.some(link => link.designExternalId === artifactTarget?.externalId)).map(d => <button type="button" key={d.externalId} title="Open Markdown specification" onClick={() => openDocument(d.externalId)}>{d.title}</button>)}
+        </div>
         <div className="design-breadcrumbs" aria-label="Design breadcrumbs">
           <button onClick={() => selectLevel("context")} type="button">System Context</button>
           {breadcrumbElements.map((element) => (
@@ -1694,7 +1751,7 @@ function DesignBrowser({
         />
       </section>
 
-      <DesignInspector
+      <div style={{display:documentsOpen ? "none" : "contents"}}><DesignInspector
         designHealthByElement={healthByElement}
         elements={payload.designElements}
         projectId={payload.projectId}
@@ -1706,7 +1763,7 @@ function DesignBrowser({
         onChange={onChange}
         onError={onError}
         onJumpToFeatures={() => selectLevel("features")}
-      />
+      /></div>
     </section>
   );
 }
@@ -3506,6 +3563,10 @@ function SettingsView({
   const [projectFileName, setProjectFileName] = React.useState(
     settings.architectureProjection.projectFileNames[activeProjectId] ?? "",
   );
+  const [markdownDirectory, setMarkdownDirectory] = React.useState(settings.architectureProjection.projectMarkdownDirectories[activeProjectId] ?? "docs/adashi");
+  React.useEffect(() => {
+    setMarkdownDirectory(settings.architectureProjection.projectMarkdownDirectories[activeProjectId] ?? "docs/adashi");
+  }, [activeProjectId, settings.architectureProjection.projectMarkdownDirectories]);
 
   React.useEffect(() => {
     setArchitectureFileName(settings.architectureProjection.fileName);
@@ -3551,6 +3612,7 @@ function SettingsView({
       projectId: activeProjectId,
       enabled,
       fileName: fileName.trim() || null,
+      markdownDirectory,
     })
       .then(onSettingsChange)
       .catch((reason) => onError(formatMutationError(reason)));
@@ -3604,12 +3666,18 @@ function SettingsView({
               value={projectFileName}
             />
           </label>
+          <label className="architecture-override-field">
+            <span>Generated Markdown directory</span>
+            <input aria-label="Generated Markdown directory" title="Project-relative directory for generated design documents" value={markdownDirectory} onChange={(event) => setMarkdownDirectory(event.target.value)} />
+          </label>
+          <button type="button" title="Save the output directory and regenerate owned design files" onClick={() => updateProjectProjection(architectureProjection.enabled, projectFileName)}>Save output settings</button>
         </div>
       </section>
 
       <section className="data-panel settings-panel settings-projection-status-panel">
         <div className="rules-panel-heading">
           <h3>Projection Status</h3>
+          <button type="button" title="Regenerate design output and retry failed publication" onClick={() => invoke<DashboardPayload>("get_dashboard", {projectId: activeProjectId}).then(onDashboardChange).catch((reason) => onError(formatMutationError(reason)))}>Regenerate</button>
           <span className="projection-revision">revision {architectureProjection.revision}</span>
         </div>
 
@@ -3738,6 +3806,8 @@ function SettingsView({
 }
 
 function TasksView({
+  markdownDocuments,
+  requestedId,
   projectId,
   tasks,
   designElements,
@@ -3749,6 +3819,8 @@ function TasksView({
   onError,
   onOpenDesignLink,
 }: {
+  markdownDocuments: MarkdownSummary[];
+  requestedId: {id:number; sequence:number} | null;
   projectId: string;
   tasks: Task[];
   designElements: DesignElement[];
@@ -3761,6 +3833,7 @@ function TasksView({
   onOpenDesignLink: (link: TaskDesignSpecificationLink) => void;
 }) {
   const [selectedTaskId, setSelectedTaskId] = React.useState<number | null>(tasks[0]?.id ?? null);
+  React.useEffect(() => {if (requestedId != null) {setSelectedTaskId(requestedId.id);setVisibleStates({todo:true,active:true,finished:true,closed:true});}}, [requestedId]);
   const [visibleStates, setVisibleStates] = React.useState<Record<TaskState, boolean>>({
     todo: true,
     active: true,
@@ -3773,8 +3846,8 @@ function TasksView({
   const selectedTask =
     tasks.find((task) => task.id === selectedTaskId && visibleStates[task.state]) ?? visibleTasks[0] ?? null;
   const designLinkOptions = React.useMemo(
-    () => buildTaskDesignLinkOptions(designElements, designRelationships, diagrams, mockups, linkQuery),
-    [designElements, designRelationships, diagrams, mockups, linkQuery],
+    () => buildTaskDesignLinkOptions(designElements, designRelationships, diagrams, mockups, linkQuery, markdownDocuments),
+    [designElements, designRelationships, diagrams, mockups, linkQuery, markdownDocuments],
   );
 
   React.useEffect(() => {
@@ -4131,7 +4204,7 @@ function TaskCompletionEditor({ task, onFinish }: {
 }
 
 type TaskDesignLinkOption = {
-  targetType: "element" | "relationship" | "uml" | "mockup";
+  targetType: DesignAssociation["targetType"];
   designExternalId: string;
   title: string;
   summary: string;
@@ -4143,6 +4216,7 @@ function buildTaskDesignLinkOptions(
   diagrams: DesignDiagram[],
   mockups: MockupSummary[],
   query: string,
+  markdownDocuments: MarkdownSummary[],
 ): TaskDesignLinkOption[] {
   const terms = query
     .trim()
@@ -4155,6 +4229,7 @@ function buildTaskDesignLinkOptions(
   }
 
   const options: TaskDesignLinkOption[] = [
+    ...markdownDocuments.map(d => ({targetType:"markdown" as const,designExternalId:d.externalId,title:d.title,summary:`${d.externalId} Markdown`})),
     ...elements.map((element) => ({
       targetType: "element" as const,
       designExternalId: element.externalId,
@@ -4206,6 +4281,8 @@ function splitLines(value: string): string[] {
 }
 
 function QaView({
+  markdownDocuments,
+  requestedId,
   projectId,
   qaChecks,
   qaJobs,
@@ -4218,6 +4295,8 @@ function QaView({
   onError,
   onOpenDesignLink,
 }: {
+  markdownDocuments: MarkdownSummary[];
+  requestedId: {id:number; sequence:number} | null;
   projectId: string;
   qaChecks: QaCheck[];
   qaJobs: QaJob[];
@@ -4231,6 +4310,7 @@ function QaView({
   onOpenDesignLink: (link: QaJobDesignLink) => void;
 }) {
   const [selectedJobId, setSelectedJobId] = React.useState<number | null>(qaJobs[0]?.id ?? null);
+  React.useEffect(() => {if(requestedId != null) {setSelectedJobId(requestedId.id);setShowDisabled(true);setVisibleStates({green:true,red:true,"needs-rerun":true,running:true});}}, [requestedId]);
   const [visibleStates, setVisibleStates] = React.useState<Record<QaDerivedState, boolean>>({
     green: true,
     red: true,
@@ -4265,8 +4345,8 @@ function QaView({
   const selectedJobRun =
     selectedJob?.runHistory.find((jobRun) => jobRun.id === selectedJobRunId) ?? selectedJob?.runHistory[0] ?? null;
   const designLinkOptions = React.useMemo(
-    () => buildTaskDesignLinkOptions(designElements, designRelationships, diagrams, mockups, designQuery),
-    [designElements, designRelationships, diagrams, mockups, designQuery],
+    () => buildTaskDesignLinkOptions(designElements, designRelationships, diagrams, mockups, designQuery, markdownDocuments),
+    [designElements, designRelationships, diagrams, mockups, designQuery, markdownDocuments],
   );
   const taskLinkOptions = React.useMemo(() => buildQaTaskLinkOptions(tasks, taskQuery), [tasks, taskQuery]);
 
@@ -5191,110 +5271,6 @@ function VersionedMarkdownEditor({ value, version, onSave, ...options }: {
   </>;
 }
 
-function MarkdownEditor({
-  value,
-  onBlur,
-  onChange,
-  placeholder = "Write the injected agent instruction in Markdown...",
-  minHeight = "440px",
-  maxHeight = "620px",
-  height = "560px",
-}: {
-  value: string;
-  onBlur: (value: string) => void;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  minHeight?: string;
-  maxHeight?: string;
-  height?: string;
-}) {
-  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
-  const editorRef = React.useRef<EasyMDE | null>(null);
-  const onBlurRef = React.useRef(onBlur);
-  const onChangeRef = React.useRef(onChange);
-  onChangeRef.current = onChange;
-
-  React.useEffect(() => {
-    onBlurRef.current = onBlur;
-  }, [onBlur]);
-
-  React.useEffect(() => {
-    if (!textareaRef.current) {
-      return;
-    }
-
-    const editor = new EasyMDE({
-      autoDownloadFontAwesome: false,
-      autofocus: false,
-      autoRefresh: { delay: 300 },
-      autosave: {
-        enabled: false,
-        uniqueId: "adashi-rule-editor-disabled",
-      },
-      element: textareaRef.current,
-      forceSync: true,
-      initialValue: value,
-      lineNumbers: false,
-      lineWrapping: true,
-      maxHeight,
-      minHeight,
-      nativeSpellcheck: true,
-      placeholder,
-      previewImagesInEditor: false,
-      promptURLs: false,
-      sideBySideFullscreen: false,
-      spellChecker: false,
-      status: false,
-      styleSelectedText: false,
-      toolbar: ([
-        { name: "heading-1", action: EasyMDE.toggleHeading1, className: "adashi-mde-heading", title: "Heading", text: "H1" },
-        { name: "bold", action: EasyMDE.toggleBold, className: "adashi-mde-bold", title: "Bold", text: "B" },
-        { name: "italic", action: EasyMDE.toggleItalic, className: "adashi-mde-italic", title: "Italic", text: "I" },
-        "|",
-        { name: "quote", action: EasyMDE.toggleBlockquote, className: "adashi-mde-quote", title: "Quote", text: ">" },
-        { name: "unordered-list", action: EasyMDE.toggleUnorderedList, className: "adashi-mde-list", title: "Bullet list", text: "- list" },
-        { name: "ordered-list", action: EasyMDE.toggleOrderedList, className: "adashi-mde-ordered", title: "Numbered list", text: "1. list" },
-        "|",
-        { name: "code", action: EasyMDE.toggleCodeBlock, className: "adashi-mde-code", title: "Code block", text: "{ }" },
-        { name: "link", action: EasyMDE.drawLink, className: "adashi-mde-link", title: "Link", text: "link" },
-        "|",
-        { name: "preview", action: EasyMDE.togglePreview, className: "adashi-mde-preview no-disable", title: "Preview", text: "Preview", noDisable: true },
-      ] as EasyMDE.Options["toolbar"]),
-      toolbarTips: true,
-      uploadImage: false,
-    });
-
-    function commit() {
-      onBlurRef.current(editor.value());
-    }
-
-    const changed = () => onChangeRef.current(editor.value());
-    editor.codemirror.on("change", changed);
-    editor.codemirror.on("blur", commit);
-    editorRef.current = editor;
-
-    window.requestAnimationFrame(() => editor.codemirror.refresh());
-
-    return () => {
-      commit();
-      editor.codemirror.off("blur", commit);
-      editor.codemirror.off("change", changed);
-      editor.toTextArea();
-      editorRef.current = null;
-    };
-  }, []);
-
-  React.useEffect(() => {
-    const editor = editorRef.current;
-    if (editor && editor.value() !== value) editor.value(value);
-  }, [value]);
-
-  return (
-    <div className="markdown-editor-host" style={{ height, minHeight }}>
-      <textarea className="markdown-editor-source" ref={textareaRef} defaultValue={value} />
-    </div>
-  );
-}
 
 function Panel({ title, children }: React.PropsWithChildren<{ title: string }>) {
   return (

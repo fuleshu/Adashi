@@ -83,6 +83,19 @@ fn frame() -> Frame {
     ] {
         answers.insert(key.into(), value);
     }
+    let prose=json!({"externalId":"prose","title":"Specification","body":"# Complete prose\n","designLinks":[]});
+    let summary=json!({"externalId":"prose","title":"Specification","designLinks":[],"readToken":"fixture-token"});
+    let page=json!({"documents":[summary.clone()],"totalCount":1,"nextAfterId":null});
+    answers.get_mut("design_inventory").unwrap()["markdown"]=json!([summary]);
+    for key in ["design_overview","design_scope","design_by_ids","design_bindings"] {
+        answers.get_mut(key).unwrap()["markdown"]=page.clone();
+    }
+    answers.get_mut("design_scope").unwrap()["backlinks"]=json!([]);
+    answers.get_mut("design_search").unwrap()["totalCount"]=json!(0);
+    answers.get_mut("design_search").unwrap()["truncated"]=json!(false);
+    answers.insert("markdown_documents".into(),page);
+    answers.insert("markdown_document".into(),prose);
+    answers.insert("markdown_backlinks".into(),json!([]));
     Frame {
         metadata: ProjectMetadata {
             identity: ProjectIdentity {
@@ -214,6 +227,9 @@ fn all_domains_are_typed_and_consumable_without_sqlite() {
     })
     .unwrap();
     s.design_documents(&[]).unwrap();
+    assert_eq!(s.markdown_documents(&markdown::MarkdownQuery::default()).unwrap().total_count,1);
+    assert_eq!(s.markdown_document("prose").unwrap().body,"# Complete prose\n");
+    assert!(s.markdown_backlinks("prose").unwrap().is_empty());
     s.design_search(&DesignSearchQuery {
         query: "core".into(),
         kinds: vec![],

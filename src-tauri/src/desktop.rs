@@ -36,6 +36,10 @@ use crate::tasks::{FinishTask, NewTask, Task, TaskDesignSpecificationLinkInput, 
 
 #[path = "storage_commands.rs"]
 mod storage_commands;
+#[path = "markdown_commands.rs"]
+mod markdown_commands;
+#[path = "markdown_import.rs"]
+mod markdown_import;
 
 struct AppState {
     settings_path: PathBuf,
@@ -48,6 +52,7 @@ const MIN_RESTORED_WINDOW_HEIGHT: u32 = 480;
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DashboardPayload {
+    markdown_documents: Vec<adashi_storage_api::markdown::MarkdownSummary>,
     project_id: String,
     project_name: String,
     project_folder: String,
@@ -181,8 +186,9 @@ fn load_dashboard_payload(project:ProjectSettings,store:&mut dyn ProjectStorage,
         let settings=state.settings.lock().map_err(|_|"Settings lock poisoned".to_string())?.clone();
         let file_name=architecture_file_name(&settings,&project.id);
         let enabled=architecture_projection_enabled(&settings,&project.id);
-        let mut status=projection::status(db,Path::new(&project.folder),&file_name,enabled)?;
-        if let Err(error)=projection::regenerate(db,Path::new(&project.folder),&file_name,enabled) {status.error=Some(error);}
+        let directory=projection::markdown_directory(&settings,&project.id);
+        let mut status=projection::status_configured(db,Path::new(&project.folder),&file_name,enabled,&directory)?;
+        if let Err(error)=projection::regenerate_configured(db,Path::new(&project.folder),&file_name,enabled,&directory) {status.error=Some(error);}
         status
     };
     let rules=db.rules().map_err(|e|e.to_string())?;
@@ -191,6 +197,7 @@ fn load_dashboard_payload(project:ProjectSettings,store:&mut dyn ProjectStorage,
     let prompt_warnings=collect_prompt_warnings(&rules,&fixed_hook_prompts,&rule_templates);
     let design_health=recorded_design_health(db,Path::new(&project.folder))?;
     Ok(DashboardPayload {
+        markdown_documents: inventory.markdown,
         project_id:project.id,project_name:project.name,project_folder:project.folder,revision,
         change_cursor:db.metadata().cursor.clone(),
         workspace_name:workspace.name,workspace_description:workspace.description,
@@ -1083,6 +1090,12 @@ pub fn run() {
             storage_commands::get_project_storage,
             storage_commands::preview_storage_migration,
             storage_commands::migrate_project_storage,
+            markdown_commands::list_markdown_documents,
+            markdown_commands::get_markdown_document,
+            markdown_commands::save_markdown_document,
+            markdown_commands::delete_markdown_document,
+            markdown_import::pick_markdown_import,
+            markdown_import::preview_markdown_import,
             add_project,
             close_app,
             close_task,
@@ -1195,9 +1208,10 @@ fn refresh_architecture_projection(
         let mut store=open_project_store(project).map_err(|e|e.to_string())?;
         let db=store.snapshot().map_err(|e|e.to_string())?;
         if architecture_projection_enabled(settings, &project.id) {
-            projection::regenerate(db.as_ref(), folder, &file_name, true)?;
+            projection::regenerate_configured(db.as_ref(), folder, &file_name, true,&projection::markdown_directory(settings,&project.id))?;
         } else {
             projection::remove_managed_blocks(folder, &file_name)?;
+            projection::regenerate_configured(db.as_ref(),folder,&file_name,false,&projection::markdown_directory(settings,&project.id))?;
         }
     }
     Ok(())
@@ -1256,6 +1270,7 @@ fn set_project_architecture_projection(
     project_id: String,
     enabled: bool,
     file_name: Option<String>,
+    markdown_directory: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<AppSettings, String> {
     let mut settings = state
@@ -1269,6 +1284,10 @@ fn set_project_architecture_projection(
     }
 
     let previous_names = resolved_architecture_names(&settings);
+
+    if let Some(directory) = markdown_directory {
+        settings.architecture_projection.project_markdown_directories.insert(project_id.clone(),projection::validate_markdown_directory(&directory)?);
+    }
 
     settings
         .architecture_projection

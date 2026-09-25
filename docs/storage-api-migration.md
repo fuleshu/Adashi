@@ -28,6 +28,23 @@ rules cases. Neither production client can obtain a SQLite connection.
 
 ## Operation map
 
+Markdown contract (task 25): `markdown_documents(MarkdownQuery)` returns a bounded
+metadata page; `markdown_document(externalId)` returns the complete authored body;
+`markdown_backlinks(externalId)` resolves incoming typed references. Query filters
+cover explicit IDs, a single association hop, file/symbol bindings and title/body
+search. `DesignChange::UpsertMarkdown` and `DeleteMarkdown` use the existing
+guarded design transaction. Canonical document identity is `markdown:<externalId>`
+and resource identity is `design.markdown`; title changes never rename identity.
+The project handle supplies isolation. Validate links against its final staged
+graph and reject remaining incoming references on deletion. Prose never cascades
+with an architecture owner. Tokens cover only externalId, title, body and ordered
+designLinks; generated filenames and headers are not canonical data.
+
+The required methods have no trait defaults. SQLite implements the contract with
+schema 15, indexed project-owned documents and ordered associations, token guards
+and final-graph validation. Text-format compatibility is handled in the next
+adapter phase; it must preserve canonical bodies and sequence identities.
+
 S means one ReadSnapshot from ProjectStorage::snapshot. Every mutation below is
 a Change inside one Mutation passed to ProjectStorage::commit. These names are
 compiled API members, not proposed names. SQL helpers and row hydration remain

@@ -934,8 +934,10 @@ fn load_design_links(db: &Connection, qa_job_id: i64) -> Result<Vec<QaJobDesignL
                 l.sort_order,
                 l.target_type,
                 l.design_external_id,
-                COALESCE(e.name, r.description, d.title, m.title, l.design_external_id) AS title
+                COALESCE(md.title, e.name, r.description, d.title, m.title, l.design_external_id) AS title
              FROM qa_job_design_links l
+             JOIN qa_jobs owner ON owner.id=l.qa_job_id
+             LEFT JOIN markdown_design_documents md ON md.project_id=owner.project_id AND md.external_id=l.design_external_id AND l.target_type='markdown'
              LEFT JOIN c4_elements e ON e.external_id = l.design_external_id
              LEFT JOIN c4_relationships r ON r.external_id = l.design_external_id
              LEFT JOIN diagrams d ON d.key = l.design_external_id
@@ -1196,6 +1198,7 @@ fn read_run_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<QaRunRow> {
 }
 
 fn infer_design_target_type(db: &Connection, design_external_id: &str) -> Result<String, String> {
+    if db.query_row("SELECT EXISTS(SELECT 1 FROM markdown_design_documents WHERE external_id=?1)",[design_external_id],|r|r.get::<_,bool>(0)).map_err(|e|e.to_string())? { return Ok("markdown".into()); }
     let element_exists = db
         .query_row(
             "SELECT 1 FROM c4_elements WHERE external_id = ?1 LIMIT 1",
@@ -1254,7 +1257,7 @@ fn infer_design_target_type(db: &Connection, design_external_id: &str) -> Result
 }
 
 fn validate_design_target_type(target_type: &str) -> Result<(), String> {
-    const TARGET_TYPES: &[&str] = &["element", "relationship", "uml", "mockup"];
+    const TARGET_TYPES: &[&str] = &["element", "relationship", "uml", "mockup", "markdown"];
     if TARGET_TYPES.contains(&target_type) {
         Ok(())
     } else {
