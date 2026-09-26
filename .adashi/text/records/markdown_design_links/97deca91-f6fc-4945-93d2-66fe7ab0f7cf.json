@@ -1,0 +1,15 @@
+{
+  "collection": "markdown_design_links",
+  "data": {
+    "design_external_id": "mcp-qa-api",
+    "document_id": {
+      "ref": "daaf83c4-c585-4eed-9d27-1cf1b308da9b"
+    },
+    "id": 15,
+    "sort_order": 3,
+    "target_type": "element"
+  },
+  "deleted": false,
+  "identity": "97deca91-f6fc-4945-93d2-66fe7ab0f7cf",
+  "schemaVersion": 1
+}

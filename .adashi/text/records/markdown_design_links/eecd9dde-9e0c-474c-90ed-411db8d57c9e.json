@@ -1,0 +1,15 @@
+{
+  "collection": "markdown_design_links",
+  "data": {
+    "design_external_id": "ui-design-browser",
+    "document_id": {
+      "ref": "862cf360-d9c3-4941-9be8-6248fa9d6720"
+    },
+    "id": 35,
+    "sort_order": 3,
+    "target_type": "element"
+  },
+  "deleted": false,
+  "identity": "eecd9dde-9e0c-474c-90ed-411db8d57c9e",
+  "schemaVersion": 1
+}

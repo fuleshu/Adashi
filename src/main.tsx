@@ -1519,24 +1519,26 @@ function DesignBrowser({
         ref={designMainRef}
         style={{ "--design-source-height": `${sourcePanelHeight}px`, display: documentsOpen ? "none" : undefined } as React.CSSProperties}
       >
-        <div className="document-artifacts" aria-label="Linked Markdown designs">
-          {payload.markdownDocuments.filter(d => d.designLinks.some(link => link.designExternalId === artifactTarget?.externalId)).map(d => <button type="button" key={d.externalId} title="Open Markdown specification" onClick={() => openDocument(d.externalId)}>{d.title}</button>)}
-        </div>
-        <div className="design-breadcrumbs" aria-label="Design breadcrumbs">
-          <button onClick={() => selectLevel("context")} type="button">System Context</button>
-          {breadcrumbElements.map((element) => (
-            <React.Fragment key={element.externalId}>
-              <ChevronRight size={15} />
-              <button onClick={() => selectTreeElement(element)} type="button">{element.name}</button>
-            </React.Fragment>
-          ))}
-          {activeLevel === "features" ? (
-            <>
-              <ChevronRight size={15} />
-              <span>UML Artifacts</span>
-            </>
-          ) : null}
-        </div>
+        <header className="design-main-header">
+          <div className="document-artifacts" aria-label="Linked Markdown designs">
+            {payload.markdownDocuments.filter(d => d.designLinks.some(link => link.designExternalId === artifactTarget?.externalId)).map(d => <button type="button" key={d.externalId} title="Open Markdown specification" onClick={() => openDocument(d.externalId)}>{d.title}</button>)}
+          </div>
+          <div className="design-breadcrumbs" aria-label="Design breadcrumbs">
+            <button onClick={() => selectLevel("context")} type="button">System Context</button>
+            {breadcrumbElements.map((element) => (
+              <React.Fragment key={element.externalId}>
+                <ChevronRight size={15} />
+                <button onClick={() => selectTreeElement(element)} type="button">{element.name}</button>
+              </React.Fragment>
+            ))}
+            {activeLevel === "features" ? (
+              <>
+                <ChevronRight size={15} />
+                <span>UML Artifacts</span>
+              </>
+            ) : null}
+          </div>
+        </header>
 
         <div className="viewer-panel design-viewer-panel">
           <div className="panel-heading">

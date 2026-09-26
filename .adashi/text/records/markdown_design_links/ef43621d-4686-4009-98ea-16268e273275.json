@@ -1,0 +1,15 @@
+{
+  "collection": "markdown_design_links",
+  "data": {
+    "design_external_id": "mcp-task-api",
+    "document_id": {
+      "ref": "b7551315-c257-4046-8fcd-c7a7ba6f851c"
+    },
+    "id": 8,
+    "sort_order": 2,
+    "target_type": "element"
+  },
+  "deleted": false,
+  "identity": "ef43621d-4686-4009-98ea-16268e273275",
+  "schemaVersion": 1
+}

@@ -1,0 +1,15 @@
+{
+  "collection": "markdown_design_links",
+  "data": {
+    "design_external_id": "ProjectStorageGuardedChange",
+    "document_id": {
+      "ref": "54c26578-8dd5-4fd7-9c07-b8fcce2ba127"
+    },
+    "id": 50,
+    "sort_order": 6,
+    "target_type": "uml"
+  },
+  "deleted": false,
+  "identity": "eedfd82b-e649-4990-b3cc-0ff671ee5a5e",
+  "schemaVersion": 1
+}

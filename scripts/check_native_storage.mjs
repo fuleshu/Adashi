@@ -215,6 +215,10 @@ try {
   await delay(250);
   assert.deepEqual(pageErrors, []);
   passed("rules, memory, settings, QA and restored design views render without JavaScript errors");
+  if (process.env.ADASHI_TEST_DESIGN_LAYOUT === "1") {
+    const { verifyDesignLayout } = await import("./check_native_design_layout.mjs");
+    await verifyDesignLayout({ page, call, until, passed, fixture });
+  }
   if (process.env.ADASHI_TEST_MARKDOWN_DOCUMENTS === "1") {
     const { verifyMarkdownDocuments } = await import("./check_native_markdown_documents.mjs");
     await verifyMarkdownDocuments({ page, call, until, passed, fixture });

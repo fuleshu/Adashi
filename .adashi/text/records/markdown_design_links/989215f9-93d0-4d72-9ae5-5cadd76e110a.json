@@ -1,0 +1,15 @@
+{
+  "collection": "markdown_design_links",
+  "data": {
+    "design_external_id": "mcp-memory-api",
+    "document_id": {
+      "ref": "daaf83c4-c585-4eed-9d27-1cf1b308da9b"
+    },
+    "id": 13,
+    "sort_order": 1,
+    "target_type": "element"
+  },
+  "deleted": false,
+  "identity": "989215f9-93d0-4d72-9ae5-5cadd76e110a",
+  "schemaVersion": 1
+}

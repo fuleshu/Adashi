@@ -1,0 +1,15 @@
+{
+  "collection": "markdown_design_links",
+  "data": {
+    "design_external_id": "storage-core",
+    "document_id": {
+      "ref": "1a3ff7a3-774b-4fac-bfe2-35e4d68803e1"
+    },
+    "id": 73,
+    "sort_order": 1,
+    "target_type": "element"
+  },
+  "deleted": false,
+  "identity": "bd861eba-3835-4bfc-9a9a-765b0734ffbd",
+  "schemaVersion": 1
+}

@@ -1,0 +1,15 @@
+{
+  "collection": "markdown_design_links",
+  "data": {
+    "design_external_id": "FormalDesignSave",
+    "document_id": {
+      "ref": "b7551315-c257-4046-8fcd-c7a7ba6f851c"
+    },
+    "id": 10,
+    "sort_order": 4,
+    "target_type": "uml"
+  },
+  "deleted": false,
+  "identity": "11026231-764c-4f26-bc8d-7e76607355c1",
+  "schemaVersion": 1
+}

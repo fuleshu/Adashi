@@ -1,0 +1,15 @@
+{
+  "collection": "markdown_design_links",
+  "data": {
+    "design_external_id": "doc.storage-text-format",
+    "document_id": {
+      "ref": "154cd666-462d-440f-a94e-ba3209d6a8ca"
+    },
+    "id": 67,
+    "sort_order": 4,
+    "target_type": "markdown"
+  },
+  "deleted": false,
+  "identity": "aeba80df-a2cc-4e59-8130-2009cecd8bb2",
+  "schemaVersion": 1
+}

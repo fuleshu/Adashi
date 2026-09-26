@@ -1,0 +1,15 @@
+{
+  "collection": "markdown_design_links",
+  "data": {
+    "design_external_id": "MarkdownDesignAuthoringSequence",
+    "document_id": {
+      "ref": "862cf360-d9c3-4941-9be8-6248fa9d6720"
+    },
+    "id": 38,
+    "sort_order": 6,
+    "target_type": "uml"
+  },
+  "deleted": false,
+  "identity": "aed03f56-a0d3-4689-bda5-6327b44bd9c9",
+  "schemaVersion": 1
+}

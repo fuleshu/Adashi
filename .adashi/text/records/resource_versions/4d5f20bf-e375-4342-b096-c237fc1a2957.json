@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "doc.context-efficiency",
+    "resource_kind": "design.markdown",
+    "updated_at": "2026-09-25 15:16:37",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "4d5f20bf-e375-4342-b096-c237fc1a2957",
+  "schemaVersion": 1
+}

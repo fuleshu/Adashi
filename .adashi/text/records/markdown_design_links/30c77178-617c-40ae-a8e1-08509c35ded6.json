@@ -1,0 +1,15 @@
+{
+  "collection": "markdown_design_links",
+  "data": {
+    "design_external_id": "doc.storage-sqlite-validation",
+    "document_id": {
+      "ref": "7d3fd70e-9de9-44f9-993f-176fdc284de6"
+    },
+    "id": 58,
+    "sort_order": 6,
+    "target_type": "markdown"
+  },
+  "deleted": false,
+  "identity": "30c77178-617c-40ae-a8e1-08509c35ded6",
+  "schemaVersion": 1
+}

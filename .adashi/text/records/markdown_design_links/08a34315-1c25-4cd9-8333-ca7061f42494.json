@@ -1,0 +1,15 @@
+{
+  "collection": "markdown_design_links",
+  "data": {
+    "design_external_id": "storage-config",
+    "document_id": {
+      "ref": "54c26578-8dd5-4fd7-9c07-b8fcce2ba127"
+    },
+    "id": 45,
+    "sort_order": 1,
+    "target_type": "element"
+  },
+  "deleted": false,
+  "identity": "08a34315-1c25-4cd9-8333-ca7061f42494",
+  "schemaVersion": 1
+}

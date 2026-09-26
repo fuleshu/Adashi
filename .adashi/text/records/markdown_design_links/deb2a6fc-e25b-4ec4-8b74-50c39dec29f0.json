@@ -1,0 +1,15 @@
+{
+  "collection": "markdown_design_links",
+  "data": {
+    "design_external_id": "desktop-dashboard-api",
+    "document_id": {
+      "ref": "7d3fd70e-9de9-44f9-993f-176fdc284de6"
+    },
+    "id": 54,
+    "sort_order": 2,
+    "target_type": "element"
+  },
+  "deleted": false,
+  "identity": "deb2a6fc-e25b-4ec4-8b74-50c39dec29f0",
+  "schemaVersion": 1
+}

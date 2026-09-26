@@ -461,7 +461,7 @@ button {
 .design-index-panel {
   display: grid;
   gap: 12px;
-  /* Five rows: C4 level tabs, search, the design-state control, then the tree or the state
+  /* Five rows: Documents, C4 level tabs, search, the design-state control, then the tree or the state
      listing. Only the last row flexes; giving a control row a flexible track is what stretched
      it into the tree's space and clipped its labels. */
   grid-template-rows: auto auto auto auto minmax(0, 1fr);
@@ -758,6 +758,16 @@ button {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+}
+
+/* Keep optional document links and breadcrumbs in one intrinsic header row;
+   the remaining rows belong to the diagram, resize handle and source pane. */
+.design-main-header {
+  min-width: 0;
+}
+
+.design-main-header .document-artifacts:empty {
+  display: none;
 }
 
 .design-breadcrumbs {
@@ -3231,6 +3241,23 @@ code {
 
 
 @media (max-width: 1180px) {
+  /* Stacked design panes must scroll, not compete for a single viewport-height
+     grid: that otherwise collapses the diagram again on high-DPI windows. */
+  .design-browser {
+    align-content: start;
+    grid-auto-rows: max-content;
+    overflow: auto;
+  }
+
+  .design-browser > .design-index-panel {
+    grid-template-rows: auto auto auto auto minmax(160px, 240px);
+  }
+
+  .design-browser > .design-main {
+    height: 75vh;
+    min-height: 680px;
+  }
+
   .task-workspace,
   .qa-workspace {
     overflow: auto;

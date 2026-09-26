@@ -1,0 +1,15 @@
+{
+  "collection": "markdown_design_links",
+  "data": {
+    "design_external_id": "doc.storage-api-migration",
+    "document_id": {
+      "ref": "54c26578-8dd5-4fd7-9c07-b8fcce2ba127"
+    },
+    "id": 51,
+    "sort_order": 7,
+    "target_type": "markdown"
+  },
+  "deleted": false,
+  "identity": "4f5f8482-5d92-44f1-bc1e-c2708745cc6a",
+  "schemaVersion": 1
+}

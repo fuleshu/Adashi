@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "doc.storage-api-migration",
+    "resource_kind": "design.markdown",
+    "updated_at": "2026-09-25 15:16:37",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "7e2fe72b-346a-4ec6-99ef-d4f93aaab8e4",
+  "schemaVersion": 1
+}

@@ -1,0 +1,15 @@
+{
+  "collection": "markdown_design_links",
+  "data": {
+    "design_external_id": "ProjectStorageMigration",
+    "document_id": {
+      "ref": "154cd666-462d-440f-a94e-ba3209d6a8ca"
+    },
+    "id": 66,
+    "sort_order": 3,
+    "target_type": "uml"
+  },
+  "deleted": false,
+  "identity": "7d18fc72-caa0-4e3f-801a-a0abc1dd6d65",
+  "schemaVersion": 1
+}

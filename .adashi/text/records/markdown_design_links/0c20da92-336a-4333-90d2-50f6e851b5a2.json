@@ -1,0 +1,15 @@
+{
+  "collection": "markdown_design_links",
+  "data": {
+    "design_external_id": "mcp-design-retrieval",
+    "document_id": {
+      "ref": "d70cec19-5fd3-4ff7-b4b7-4b15f7d529bd"
+    },
+    "id": 24,
+    "sort_order": 1,
+    "target_type": "element"
+  },
+  "deleted": false,
+  "identity": "0c20da92-336a-4333-90d2-50f6e851b5a2",
+  "schemaVersion": 1
+}

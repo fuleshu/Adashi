@@ -1,0 +1,15 @@
+{
+  "collection": "markdown_design_links",
+  "data": {
+    "design_external_id": "ui-qa-workspace",
+    "document_id": {
+      "ref": "a38ac6c3-9db6-4415-9cfe-e80187845b56"
+    },
+    "id": 30,
+    "sort_order": 3,
+    "target_type": "element"
+  },
+  "deleted": false,
+  "identity": "907ec875-9e73-4f0b-b424-3c41f839c258",
+  "schemaVersion": 1
+}

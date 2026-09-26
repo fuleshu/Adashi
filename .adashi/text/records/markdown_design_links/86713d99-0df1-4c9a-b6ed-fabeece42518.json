@@ -1,0 +1,15 @@
+{
+  "collection": "markdown_design_links",
+  "data": {
+    "design_external_id": "MarkdownDesignDiscoveryFlow",
+    "document_id": {
+      "ref": "a38ac6c3-9db6-4415-9cfe-e80187845b56"
+    },
+    "id": 31,
+    "sort_order": 4,
+    "target_type": "uml"
+  },
+  "deleted": false,
+  "identity": "86713d99-0df1-4c9a-b6ed-fabeece42518",
+  "schemaVersion": 1
+}

@@ -1,0 +1,15 @@
+{
+  "collection": "markdown_design_links",
+  "data": {
+    "design_external_id": "mcp-concurrency-api",
+    "document_id": {
+      "ref": "1fbe926e-2c07-4939-93e7-c0dd2732adc1"
+    },
+    "id": 20,
+    "sort_order": 2,
+    "target_type": "element"
+  },
+  "deleted": false,
+  "identity": "818ffcdb-378c-46bb-8b08-60d872e1c810",
+  "schemaVersion": 1
+}

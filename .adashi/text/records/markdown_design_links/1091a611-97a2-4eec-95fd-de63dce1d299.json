@@ -1,0 +1,15 @@
+{
+  "collection": "markdown_design_links",
+  "data": {
+    "design_external_id": "lifecycle-rule-injection-sequence",
+    "document_id": {
+      "ref": "daaf83c4-c585-4eed-9d27-1cf1b308da9b"
+    },
+    "id": 17,
+    "sort_order": 5,
+    "target_type": "uml"
+  },
+  "deleted": false,
+  "identity": "1091a611-97a2-4eec-95fd-de63dce1d299",
+  "schemaVersion": 1
+}

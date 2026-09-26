@@ -1,0 +1,15 @@
+{
+  "collection": "resource_versions",
+  "data": {
+    "project_id": {
+      "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
+    },
+    "resource_id": "doc.architecture-projection",
+    "resource_kind": "design.markdown",
+    "updated_at": "2026-09-25 15:16:37",
+    "version": 1
+  },
+  "deleted": false,
+  "identity": "41a4c47a-0603-4ace-9497-62cc1fd2ac90",
+  "schemaVersion": 1
+}

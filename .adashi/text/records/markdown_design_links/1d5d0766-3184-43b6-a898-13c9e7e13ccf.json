@@ -1,0 +1,15 @@
+{
+  "collection": "markdown_design_links",
+  "data": {
+    "design_external_id": "ProjectStorageStructure",
+    "document_id": {
+      "ref": "54c26578-8dd5-4fd7-9c07-b8fcce2ba127"
+    },
+    "id": 49,
+    "sort_order": 5,
+    "target_type": "uml"
+  },
+  "deleted": false,
+  "identity": "1d5d0766-3184-43b6-a898-13c9e7e13ccf",
+  "schemaVersion": 1
+}
