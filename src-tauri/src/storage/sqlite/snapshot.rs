@@ -206,6 +206,11 @@ impl ReadSnapshot for Snapshot<'_> {
     fn task(&self, id: i64) -> StorageResult<Task> {
         tasks::load_task(&self.tx, self.metadata.record_id, id).map_err(StorageError::backend)
     }
+    fn task_by_number(&self, number: i64) -> StorageResult<Task> {
+        let id = super::task_numbers::resolve(&self.tx, self.metadata.record_id, number)
+            .map_err(StorageError::Validation)?;
+        self.task(id)
+    }
     fn task_page(&self, q: &TaskQuery) -> StorageResult<TaskPage> {
         let limit = u32::try_from(q.limit)
             .map_err(|_| StorageError::Validation("Task page limit is too large".into()))?;

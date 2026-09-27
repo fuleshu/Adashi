@@ -1,4 +1,4 @@
-//! Numeric identities must match the SQL behavior that predates the adapters.
+//! Random text allocation across domains, with stable conversion identities.
 use super::*;
 
 fn numeric_rows(rows: &engine::Rows) -> BTreeMap<String, Vec<(i64, Option<i64>)>> {
@@ -21,7 +21,7 @@ fn numeric_rows(rows: &engine::Rows) -> BTreeMap<String, Vec<(i64, Option<i64>)>
 }
 
 #[test]
-fn all_domain_creation_ids_and_numbers_match_sqlite() {
+fn all_domain_creation_ids_are_randomized_in_text_and_stable_after_reopen() {
     let (_dir, source_request, mut source) = sqlite::tests::fixture();
     let target = api::OpenRequest {
         location: Path::new(&source_request.location)
@@ -45,7 +45,7 @@ fn all_domain_creation_ids_and_numbers_match_sqlite() {
     sqlite::tests::conformance::populate(&mut text);
     for store in [&mut source as &mut dyn ProjectStorage, &mut text] {
         for operation in ["qa-first", "qa-second"] {
-            let job = store.snapshot().unwrap().qa_job(1).unwrap();
+            let job = store.snapshot().unwrap().qa_jobs(&api::qa::QaJobQuery::default()).unwrap().remove(0);
             store
                 .commit(Mutation {
                     operation_id: operation.into(),
@@ -61,8 +61,8 @@ fn all_domain_creation_ids_and_numbers_match_sqlite() {
                 })
                 .unwrap();
         }
-        // A fresh equivalent upsert also consumes a SQL ID, despite reporting
-        // no design changes. Preserve that pre-adapter allocation behavior too.
+        // Exercise repeated and equivalent upserts before another allocation.
+        // Existing identities survive, while text reserves fresh random gaps.
         for (operation, name) in [
             ("rename-one", "One"),
             ("rename-two", "Two"),
@@ -81,7 +81,7 @@ fn all_domain_creation_ids_and_numbers_match_sqlite() {
                 .commit(Mutation {
                     operation_id: operation.into(),
                     changes: vec![Change::Design(api::DesignWrite::Save {
-                        change_intent: "Exercise SQL upsert sequence allocation".into(),
+                        change_intent: "Exercise repeated upserts and stable identities".into(),
                         changes: vec![serde_json::from_value(change).unwrap()],
                         read_tokens: vec![api::documents::DocumentReadToken {
                             document_id: doc.document_id,
@@ -95,7 +95,7 @@ fn all_domain_creation_ids_and_numbers_match_sqlite() {
             .commit(Mutation {
                 operation_id: "after-upserts".into(),
                 changes: vec![Change::Design(api::DesignWrite::Save {
-                    change_intent: "Next ID must match SQL, including consumed upsert IDs".into(),
+                    change_intent: "Allocate another identity after upserts".into(),
                     changes: serde_json::from_value(serde_json::json!([{
                         "op":"upsert_element", "externalId":"after-upserts", "parentExternalId":"1",
                         "elementType":"Container", "name":"After upserts"
@@ -112,7 +112,20 @@ fn all_domain_creation_ids_and_numbers_match_sqlite() {
     let files = journal::inventory(Path::new(&target.location)).unwrap();
     let records = engine::parse_records(&files).unwrap();
     let actual = engine::rows_from_records(&records, &tables).unwrap();
-    assert_eq!(numeric_rows(&actual), numeric_rows(&expected));
+    let expected = numeric_rows(&expected);
+    let actual = numeric_rows(&actual);
+    assert_eq!(actual.keys().collect::<Vec<_>>(), expected.keys().collect::<Vec<_>>());
+    let mut randomized = 0;
+    for (name, values) in &actual {
+        assert_eq!(values.len(), expected[name].len(), "{name}");
+        assert!(values.iter().all(|(id, _)| *id > 0 && *id <= MAX_SAFE));
+        if values != &expected[name] { randomized += 1; }
+    }
+    assert!(randomized >= 12, "expected randomized allocations across domains, got {randomized}");
+    drop(text);
+    let mut reopened = store(&target);
+    reopened.snapshot().unwrap();
+    assert_eq!(journal::inventory(Path::new(&target.location)).unwrap(), files);
 }
 
 #[test]
@@ -155,5 +168,10 @@ fn every_numeric_collection_resumes_after_live_and_deleted_ids_without_gaps() {
             )
             .unwrap();
         assert_eq!(high, 123, "{name}: next generated ID must be 124");
+    }
+    sequences::randomize(&db, &tables, &tombstones).unwrap();
+    for name in tombstones.values().map(|r| &r.collection) {
+        let seed: i64 = db.query_row("SELECT seq FROM sqlite_sequence WHERE name=?1", [name], |r| r.get(0)).unwrap();
+        assert!(seed > 123 && seed < MAX_SAFE, "{name}: text allocation reserves a random gap");
     }
 }

@@ -197,6 +197,11 @@ pub(super) fn dump(db: &Connection, tables: &[Table]) -> StorageResult<Rows> {
             if table.name == "projects" {
                 data.insert("repository_path".into(), Value::Null);
             }
+            // Task numbers are disposable communication labels. Normalize the
+            // legacy SQL column to identity so guards/conversion ignore its value.
+            if table.name == "agent_tasks" {
+                data.insert("number".into(), data["id"].clone());
+            }
             if table.name == "design_workspaces" {
                 data.insert("structurizr_dsl".into(), "".into());
                 data.insert("structurizr_json".into(), "".into());

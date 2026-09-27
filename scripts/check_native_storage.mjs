@@ -132,7 +132,7 @@ try {
   const pageErrors = [];
   page.on("pageerror", error => pageErrors.push(error.stack || String(error)));
   await page.getByRole("button", { name: "Tasks", exact: true }).click();
-  await page.getByRole("button", { name: new RegExp(`Task Id ${taskIds[0]} Desktop edit fixture`) }).click();
+  await page.getByRole("button", { name: new RegExp(`Task #${(await getTask(1)).number} Desktop edit fixture`) }).click();
   const title = page.locator(".task-editor-form label").filter({ has: page.locator("span", { hasText: /^Title$/ }) }).locator("input");
   await title.waitFor();
   await delay(2500); // Observe at least one normal desktop revision poll.
@@ -141,7 +141,7 @@ try {
 
   await title.fill("Desktop draft survived external refresh");
   await updateTask(2, "MCP update visible while draft open");
-  await page.getByRole("button", { name: new RegExp(`Task Id ${taskIds[1]} MCP update visible while draft open`) }).waitFor();
+  await page.getByRole("button", { name: new RegExp(`Task #${(await getTask(2)).number} MCP update visible while draft open`) }).waitFor();
   assert.equal(await title.inputValue(), "Desktop draft survived external refresh");
   assert.equal((await getTask(1)).title, "Desktop edit fixture");
   await title.press("Tab");

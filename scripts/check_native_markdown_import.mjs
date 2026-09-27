@@ -59,7 +59,7 @@ export async function verifyMarkdownImport({page,call,until,passed,fixture,proje
   assert.deepEqual(updated.designSpecificationLinks.map(({targetType,designExternalId})=>({targetType,designExternalId})),[existing,link]);
   await call("adashi_qa",{operation:"create_job",operationId:randomUUID(),name:"Verify adopted design",command:"echo ok",designSpecificationLinks:[link]});
   await page.getByRole("button",{name:"Tasks",exact:true}).click();
-  await page.getByRole("button",{name:new RegExp(`Task Id ${task.id} Implement adopted design`)}).click();
+  await page.getByRole("button",{name:new RegExp(`Task #${task.number} Implement adopted design`)}).click();
   await page.getByRole("button",{name:"Open Adopted specification in Design",exact:true}).click();
   await page.getByRole("heading",{name:"Adopted specification",exact:true}).waitFor();
   await page.getByRole("button",{name:"qa.job: Verify adopted design",exact:true}).waitFor();

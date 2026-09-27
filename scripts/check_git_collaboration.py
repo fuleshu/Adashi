@@ -9,17 +9,22 @@ from git_collaboration.merges import additions, edits, local_processes_and_reads
 from git_collaboration.conflicts import textual, semantic, ordering
 from git_collaboration.recovery import interrupted, prepare_native
 from git_collaboration.markdown import markdown
+from git_collaboration.task_numbers import task_numbers
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", required=True)
     parser.add_argument("--native-only", action="store_true", help="Prepare fresh native clones without rerunning the Python scenarios")
+    parser.add_argument("--numbering-only", action="store_true", help="Run the focused task-number MCP regression")
     args = parser.parse_args()
     suite = Suite(args.binary)
     try:
-        if not args.native_only:
+        if args.numbering_only:
+            task_numbers(suite)
+        elif not args.native_only:
             additions(suite)
+            task_numbers(suite)
             edits(suite)
             markdown(suite)
             local_processes_and_reads(suite)

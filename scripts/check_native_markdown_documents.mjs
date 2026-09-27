@@ -23,7 +23,7 @@ export async function verifyMarkdownDocuments({ page, call, until, passed, fixtu
   await assert.rejects(save({...document,body:"Stale overwrite"},old.readToken), /out_of_date/);
   const task=(await call("adashi_tasks", {operation:"create",operationId:randomUUID(),title:"Native Markdown task"})).task;
   await page.getByRole("button", {name:"Tasks",exact:true}).click();
-  await page.getByRole("button", {name:new RegExp(`Task Id ${task.id} Native Markdown task`)}).click();
+  await page.getByRole("button", {name:new RegExp(`Task #${task.number} Native Markdown task`)}).click();
   const active=page.locator(".workspace-tab:not([hidden])");
   await active.locator(".task-link-search input").fill("Renamed desktop");
   await active.locator(".task-link-results button").filter({hasText:"Renamed desktop specification"}).click();

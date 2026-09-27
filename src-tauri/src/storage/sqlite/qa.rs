@@ -998,11 +998,12 @@ fn replace_design_links(
 fn load_task_links(db: &Connection, qa_job_id: i64) -> Result<Vec<QaJobTaskLink>, String> {
     let mut statement = db
         .prepare(
-            "SELECT l.id, l.qa_job_id, l.task_id, l.sort_order, t.title, t.number, t.state
+            &format!("{} SELECT l.id, l.qa_job_id, l.task_id, l.sort_order, t.title, n.display_number, t.state
              FROM qa_job_task_links l
              JOIN agent_tasks t ON t.id = l.task_id
+             JOIN task_numbers n ON n.id = t.id
              WHERE l.qa_job_id = ?1
-             ORDER BY l.sort_order, l.id",
+             ORDER BY l.sort_order, l.id", super::task_numbers::CTE),
         )
         .map_err(|err| err.to_string())?;
     let rows = statement
@@ -1295,6 +1296,9 @@ fn required_trimmed<'a>(value: &'a str, label: &str) -> Result<&'a str, String> 
 }
 
 fn next_job_number(db: &Connection, project_id: i64) -> Result<i64, String> {
+    if let Some(number) = crate::storage::text::random_label(db, "qa_jobs")? {
+        return Ok(number);
+    }
     db.query_row(
         "SELECT COALESCE(MAX(number), 0) + 1 FROM qa_jobs WHERE project_id = ?1",
         params![project_id],

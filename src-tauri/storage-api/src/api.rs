@@ -189,6 +189,8 @@ pub trait ReadSnapshot {
     fn mockup(&self, external_id: &str) -> StorageResult<UiMockup>;
     fn tasks(&self, states: &[TaskState]) -> StorageResult<Vec<Task>>;
     fn task(&self, id: i64) -> StorageResult<Task>;
+    /// Resolve an ephemeral communication number in this exact snapshot.
+    fn task_by_number(&self, number: i64) -> StorageResult<Task>;
     fn task_page(&self, query: &TaskQuery) -> StorageResult<TaskPage>;
     fn qa_jobs(&self, query: &QaJobQuery) -> StorageResult<Vec<QaJob>>;
     fn qa_job(&self, id: i64) -> StorageResult<QaJob>;

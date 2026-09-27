@@ -113,7 +113,7 @@ fn text_roundtrip_guards_replay_and_write_free_reads() {
     let request = request(dir.path());
     let mut a = store(&request);
     let rule = create(&mut a, "rule-one", "First");
-    assert_eq!(rule.id, 1);
+    assert!(rule.id > 1);
     assert!(rule.id <= MAX_SAFE);
     let before = journal::inventory(Path::new(&request.location)).unwrap();
     let mut b = store(&request);

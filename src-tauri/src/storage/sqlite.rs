@@ -20,6 +20,7 @@ pub(crate) mod schema;
 pub(crate) mod seed;
 pub(crate) mod state;
 pub(crate) mod tasks;
+mod task_numbers;
 pub(crate) mod transfer;
 
 mod mutations;

@@ -26,7 +26,14 @@ fn operation_schema(tool: &str, operation: &str) -> Option<Value> {
         ("adashi_tasks", "finish") => schema::<FinishTaskParams>(),
         ("adashi_tasks", "close") => schema::<CloseTaskParams>(),
         ("adashi_tasks", "delete") => schema::<DeleteTaskParams>(),
-        ("adashi_tasks", "get") => schema::<TaskIdParams>(),
+        ("adashi_tasks", "get") => {
+            let mut value = schema::<TaskIdParams>();
+            value["oneOf"] = json!([
+                {"required":["taskId"],"properties":{"taskId":{"type":"integer","minimum":1},"taskNumber":{"type":"null"}}},
+                {"required":["taskNumber"],"properties":{"taskNumber":{"type":"integer","minimum":1},"taskId":{"type":"null"}}}
+            ]);
+            value
+        },
         ("adashi_qa", "create_job") => schema::<CreateQaJobParams>(),
         ("adashi_qa", "update_job") => schema::<UpdateQaJobParams>(),
         ("adashi_qa", "delete_job") => schema::<DeleteQaJobParams>(),

@@ -245,7 +245,12 @@ struct TaskCursor {
 struct TaskIdParams {
     /// Configured project name (case-insensitive) or project id.
     project_name: String,
-    task_id: i64,
+    /// Permanent task ID. Supply exactly one of taskId and taskNumber.
+    task_id: Option<i64>,
+    /// Current desktop Task # number, resolved once in the current snapshot.
+    task_number: Option<i64>,
+    /// Optional revision from the observed task list; rejects stale number lookup.
+    expected_revision: Option<i64>,
     /// get: also inline each linked design specification's scope and mockup content. Off by
     /// default, because a task with many links otherwise returns a very large payload; prefer
     /// retrieving the one or two scopes the work actually needs.
@@ -863,8 +868,12 @@ struct TasksParams {
     state: Option<String>,
     /// update/finish/close/delete: expected task version.
     expected_version: Option<i64>,
-    /// update/finish/close/delete/get: task id.
+    /// update/finish/close/delete/get: permanent task id, never the displayed number.
     task_id: Option<i64>,
+    /// get only: current desktop Task # number, instead of taskId. Use the returned id for subsequent mutations.
+    task_number: Option<i64>,
+    /// get only: optional observed project revision; rejects stale task-number resolution.
+    expected_revision: Option<i64>,
     /// finish: completion memo.
     completion_memo: Option<String>,
     /// finish: files created.
@@ -1063,7 +1072,7 @@ impl AdashiMcpServer {
                 .ok()
                 .and_then(|bytes| serde_json::from_slice(&bytes).ok())
                 .ok_or_else(|| tool_error("tasks.invalid_cursor".into()))?;
-            if cursor.contract_version != 2
+            if cursor.contract_version != 3
                 || cursor.project_id != project.id
                 || cursor.states.as_deref() != Some(state_filter.as_slice())
                 || cursor.after_id <= 0
@@ -1098,7 +1107,7 @@ impl AdashiMcpServer {
         tasks.truncate(limit as usize);
         let next_cursor = if has_more {
             let cursor = TaskCursor {
-                contract_version: 2,
+                contract_version: 3,
                 project_id: project.id.clone(),
                 revision,
                 states: Some(state_filter.clone()),
@@ -1131,7 +1140,14 @@ impl AdashiMcpServer {
         let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
         let db = store.snapshot().map_err(storage_error)?;
         let revision = db.metadata();
-        let task = db.task(params.task_id).map_err(storage_error)?;
+        if params.expected_revision.is_some_and(|expected| expected != revision.revision) {
+            return Err(tool_error("tasks.stale_number: project changed; refresh the task list before resolving a number".into()));
+        }
+        let task = match (params.task_id, params.task_number) {
+            (Some(id), None) if id > 0 => db.task(id),
+            (None, Some(number)) if number > 0 => db.task_by_number(number),
+            _ => return Err(tool_error("Supply exactly one positive taskId or taskNumber".into())),
+        }.map_err(storage_error)?;
         let mut design_specifications =
             load_task_design_specifications(db.as_ref(), &task, params.include_design_scopes)
                 .map_err(tool_error)?;
@@ -2163,6 +2179,10 @@ impl AdashiMcpServer {
         &self,
         Parameters(params): Parameters<TasksParams>,
     ) -> Result<CallToolResult, ErrorData> {
+        if !matches!(params.operation, TasksOperation::Get)
+            && (params.task_number.is_some() || params.expected_revision.is_some()) {
+            return Err(tool_error("taskNumber and expectedRevision are for get only; resolve the number, then use the returned permanent taskId and version".into()));
+        }
         match params.operation {
             TasksOperation::Create => {
                 let operation_id = required(params.operation_id, "operationId")?;
@@ -2241,10 +2261,11 @@ impl AdashiMcpServer {
                 .into_call_tool_result()
             }
             TasksOperation::Get => {
-                let task_id = required(params.task_id, "taskId")?;
                 self.get_task(Parameters(TaskIdParams {
                     project_name: params.project_name,
-                    task_id,
+                    task_id: params.task_id,
+                    task_number: params.task_number,
+                    expected_revision: params.expected_revision,
                     include_design_scopes: params.include_design_scopes,
                 }))?
                 .into_call_tool_result()
@@ -3460,7 +3481,9 @@ mod tests {
         let lean = server
             .get_task(rmcp::handler::server::wrapper::Parameters(TaskIdParams {
                 project_name: project.name.clone(),
-                task_id: task.id,
+                task_id: Some(task.id),
+                task_number: None,
+                expected_revision: None,
                 include_design_scopes: false,
             }))
             .unwrap();
@@ -3477,7 +3500,9 @@ mod tests {
         let full = server
             .get_task(rmcp::handler::server::wrapper::Parameters(TaskIdParams {
                 project_name: project.name.clone(),
-                task_id: task.id,
+                task_id: Some(task.id),
+                task_number: None,
+                expected_revision: None,
                 include_design_scopes: true,
             }))
             .unwrap();
@@ -3717,7 +3742,9 @@ mod tests {
         let result = server
             .get_task(Parameters(TaskIdParams {
                 project_name: project.id,
-                task_id: task.id,
+                task_id: Some(task.id),
+                task_number: None,
+                expected_revision: None,
                 include_design_scopes: true,
             }))
             .unwrap();

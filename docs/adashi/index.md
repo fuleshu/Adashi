@@ -16,5 +16,6 @@ Agents retrieve canonical documents and readTokens through Adashi MCP before edi
 - [Collaborating through Git text storage](design-d5976c26ea8d923191cfba262e6a72e522a50120d94705973f50b8d93de2e1e4.md) — `doc.storage-git-collaboration`
 - [Switching project storage](design-7b9132da35c599a3b454e218e1d1885f9aa960c79f28e22cb14f8d401096f78a.md) — `doc.storage-migration`
 - [SQLite adapter acceptance — tasks 14 and 15](design-9b39bf9dc98275b9c7d4ebbac8ebb9c213ce496e8205d89779fb933d17d5a050.md) — `doc.storage-sqlite-validation`
-- [Git text storage, version 2](design-63e6ab50d2641ea8138e12211250e5a0ee0df29f5ce86d92a893d93c7cb7029d.md) — `doc.storage-text-format`
+- [Git text storage, version 3](design-63e6ab50d2641ea8138e12211250e5a0ee0df29f5ce86d92a893d93c7cb7029d.md) — `doc.storage-text-format`
 - [Text adapter acceptance — task 17](design-32b28c7445e6408f25027604fa1dd6958e50a14e4d1802715e0cb66d9520b34c.md) — `doc.storage-text-validation`
+- [Random text IDs and task communication numbers](design-70326f512e0a5a3e5efd0a59d0534889f4dad42dcb1248a043034c6cd56d0925.md) — `doc.task-communication-numbers`

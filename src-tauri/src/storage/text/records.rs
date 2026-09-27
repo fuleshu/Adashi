@@ -9,7 +9,7 @@ pub(super) fn parse_records(files: &Files) -> StorageResult<BTreeMap<String, cod
             .ok_or_else(|| invalid("format.json", "text project is not initialized"))?,
         "format.json",
     )?;
-    if ![1, 2].contains(&format.schema_version)
+    if ![1, 2, 3].contains(&format.schema_version)
         || ![14, sqlite::schema::SCHEMA_VERSION].contains(&format.relational_schema)
     {
         return Err(invalid(
@@ -26,7 +26,7 @@ pub(super) fn parse_records(files: &Files) -> StorageResult<BTreeMap<String, cod
         if format.relational_schema < 15 && r.collection.starts_with("markdown_design_") {
             return Err(invalid(path, "Markdown records require relational schema 15"));
         }
-        if format.schema_version == 2 && r.collection == "mutation_operations" {
+        if format.schema_version >= 2 && r.collection == "mutation_operations" {
             return Err(invalid(
                 path,
                 "request history belongs in ignored local state, not text project records",
@@ -154,11 +154,23 @@ pub(super) fn rows_from_records(
     for record in records.values().filter(|r| !r.deleted) {
         let table = tables.iter().find(|t| t.name == record.collection).unwrap();
         let path = format!("records/{}/{}.json", record.collection, record.identity);
-        if record.data.len() != table.columns.len() {
+        let derived_number = record.collection == "agent_tasks" && !record.data.contains_key("number");
+        if record.data.len() + usize::from(derived_number) != table.columns.len() {
             return Err(invalid(&path, "missing or unknown record fields"));
         }
         let mut data = Data::new();
         for column in &table.columns {
+            if record.collection == "agent_tasks" && column.name == "number" {
+                // Legacy numbers are accepted but no longer authoritative. The
+                // SQL compatibility column needs a unique value, not a rank.
+                if let Some(value) = record.data.get("number") {
+                    if value.as_i64().is_none() {
+                        return Err(invalid(&path, "legacy task number must be an integer"));
+                    }
+                }
+                data.insert("number".into(), record.data["id"].clone());
+                continue;
+            }
             let v = field(records, tables, record, &column.name, &mut BTreeSet::new())?;
             let valid = if v.is_null() {
                 column.nullable && column.pk == 0
@@ -284,7 +296,7 @@ pub(super) fn export(
     files.insert(
         "format.json".into(),
         codec::bytes(&codec::Format {
-            schema_version: 2,
+            schema_version: 3,
             relational_schema: sqlite::schema::SCHEMA_VERSION,
         })?,
     );
@@ -297,6 +309,9 @@ pub(super) fn export(
             .iter()
             .map(|(k, v)| (k.clone(), codec::encode(v)))
             .collect::<Data>();
+        if table.name == "agent_tasks" {
+            data.remove("number");
+        }
         for f in &table.foreign {
             if f.from.iter().any(|c| row[c].is_null()) {
                 continue;

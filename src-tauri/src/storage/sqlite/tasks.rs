@@ -2,6 +2,7 @@
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::concurrency;
+use super::task_numbers::CTE;
 
 pub use adashi_storage_api::tasks::*;
 
@@ -37,11 +38,12 @@ pub fn load_task_summaries(
         )
         .map_err(|e| e.to_string())?;
     let mut statement = db.prepare(
-        "SELECT t.id, t.number, substr(t.title,1,240), t.state, COALESCE(rv.version, 0), length(t.title)>240
-         FROM agent_tasks t LEFT JOIN resource_versions rv
+        &format!("{CTE} SELECT t.id, n.display_number, substr(t.title,1,240), t.state, COALESCE(rv.version, 0), length(t.title)>240
+         FROM agent_tasks t JOIN task_numbers n USING(id) LEFT JOIN resource_versions rv
            ON rv.project_id=t.project_id AND rv.resource_kind='task' AND rv.resource_id=CAST(t.id AS TEXT)
          WHERE t.project_id=?1 AND t.state IN (SELECT value FROM json_each(?2))
-           AND t.id>?3 ORDER BY t.id LIMIT ?4"
+           AND n.display_number>COALESCE((SELECT display_number FROM task_numbers WHERE id=?3),0)
+         ORDER BY n.display_number LIMIT ?4")
     ).map_err(|e| e.to_string())?;
     let rows = statement
         .query_map(params![project_id, filter, after_id, limit], |row| {
@@ -472,20 +474,12 @@ fn hydrate_task(db: &Connection, project_id: i64, task: TaskRow) -> Result<Task,
 fn load_task_rows(db: &Connection, project_id: i64) -> Result<Vec<TaskRow>, String> {
     let mut statement = db
         .prepare(
-            "SELECT id, number, title, description, state, created_at, updated_at,
+            &format!("{CTE} SELECT id, n.display_number, title, description, state, created_at, updated_at,
                     completed_at, confirmed_at, completion_memo, created_files,
                     changed_files, confirmation_commit_id
-             FROM agent_tasks
+             FROM agent_tasks JOIN task_numbers n USING(id)
              WHERE project_id = ?1
-             ORDER BY
-                CASE state
-                    WHEN 'todo' THEN 0
-                    WHEN 'active' THEN 1
-                    WHEN 'finished' THEN 2
-                    WHEN 'closed' THEN 3
-                    ELSE 4
-                END,
-                number",
+             ORDER BY n.display_number"),
         )
         .map_err(|err| err.to_string())?;
     let rows = statement
@@ -498,11 +492,11 @@ fn load_task_rows(db: &Connection, project_id: i64) -> Result<Vec<TaskRow>, Stri
 
 fn load_task_row(db: &Connection, project_id: i64, task_id: i64) -> Result<TaskRow, String> {
     db.query_row(
-        "SELECT id, number, title, description, state, created_at, updated_at,
+        &format!("{CTE} SELECT id, n.display_number, title, description, state, created_at, updated_at,
                 completed_at, confirmed_at, completion_memo, created_files,
                 changed_files, confirmation_commit_id
-         FROM agent_tasks
-         WHERE id = ?1 AND project_id = ?2",
+         FROM agent_tasks JOIN task_numbers n USING(id)
+         WHERE id = ?1 AND project_id = ?2"),
         params![task_id, project_id],
         read_task_row,
     )
@@ -664,6 +658,9 @@ fn infer_design_target_type(db: &Connection, design_external_id: &str) -> Result
 }
 
 fn next_task_number(db: &Connection, project_id: i64) -> Result<i64, String> {
+    if let Some(number) = crate::storage::text::random_label(db, "agent_tasks")? {
+        return Ok(number);
+    }
     db.query_row(
         "SELECT COALESCE(MAX(number), 0) + 1 FROM agent_tasks WHERE project_id = ?1",
         params![project_id],

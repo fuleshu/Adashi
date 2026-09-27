@@ -1,4 +1,4 @@
-//! Preserve SQL AUTOINCREMENT behavior across projections and backend conversion.
+//! Randomized text allocation; SQL sequence preservation during conversion only.
 use super::*;
 use rusqlite::{params, Connection};
 
@@ -23,6 +23,62 @@ fn deleted_max(records: &BTreeMap<String, codec::Record>, name: &str) -> i64 {
         .filter_map(|r| r.data.get("id").and_then(Value::as_i64))
         .max()
         .unwrap_or(0)
+}
+
+/// Reserve an independent random gap for every numeric collection. Existing and
+/// deleted aliases are never reused; inserts within this transaction use the
+/// reserved sequence. No sequence file or unused reservation is written to Git.
+pub(super) fn randomize(
+    db: &Connection,
+    tables: &[engine::Table],
+    records: &BTreeMap<String, codec::Record>,
+) -> StorageResult<()> {
+    for table in tables.iter().filter(|t| numeric(t)) {
+        let high = live_max(db, table)?.max(deleted_max(records, &table.name));
+        let bytes = *uuid::Uuid::new_v4().as_bytes();
+        let gap = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as i64 + 1;
+        let next = high
+            .checked_add(gap)
+            .filter(|n| *n < MAX_SAFE - 1_000_000)
+            .ok_or_else(|| invalid(&table.name, "integer alias space exhausted"))?;
+        db.execute("DELETE FROM sqlite_sequence WHERE name=?1", [&table.name])
+            .map_err(StorageError::backend)?;
+        db.execute(
+            "INSERT INTO sqlite_sequence(name,seq) VALUES(?1,?2)",
+            params![table.name, next],
+        )
+        .map_err(StorageError::backend)?;
+    }
+    Ok(())
+}
+
+/// Legacy SQL label columns remain internal. Only the text projection needs
+/// independently allocated values; the public task number is derived on read.
+pub(crate) fn random_label(db: &Connection, table: &str) -> Result<Option<i64>, String> {
+    if !db
+        .table_exists(Some("temp"), "adashi_text_context")
+        .map_err(|e| e.to_string())?
+    {
+        return Ok(None);
+    }
+    if !["agent_tasks", "qa_jobs"].contains(&table) {
+        return Err("Invalid label collection".into());
+    }
+    loop {
+        let bytes = *uuid::Uuid::new_v4().as_bytes();
+        let number =
+            (u64::from_le_bytes(bytes[..8].try_into().unwrap()) & MAX_SAFE as u64).max(1) as i64;
+        let exists: bool = db
+            .query_row(
+                &format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE number=?1)"),
+                [number],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if !exists {
+            return Ok(Some(number));
+        }
+    }
 }
 
 /// Restore each numeric collection without random gaps or reusing deleted IDs.

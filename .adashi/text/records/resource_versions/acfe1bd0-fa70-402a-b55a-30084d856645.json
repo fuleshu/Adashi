@@ -4,12 +4,12 @@
     "project_id": {
       "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
     },
-    "resource_id": "doc.storage-text-format",
+    "resource_id": "doc.task-communication-numbers",
     "resource_kind": "design.markdown",
     "updated_at": "2026-09-27 17:42:19",
-    "version": 3
+    "version": 2
   },
   "deleted": false,
-  "identity": "70f56152-07ef-4fe6-a420-ab2df9ca8296",
+  "identity": "acfe1bd0-fa70-402a-b55a-30084d856645",
   "schemaVersion": 1
 }

@@ -54,7 +54,7 @@ fn markdown_discovery_references_and_search_on_both_backends() {
         }
         store.commit(save("rename",json!([{"op":"upsert_markdown","externalId":"spec","title":"Renamed","body":body,"designLinks":[{"targetType":"element","designExternalId":"app"}]}]),vec![token])).unwrap();
         let s = store.snapshot().unwrap();
-        assert_eq!(s.task(1).unwrap().design_specification_links[0].title,"Renamed");
-        assert_eq!(s.qa_job(1).unwrap().design_specification_links[0].title,"Renamed");
+        assert_eq!(s.task_by_number(1).unwrap().design_specification_links[0].title,"Renamed");
+        assert_eq!(s.qa_jobs(&QaJobQuery::default()).unwrap()[0].design_specification_links[0].title,"Renamed");
     }
 }

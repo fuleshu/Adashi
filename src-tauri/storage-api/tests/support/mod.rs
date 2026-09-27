@@ -77,6 +77,9 @@ impl ReadSnapshot for Frame {
     fn task(&self, id: i64) -> StorageResult<Task> {
         self.reply("task", json!([id]))
     }
+    fn task_by_number(&self, number: i64) -> StorageResult<Task> {
+        self.reply("task_by_number", json!([number]))
+    }
     fn task_page(&self, query: &TaskQuery) -> StorageResult<TaskPage> {
         self.reply("task_page", json!([query]))
     }

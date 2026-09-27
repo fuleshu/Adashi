@@ -17,6 +17,7 @@ pub(crate) mod journal;
 mod local;
 mod records;
 mod sequences;
+pub(crate) use sequences::random_label;
 #[cfg(test)]
 mod tests;
 pub(crate) mod transfer;
@@ -250,7 +251,7 @@ impl StorageBackend for TextStorage {
         loaded
             .local
             .require_owned_claims(&loaded.db, prepared.mutation())?;
-        sequences::restore(&loaded.db, &loaded.tables, &loaded.records)?;
+        sequences::randomize(&loaded.db, &loaded.tables, &loaded.records)?;
         context(
             &loaded.db,
             loaded.project,
@@ -283,7 +284,6 @@ impl StorageBackend for TextStorage {
         let rows = engine::dump(db, &loaded.tables)?;
         validation::validate(db, &rows)?;
         loaded.local.capture(db, loaded.project)?;
-        sequences::retain(db, &loaded.tables, &mut loaded.records)?;
         let mut interim =
             engine::export(&rows, &loaded.tables, &loaded.records, &loaded.rows, false)?;
         preserve_unchanged(&loaded.files, &mut interim)?;

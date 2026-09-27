@@ -74,7 +74,7 @@ fn legacy_history_moves_local_on_write_and_interrupted_removal_recovers() {
         codec::parse::<codec::Format>(&after["format.json"], "format.json")
             .unwrap()
             .schema_version,
-        2
+        3
     );
     for (path, bytes) in portable(&before) {
         if path != "format.json" && path != history_path {

@@ -5,7 +5,7 @@ never repair, discard or overwrite these conflicting records on its own.
 """
 import json
 import uuid
-from .common import raw_error, write_json, correct_task_numbers
+from .common import raw_error, write_json
 
 
 def assert_blocked(peer, old, reason=None):
@@ -72,29 +72,22 @@ def semantic(suite):
         a.commit("Review reference conflict: restore referenced task")
         assert a.call("adashi_qa", operation="get_job", qaJobId=job["id"])["job"]["taskLinks"][0]["taskId"] == old["id"]
         suite.passed("clean Git delete/reference merge is rejected semantically and recoverable", error=error)
-    with suite.pair("numbers") as (a, b):
-        tasks = []
-        for peer, label in ((a, "Alice"), (b, "Bob")):
-            task = peer.mutate("adashi_tasks", operation="create", title=label + " collision")["task"]
-            if label == "Bob":
-                _, task_record = peer.record("agent_tasks", id=task["id"])
-                _, version_record = peer.record("resource_versions", resource_kind="task", resource_id=str(task["id"]))
-                task["id"] += 1
-                correct_task_numbers(peer, task_record["identity"], version_record["identity"], task["id"], task["number"])
-            tasks.append(task)
-            path, record = peer.record("agent_tasks", id=task["id"])
-            record["data"]["number"] = 987654321
-            write_json(path, record)
-            assert peer.call("adashi_tasks", operation="get", taskId=task["id"])["task"]["number"] == 987654321
-            peer.commit("Independent display label " + label)
-        a.merge_from(b, "numbers-b")
-        error = assert_blocked(a, a.suite.seed_tasks[0], "UNIQUE")
-        path, record = a.record("agent_tasks", id=tasks[1]["id"])
-        record["data"]["number"] = 987654322
+    with suite.pair("identities") as (a, b):
+        left = a.mutate("adashi_tasks", operation="create", title="Alice")["task"]
+        right = b.mutate("adashi_tasks", operation="create", title="Bob")["task"]
+        path, record = b.record("agent_tasks", id=right["id"])
+        record["data"]["id"] = left["id"]  # Deliberately corrupt a permanent identity.
         write_json(path, record)
-        a.commit("Explicitly disambiguate labels; preserve immutable API IDs")
-        assert a.call("adashi_tasks", operation="get", taskId=tasks[1]["id"])["task"]["number"] == 987654322
-        suite.passed("syntactically clean duplicate display-number merge fails without automatic reassignment", error=error)
+        a.commit("Alice task")
+        b.commit("Fixture injects duplicate permanent alias")
+        a.merge_from(b, "identities-b")
+        error = assert_blocked(a, suite.seed_tasks[0], "duplicate")
+        path = a.folder / ".adashi/text/records/agent_tasks" / (record["identity"] + ".json")
+        record["data"]["id"] = right["id"]
+        write_json(path, record)
+        a.commit("Restore the original permanent alias")
+        assert a.call("adashi_tasks", operation="get", taskId=right["id"])["task"]["title"] == "Bob"
+        suite.passed("a genuine permanent-ID collision remains explicit and recoverable", error=error)
 
 
 def ordering(suite):

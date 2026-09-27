@@ -1,0 +1,15 @@
+{
+  "collection": "markdown_design_links",
+  "data": {
+    "design_external_id": "ui-taskqa-placeholder",
+    "document_id": {
+      "ref": "de97c044-1d34-4d5c-af01-b8cc8b1d022a"
+    },
+    "id": 85,
+    "sort_order": 2,
+    "target_type": "element"
+  },
+  "deleted": false,
+  "identity": "8abe6c9b-ecf0-4300-8eda-b1420461fad3",
+  "schemaVersion": 1
+}

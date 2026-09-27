@@ -28,7 +28,7 @@ export async function verifyMigration({ page, call, request, getTask, updateTask
   assert.ok(stale.error || stale.result.isError, "pre-migration MCP guard rejected");
   const created = await call("adashi_tasks", { operation: "create", operationId: randomUUID(), title: "Created by MCP in text storage" });
   await page.getByRole("button", { name: "Tasks", exact: true }).click();
-  await page.getByRole("button", { name: new RegExp(`Task Id ${created.task.id} Created by MCP in text storage`) }).waitFor();
+  await page.getByRole("button", { name: new RegExp(`Task #${created.task.number} Created by MCP in text storage`) }).waitFor();
   passed("settings converts SQLite to text and connected MCP reads and writes the selected backend");
 
   // Exercise the reverse settings action, including populated-destination consent.
@@ -51,7 +51,7 @@ export async function verifyMigration({ page, call, request, getTask, updateTask
 
   // A separate command can switch storage while a native editor remains dirty.
   await page.getByRole("button", { name: "Tasks", exact: true }).click();
-  await page.getByRole("button", { name: new RegExp(`Task Id ${taskIds[0]} `) }).click();
+  await page.getByRole("button", { name: new RegExp(`Task #${(await getTask(1)).number} `) }).click();
   const title = page.locator(".task-editor-form label").filter({ has: page.locator("span", { hasText: /^Title$/ }) }).locator("input");
   await title.fill("Draft retained across backend conversion");
   const report = await page.evaluate(async () => {

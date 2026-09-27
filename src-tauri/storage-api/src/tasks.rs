@@ -85,6 +85,7 @@ pub const ALL_TASK_STATES: [TaskState; 4] = [
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TaskSummary {
     pub id: i64,
+    /// Current one-based creation-order label. Resolve to id before mutations.
     pub number: i64,
     pub title: String,
     pub title_truncated: bool,
@@ -115,6 +116,7 @@ pub fn default_state_filter(states: Option<&[TaskState]>) -> Vec<TaskState> {
 pub struct Task {
     pub id: i64,
     pub version: i64,
+    /// Current creation-order label; may change after deletions or Git updates.
     pub number: i64,
     pub title: String,
     pub description: String,

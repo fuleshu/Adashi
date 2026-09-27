@@ -80,13 +80,14 @@ pub(crate) fn populate(store: &mut dyn ProjectStorage) {
             new_rule(),
         ],
     );
+    let task_id = store.snapshot().unwrap().tasks(&tasks::ALL_TASK_STATES).unwrap()[0].id;
     commit(
         store,
         "content",
         vec![
             Change::Qa(QaWrite::CreateJob {
                 input: input(
-                    json!({"name":"Check","command":"echo checked","tags":["adapter"],"taskIds":[1],"designSpecificationLinks":[{"targetType":"element","designExternalId":"app"}]}),
+                    json!({"name":"Check","command":"echo checked","tags":["adapter"],"taskIds":[task_id],"designSpecificationLinks":[{"targetType":"element","designExternalId":"app"}]}),
                 ),
             }),
             Change::Memory(MemoryWrite::Append {
@@ -94,7 +95,7 @@ pub(crate) fn populate(store: &mut dyn ProjectStorage) {
                     note_id: "handover".into(),
                     operation_id: "content".into(),
                     run_id: "run-a".into(),
-                    task_id: Some(1),
+                    task_id: Some(task_id),
                     body: "Retain this decision".into(),
                 },
             }),
@@ -130,7 +131,7 @@ pub(crate) fn populate(store: &mut dyn ProjectStorage) {
                 external_id: "app".into(),
                 state: health::ElementHealth::Unmapped,
                 reason: "Reviewed fixture".into(),
-                task_id: Some(1),
+                task_id: Some(task_id),
             },
             Change::Legacy {
                 expected_version: legacy,

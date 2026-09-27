@@ -8,6 +8,7 @@ import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { canonical, client, git, startDesktop, until, assertError } from "./git_collaboration/native_helpers.mjs";
+import { checkTaskNumbers } from "./git_collaboration/native_numbers.mjs";
 
 const { chromium } = createRequire(import.meta.url)(process.env.ADASHI_PLAYWRIGHT_PACKAGE || "playwright");
 const fixture = JSON.parse(await fs.readFile(path.join(process.argv[2], "native-fixture.json"), "utf8"));
@@ -42,10 +43,17 @@ try {
   const pageErrors = [];
   page.on("pageerror", error => pageErrors.push(error.stack || String(error)));
   await page.getByRole("button", { name: "Tasks", exact: true }).click();
-  await page.getByRole("button", { name: new RegExp(`Task Id ${fixture.tasks[0].id} Git desktop task`) }).click();
+  await page.getByRole("button", { name: new RegExp(`Task #${fixture.tasks[0].number} Git desktop task`) }).click();
   const title = page.locator(".task-editor-form label").filter({ has: page.locator("span", { hasText: /^Title$/ }) }).locator("input");
   await title.waitFor();
   const initialTask = await task();
+  const initialList = await a.call("adashi_tasks", { operation: "list" });
+  for (const item of initialList.tasks) {
+    await page.getByRole("button", { name: new RegExp(`Task #${item.number} ${item.title}`) }).waitFor();
+    const resolved = await a.call("adashi_tasks", { operation: "get", taskNumber: item.number, expectedRevision: initialList.revision });
+    assert.equal(resolved.task.id, item.id);
+  }
+  passed("native task labels and MCP taskNumber lookup identify the same permanent tasks");
   const beforeNoop = await canonical(fixture.repoA);
   await page.evaluate(input => window.__TAURI_INTERNALS__.invoke("update_task", { input }), {
     projectId: "fixture", taskId: initialTask.id, expectedVersion: initialTask.version,
@@ -157,7 +165,8 @@ try {
   await page.screenshot({ path: path.join(fixture.root, "native-git-roundtrip.png"), fullPage: true });
   const finalFiles = await canonical(fixture.repoA);
   assert.ok(!Object.keys(finalFiles).some(name => name.includes("mutation_operations")));
-  assert.equal(JSON.parse(finalFiles["format.json"]).schemaVersion, 2);
+  assert.equal(JSON.parse(finalFiles["format.json"]).schemaVersion, 3);
+  await checkTaskNumbers(fixture, a, page, passed);
   assert.deepEqual(pageErrors, []);
   evidence.tasks = [await task(), await task(a, 1)];
   evidence.success = true;
