@@ -10,7 +10,6 @@
     "created_files": "[]",
     "description": "Add rmcp server resources for C4 workspaces, Mermaid diagrams, task injection, and QA gates.",
     "id": 1,
-    "number": 1,
     "project_id": {
       "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
     },

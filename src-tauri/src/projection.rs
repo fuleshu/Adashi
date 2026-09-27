@@ -16,6 +16,8 @@ mod ownership;
 pub const AGENT_WORKFLOW: &str = include_str!("../../agents_template.md");
 #[cfg(test)]
 mod markdown_tests;
+#[cfg(test)]
+mod case_tests;
 
 pub fn validate_markdown_directory(value: &str) -> Result<String,String> { files::relative(value) }
 pub fn markdown_directory(settings: &crate::settings::AppSettings, project: &str) -> String {
@@ -552,7 +554,7 @@ fn expected_blocks(
     snapshot: &DesignSnapshot,
     project_folder: &Path,
     revision: i64,
-) -> BTreeMap<String, String> {
+) -> Result<BTreeMap<String, String>, String> {
     let mut blocks = BTreeMap::new();
     blocks.insert(String::new(), render_root_block(snapshot, revision));
 
@@ -568,6 +570,7 @@ fn expected_blocks(
         if directory_is_excluded(&folder) {
             continue;
         }
+        let folder = files::resolved_relative(project_folder, &folder)?;
         by_folder.entry(folder).or_default().push(index);
     }
 
@@ -620,7 +623,7 @@ fn expected_blocks(
         }
     }
 
-    blocks
+    Ok(blocks)
 }
 
 /// Extracts the managed block from file content, if present.
@@ -684,7 +687,7 @@ fn strip_block(existing: &str) -> String {
 }
 
 /// Every instruction file under `root` carrying the configured name, breadth-first and bounded.
-fn walk_instruction_files(root: &Path, file_name: &str) -> Vec<PathBuf> {
+fn walk_instruction_files(root: &Path, file_name: &str) -> Result<Vec<PathBuf>, String> {
     let mut found = Vec::new();
     let mut queue = vec![root.to_path_buf()];
     let mut visited = 0;
@@ -700,23 +703,27 @@ fn walk_instruction_files(root: &Path, file_name: &str) -> Vec<PathBuf> {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if files::checked(root,&relative_display(root,&path)).is_err() { continue; }
             let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
                 continue;
             };
+            let checked = files::checked(root,&relative_display(root,&path));
+            if name.eq_ignore_ascii_case(file_name) {
+                // Do not silently skip an ambiguous instruction file during cleanup.
+                found.push(checked?);
+                continue;
+            }
+            if checked.is_err() { continue; }
             if path.is_dir() {
                 if name.starts_with('.') || EXCLUDED_DIRECTORIES.contains(&name) {
                     continue;
                 }
                 queue.push(path);
-            } else if name == file_name {
-                found.push(path);
             }
         }
     }
 
     found.sort();
-    found
+    Ok(found)
 }
 
 fn relative_display(project_folder: &Path, path: &Path) -> String {
@@ -742,9 +749,9 @@ fn write_block(
             directory.push(part);
         }
     }
-    let path = directory.join(file_name);
+    let relative = relative_display(project_folder,&directory.join(file_name));
+    let path = files::checked(project_folder,&relative)?;
     let relative = relative_display(project_folder,&path);
-    files::checked(project_folder,&relative)?;
 
     let existing = fs::read_to_string(&path).unwrap_or_default();
     let repaired = match extract_block(&existing) {
@@ -790,13 +797,13 @@ pub fn regenerate_configured(db:&dyn adashi_storage_api::ReadSnapshot,project_fo
     let mut report = ProjectionReport::default();
     let plan = markdown::Plan::load(db,project_folder,directory,enabled)?;
     if !enabled {
-        if project_folder.join(".adashi/local/markdown-projection.json").exists() { ownership::publish(project_folder,&plan,&mut report)?; }
+        if files::checked(project_folder,".adashi/local/markdown-projection.json")?.exists() { ownership::publish(project_folder,&plan,&mut report)?; }
         return Ok(report);
     }
 
     let snapshot = load_snapshot(db)?;
     let revision = db.metadata().revision;
-    let mut blocks = expected_blocks(&snapshot, project_folder, revision);
+    let mut blocks = expected_blocks(&snapshot, project_folder, revision)?;
     plan.enrich(&mut blocks,revision);
     ownership::publish(project_folder,&plan,&mut report)?;
 
@@ -812,7 +819,7 @@ pub fn regenerate_configured(db:&dyn adashi_storage_api::ReadSnapshot,project_fo
 
     // Drop blocks that no longer correspond to bound design, including stale ones left by an
     // earlier configuration.
-    for path in walk_instruction_files(project_folder, file_name) {
+    for path in walk_instruction_files(project_folder, file_name)? {
         let relative = relative_display(project_folder, &path);
         if expected_paths.contains(&relative) {
             continue;
@@ -837,7 +844,7 @@ pub fn remove_managed_blocks(
     file_name: &str,
 ) -> Result<Vec<String>, String> {
     let mut removed = Vec::new();
-    for path in walk_instruction_files(project_folder, file_name) {
+    for path in walk_instruction_files(project_folder, file_name)? {
         if remove_block(&path)? {
             removed.push(relative_display(project_folder, &path));
         }
@@ -863,7 +870,7 @@ pub fn status_configured(db:&dyn adashi_storage_api::ReadSnapshot,project_folder
 
     if enabled {
         let snapshot = load_snapshot(db)?;
-        let mut blocks = expected_blocks(&snapshot, project_folder, revision);
+        let mut blocks = expected_blocks(&snapshot, project_folder, revision)?;
         match markdown::Plan::load(db,project_folder,directory,true) {
             Ok(plan) => {
                 plan.enrich(&mut blocks,revision);
@@ -879,7 +886,16 @@ pub fn status_configured(db:&dyn adashi_storage_api::ReadSnapshot,project_folder
                 }
             }
             path.push(file_name);
-            let relative_path = relative_display(project_folder, &path);
+            let mut relative_path = relative_display(project_folder, &path);
+            let path = match files::checked(project_folder, &relative_path) {
+                Ok(path) => path,
+                Err(reason) => {
+                    error = Some(reason);
+                    files.push(ProjectionFileStatus { path: relative_path, state: "error".into() });
+                    continue;
+                }
+            };
+            relative_path = relative_display(project_folder, &path);
 
             let state = match fs::read_to_string(&path) {
                 Err(_) => "missing",

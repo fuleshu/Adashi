@@ -213,6 +213,9 @@ type TaskState = "todo" | "active" | "finished" | "closed";
 /** The lifecycle in order: unclaimed, being worked on, awaiting review, accepted. */
 const TASK_STATES: TaskState[] = ["todo", "active", "finished", "closed"];
 
+/** Display active work first without changing creation-based task numbers. */
+const TASK_STATE_PRIORITY: Record<TaskState, number> = { active: 0, todo: 1, finished: 2, closed: 3 };
+
 type TaskDesignSpecificationLink = {
   id: number;
   taskId: number;
@@ -3844,7 +3847,12 @@ function TasksView({
   });
   const [linkQuery, setLinkQuery] = React.useState("");
 
-  const visibleTasks = tasks.filter((task) => visibleStates[task.state]);
+  const visibleTasks = React.useMemo(
+    () => tasks.filter((task) => visibleStates[task.state]).sort(
+      (left, right) => TASK_STATE_PRIORITY[left.state] - TASK_STATE_PRIORITY[right.state] || left.number - right.number,
+    ),
+    [tasks, visibleStates],
+  );
   const selectedTask =
     tasks.find((task) => task.id === selectedTaskId && visibleStates[task.state]) ?? visibleTasks[0] ?? null;
   const designLinkOptions = React.useMemo(

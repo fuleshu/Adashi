@@ -13,18 +13,25 @@ pub(super) fn relative(value: &str) -> Result<String, String> {
     Ok(value)
 }
 
+/// Resolve each existing component without regard to case, preserving its on-disk spelling.
+/// Multiple matching entries are ambiguous even when one matches the requested spelling exactly.
 pub(super) fn checked(root: &Path, relative: &str) -> Result<PathBuf, String> {
     let mut path = root.to_path_buf();
     for part in relative.replace('\\',"/").split('/') {
         if part.is_empty() || part == "." || part == ".." || part.contains(':') { return Err("Unsafe projection path".into()); }
-        // Reject case aliases even on a case-sensitive filesystem, preserving portability.
-        if let Ok(entries) = fs::read_dir(&path) {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                if name.eq_ignore_ascii_case(part) && name != part { return Err(format!("Projection path case collision: {relative}")); }
-            }
+        let mut matched = None;
+        match fs::read_dir(&path) {
+            Ok(entries) => for entry in entries {
+                let name = entry.map_err(|e| e.to_string())?.file_name();
+                if name.to_string_lossy().eq_ignore_ascii_case(part) {
+                    if matched.is_some() { return Err(format!("Ambiguous projection path (multiple case-insensitive matches): {relative}")); }
+                    matched = Some(name);
+                }
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+            Err(e) => return Err(e.to_string()),
         }
-        path.push(part);
+        path.push(matched.unwrap_or_else(|| part.into()));
         match fs::symlink_metadata(&path) {
             Ok(meta) => {
                 #[cfg(windows)]
@@ -39,6 +46,16 @@ pub(super) fn checked(root: &Path, relative: &str) -> Result<PathBuf, String> {
     }
     Ok(path)
 }
+
+/// Use actual spelling in generated links, reports and folder grouping, including on Linux.
+pub(super) fn resolved_relative(root: &Path, relative: &str) -> Result<String, String> {
+    if relative.is_empty() { return Ok(String::new()); }
+    let path = checked(root, relative)?;
+    Ok(super::relative_display(root, &path))
+}
+
+/// Ownership and plan membership refer to the same file across case-only configuration changes.
+pub(super) fn key(relative: &str) -> String { relative.replace('\\', "/").to_ascii_lowercase() }
 
 pub(super) fn write(root: &Path, relative: &str, bytes: &[u8]) -> Result<bool,String> {
     let path = checked(root,relative)?;

@@ -1200,7 +1200,7 @@ fn refresh_architecture_projection(
             .iter()
             .find(|(id, _)| id == &project.id)
         {
-            if previous != &file_name {
+            if !previous.eq_ignore_ascii_case(&file_name) {
                 projection::remove_managed_blocks(folder, previous)?;
             }
         }

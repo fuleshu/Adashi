@@ -10,7 +10,6 @@
     "created_files": "[\"src-tauri/src/qa.rs\"]",
     "description": "Implement the v1 QA system exactly as captured in the formal design. Scope includes project-local QA job definitions; QA job design/task links and tags; derived job state from latest evidence plus staleness; immutable qa_runs execution groups; qa_job_runs per-job output/evidence; query-driven ad hoc batch runs without persisted batch-job definitions; Dashboard QA workspace with list/edit/delete/filter/run actions and integrated console output; shared Rust/Tauri execution runtime; and MCP tools to list/query/create/update/delete/run QA jobs and inspect run evidence. Do not introduce saved QA suites/batches in v1.",
     "id": 4,
-    "number": 2,
     "project_id": {
       "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
     },

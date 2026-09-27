@@ -79,10 +79,10 @@ fn markdown_output_is_complete_stable_owned_and_recoverable() {
 }
 
 #[test]
-fn markdown_paths_reject_case_collisions_and_symlink_escapes() {
+fn markdown_paths_resolve_case_and_reject_symlink_escapes() {
     let root=tempfile::tempdir().unwrap();
     fs::create_dir(root.path().join("Docs")).unwrap();
-    assert!(files::checked(root.path(),"docs/adashi/index.md").is_err());
+    assert_eq!(files::checked(root.path(),"docs/adashi/index.md").unwrap(),root.path().join("Docs/adashi/index.md"));
     #[cfg(unix)] {
         std::os::unix::fs::symlink(std::env::temp_dir(),root.path().join("escape")).unwrap();
         assert!(files::checked(root.path(),"escape/design.md").is_err());
