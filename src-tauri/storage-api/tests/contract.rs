@@ -16,7 +16,7 @@ fn frame() -> Frame {
         "acceptedSvg":"<svg/>","acceptedRevision":1,"acceptedVersion":1,"workingVersion":1,
         "workingSvg":null,"baseRevision":null,"status":"accepted","editOperations":[],"annotations":[],
         "proposal":null,"createdAt":"created","updatedAt":"updated"});
-    let job = json!({"id":5,"version":1,"number":1,"name":"Tests","description":"","command":"cargo test",
+    let job = json!({"id":5,"version":1,"number":1,"name":"Tests","description":"","kind":"unit","scope":"workspace tests","command":"cargo test",
         "workingDirectory":"","shell":"powershell","timeoutSeconds":120,"enabled":true,"createdBy":"user",
         "createdAt":"created","updatedAt":"updated","derivedState":"not_run","designSpecificationLinks":[],
         "taskLinks":[],"tags":[],"latestRun":null,"runHistory":[]});

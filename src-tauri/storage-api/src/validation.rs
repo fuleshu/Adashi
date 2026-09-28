@@ -1,5 +1,5 @@
 use crate::{
-    coordination::*, design::DesignChange, documents::*, memory::*, rules::validate_rule,
+    coordination::*, design::DesignChange, documents::*, memory::*, qa::*, rules::validate_rule,
     tasks::TaskState, *,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -192,8 +192,30 @@ pub fn prepare_mutation(mut mutation: Mutation) -> StorageResult<PreparedMutatio
             Change::Qa(QaWrite::CreateJob { input }) => {
                 required(&input.name, "QA name")?;
                 required(&input.command, "QA command")?;
-                if let Some(timeout) = input.timeout_seconds {
-                    positive(timeout, "QA timeout")?;
+                let kind = validate_qa_identity(
+                    input.kind.as_deref().unwrap_or(""),
+                    input.scope.as_deref().unwrap_or(""),
+                )
+                .map_err(invalid)?;
+                validate_qa_timeout(
+                    kind,
+                    input
+                        .timeout_seconds
+                        .unwrap_or(QA_JOB_DEFAULT_TIMEOUT_SECONDS),
+                )
+                .map_err(invalid)?;
+                validate_qa_packaging(kind, &input.command).map_err(invalid)?;
+                // Only a runnable job must name what it verifies; a disabled draft
+                // may be stored while its target is chosen.
+                if input.enabled.unwrap_or(true) {
+                    validate_qa_verify_target(
+                        input
+                            .design_specification_links
+                            .as_ref()
+                            .map_or(0, Vec::len),
+                        input.task_ids.as_ref().map_or(0, Vec::len),
+                    )
+                    .map_err(invalid)?;
                 }
             }
             Change::Qa(QaWrite::UpdateJob { input, .. }) => {
@@ -207,6 +229,16 @@ pub fn prepare_mutation(mut mutation: Mutation) -> StorageResult<PreparedMutatio
                 if let Some(timeout) = input.timeout_seconds {
                     positive(timeout, "QA timeout")?;
                 }
+                // Stripping every verify target is never valid for a runnable job; the
+                // storage layer re-checks the realized job (kind, scope, timeout, packaging).
+                if input.enabled != Some(false)
+                    && input.design_specification_links.as_ref().is_some_and(Vec::is_empty)
+                    && input.task_ids.as_ref().is_some_and(Vec::is_empty)
+                {
+                    return Err(invalid(
+                        "QA job must link at least one design specification or task that it verifies",
+                    ));
+                }
             }
             Change::Qa(QaWrite::DeleteJob { id, .. }) => positive(*id, "qaJobId")?,
             Change::Qa(QaWrite::StartRun {
@@ -217,6 +249,12 @@ pub fn prepare_mutation(mut mutation: Mutation) -> StorageResult<PreparedMutatio
                 required(trigger_source, "trigger source")?;
                 if jobs.is_empty() {
                     return Err(invalid("No enabled QA jobs matched the run request"));
+                }
+                if jobs.len() > QA_RUN_MAX_JOBS {
+                    return Err(invalid(format!(
+                        "A QA run may execute at most {QA_RUN_MAX_JOBS} jobs, got {}. Narrow the selection.",
+                        jobs.len()
+                    )));
                 }
                 let mut seen = BTreeSet::new();
                 for job in jobs {

@@ -57,7 +57,7 @@ pub(super) fn populate(store: &mut dyn ProjectStorage) {
     );
     store.commit(Mutation {operation_id:"markdown-links".into(),changes:vec![
         Change::Task(TaskWrite::Create {input:serde_json::from_value(json!({"title":"Markdown task","designSpecificationLinks":[{"targetType":"markdown","designExternalId":"component-spec"}]})).unwrap()}),
-        Change::Qa(QaWrite::CreateJob {input:serde_json::from_value(json!({"name":"Markdown QA","command":"echo test","enabled":false,"designSpecificationLinks":[{"targetType":"markdown","designExternalId":"component-spec"}]})).unwrap()})
+        Change::Qa(QaWrite::CreateJob {input:serde_json::from_value(json!({"name":"Markdown QA","kind":"unit","scope":"markdown component spec","command":"echo test","enabled":false,"designSpecificationLinks":[{"targetType":"markdown","designExternalId":"component-spec"}]})).unwrap()})
     ]}).unwrap();
 }
 

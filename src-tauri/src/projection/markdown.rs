@@ -63,6 +63,18 @@ impl Plan {
         let workflow_path=files::resolved_relative(root,&format!("{directory}/agent-workflow.md"))?;
         plan.files.insert(workflow_path.clone(),format!("<!-- Generated Adashi agent workflow; do not edit this copy. -->\n{AGENT_WORKFLOW}"));
         plan.links.entry(String::new()).or_default().insert(0,format!("Shared Adashi workflow: [current instructions]({})",link("",&workflow_path)));
+        // Skills are read on demand. Mirror them next to the workflow so a host without MCP can
+        // still fetch one, and expose a single index entry in the discovery block.
+        let skills_directory=files::resolved_relative(root,&format!("{directory}/skills"))?;
+        let mut skills_index=String::from("<!-- Generated from Adashi; do not edit directly. -->\n# Adashi skills\n\nRead one skill on demand through `adashi_help` with the skill name (no project or write required), or open its mirrored file below. These documents are not loaded by the always-on workflow.\n\n");
+        for skill in crate::skills::SKILLS {
+            let path=files::resolved_relative(root,&format!("{skills_directory}/{}.md",skill.name))?;
+            plan.files.insert(path.clone(),format!("<!-- Generated Adashi skill '{}'; do not edit this copy. -->\n{}",skill.name,skill.body));
+            skills_index.push_str(&format!("- `{}` — {} ([read]({}))\n",skill.name,skill.when,link(&skills_directory,&path)));
+        }
+        let skills_index_path=files::resolved_relative(root,&format!("{skills_directory}/index.md"))?;
+        plan.files.insert(skills_index_path.clone(),skills_index);
+        plan.links.entry(String::new()).or_default().insert(0,format!("Adashi skills: [on-demand index]({})",link("",&skills_index_path)));
         Ok(plan)
     }
 

@@ -26,7 +26,7 @@ fn markdown_discovery_references_and_search_on_both_backends() {
         let links = json!([{"targetType":"markdown","designExternalId":"spec"}]);
         store.commit(Mutation { operation_id:"references".into(),changes:vec![
             Change::Task(TaskWrite::Create {input:serde_json::from_value(json!({"title":"Implement","designSpecificationLinks":links})).unwrap()}),
-            Change::Qa(QaWrite::CreateJob {input:serde_json::from_value(json!({"name":"Verify","command":"echo ok","designSpecificationLinks":links})).unwrap()})
+            Change::Qa(QaWrite::CreateJob {input:serde_json::from_value(json!({"name":"Verify","kind":"unit","scope":"markdown discovery","command":"echo ok","designSpecificationLinks":links})).unwrap()})
         ] }).unwrap();
         let token;
         {

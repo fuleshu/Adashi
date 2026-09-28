@@ -68,7 +68,7 @@ fn removed_natural_child_key_can_be_added_again_with_same_identity() {
             operation_id: "tagged".into(),
             changes: vec![Change::Qa(api::QaWrite::CreateJob {
                 input: serde_json::from_value(
-                    serde_json::json!({"name":"Tags","command":"echo ok","tags":["keep"]}),
+                    serde_json::json!({"name":"Tags","kind":"unit","scope":"tagged job","command":"echo ok","tags":["keep"],"enabled":false}),
                 )
                 .unwrap(),
             })],

@@ -1089,6 +1089,9 @@ mod tests {
         assert!(strip_block(&content).is_empty());
     }
 
+    /// Windows drive-letter paths are meaningless to `std::path` on Unix, so this
+    /// exercises the absolute-path branch only on the platform it describes.
+    #[cfg(windows)]
     #[test]
     fn bound_paths_that_escape_the_project_are_rejected() {
         let root = Path::new(r"C:\src\Adashi");
@@ -1102,6 +1105,26 @@ mod tests {
         );
         assert_eq!(relative_target(root, "../escape.rs"), None);
         assert_eq!(relative_target(root, r"D:\elsewhere\file.rs"), None);
+        assert_eq!(relative_target(root, "   "), None);
+    }
+
+    /// The platform-neutral half of the same contract: relative targets resolve,
+    /// traversal and blank targets are rejected, and an absolute Unix target must
+    /// stay inside the project folder.
+    #[cfg(unix)]
+    #[test]
+    fn bound_paths_that_escape_the_project_are_rejected() {
+        let root = Path::new("/src/Adashi");
+        assert_eq!(
+            relative_target(root, "src/mcp.rs").as_deref(),
+            Some("src/mcp.rs")
+        );
+        assert_eq!(
+            relative_target(root, "/src/Adashi/src/mcp.rs").as_deref(),
+            Some("src/mcp.rs")
+        );
+        assert_eq!(relative_target(root, "src/../escape.rs"), None);
+        assert_eq!(relative_target(root, "/elsewhere/file.rs"), None);
         assert_eq!(relative_target(root, "   "), None);
     }
 
@@ -1236,7 +1259,21 @@ mod tests {
             true,
         )
         .unwrap();
-        assert_eq!(report.written, vec!["AGENTS.md", "docs/adashi/agent-workflow.md", "src/AGENTS.md"]);
+        assert_eq!(report.written, {
+            let mut expected = vec![
+                "AGENTS.md".to_string(),
+                "docs/adashi/agent-workflow.md".to_string(),
+                "src/AGENTS.md".to_string(),
+            ];
+            expected.extend(
+                crate::skills::SKILLS
+                    .iter()
+                    .map(|skill| format!("docs/adashi/skills/{}.md", skill.name)),
+            );
+            expected.push("docs/adashi/skills/index.md".to_string());
+            expected.sort();
+            expected
+        });
         assert!(report.repaired.is_empty() && report.removed.is_empty());
 
         let root_file = project_folder.join("AGENTS.md");
@@ -1308,8 +1345,16 @@ mod tests {
             true,
         )
         .unwrap();
-        assert_eq!(status.files.len(), 3);
-        assert!(status.files.iter().all(|file| file.state == if file.path == "docs/adashi/agent-workflow.md" { "current" } else { "missing" }));
+        assert_eq!(
+            status.files.len(),
+            3 + crate::skills::SKILLS.len() + 1,
+            "AGENTS.md files plus the workflow and mirrored skills"
+        );
+        assert!(status.files.iter().all(|file| {
+            let generated = file.path == "docs/adashi/agent-workflow.md"
+                || file.path.starts_with("docs/adashi/skills/");
+            file.state == if generated { "current" } else { "missing" }
+        }));
 
         // The connection must close before Windows will release the project database file.
         drop(db);

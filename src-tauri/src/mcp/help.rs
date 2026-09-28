@@ -7,16 +7,32 @@ use std::collections::BTreeSet;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct HelpParams {
     /// Exact tool name. Omit operation to list its operations without loading their schemas.
-    #[schemars(schema_with = "tool_name_schema")]
-    pub tool: String,
+    /// Omit both tool and skill for the tool and skill catalog.
+    #[serde(default)]
+    #[schemars(schema_with = "optional_tool_name_schema")]
+    pub tool: Option<String>,
     /// Select one operation. adashi_grep has no operation; omit it for grep help.
     pub operation: Option<String>,
     /// Only for adashi_design/save: return just these changes[].op variants, e.g. ["upsert_uml"]. Omit for all variants.
     pub change_types: Option<Vec<String>>,
+    /// Read one on-demand skill (for example design-authoring) instead of an operation contract.
+    #[serde(default)]
+    #[schemars(schema_with = "skill_name_schema")]
+    pub skill: Option<String>,
 }
 
-fn tool_name_schema(_: &mut rmcp::schemars::SchemaGenerator) -> rmcp::schemars::Schema {
-    rmcp::schemars::json_schema!({"type":"string", "enum":crate::prompt_hygiene::MCP_TOOL_NAMES})
+fn tool_alias_schema(names: &[&str]) -> rmcp::schemars::Schema {
+    let mut values = names.iter().map(|name| json!(name)).collect::<Vec<Value>>();
+    values.push(Value::Null);
+    rmcp::schemars::json_schema!({"type":["string","null"], "enum":values})
+}
+
+fn optional_tool_name_schema(_: &mut rmcp::schemars::SchemaGenerator) -> rmcp::schemars::Schema {
+    tool_alias_schema(crate::prompt_hygiene::MCP_TOOL_NAMES)
+}
+
+fn skill_name_schema(_: &mut rmcp::schemars::SchemaGenerator) -> rmcp::schemars::Schema {
+    tool_alias_schema(&crate::skills::names())
 }
 
 pub(super) fn operations(tool: &Tool) -> Vec<String> {
@@ -41,13 +57,29 @@ fn invalid(message: String, details: Value) -> ErrorData {
 }
 
 pub(super) fn get(params: HelpParams) -> Result<CallToolResult, ErrorData> {
+    if params.tool.is_some() && params.skill.is_some() {
+        return Err(invalid(
+            "Pass either tool or skill, not both.".into(),
+            json!({
+                "availableTools":crate::prompt_hygiene::MCP_TOOL_NAMES,
+                "availableSkills":crate::skills::names(),
+            }),
+        ));
+    }
+    if let Some(skill) = params.skill.as_deref() {
+        return skill_help(skill);
+    }
+    let Some(tool_name) = params.tool.clone() else {
+        return Ok(CallToolResult::structured(json!({
+            "tools":crate::prompt_hygiene::MCP_TOOL_NAMES,
+            "skills":crate::skills::catalog(),
+            "next":"Call adashi_help with tool and operation for one exact contract, or with skill for the on-demand workflow that matches the work."
+        })));
+    };
     let router = AdashiMcpServer::tool_router();
-    let tool = router.get(&params.tool).ok_or_else(|| {
+    let tool = router.get(&tool_name).ok_or_else(|| {
         invalid(
-            format!(
-                "Unknown tool '{}'. Choose one of availableTools.",
-                params.tool
-            ),
+            format!("Unknown tool '{tool_name}'. Choose one of availableTools."),
             json!({"availableTools":crate::prompt_hygiene::MCP_TOOL_NAMES}),
         )
     })?;
@@ -57,8 +89,7 @@ pub(super) fn get(params: HelpParams) -> Result<CallToolResult, ErrorData> {
         if !available.iter().any(|candidate| candidate == operation) {
             return Err(invalid(
                 format!(
-                    "Unknown operation '{operation}' for {}. {}",
-                    params.tool,
+                    "Unknown operation '{operation}' for {tool_name}. {}",
                     if available.is_empty() {
                         "Omit operation for this tool."
                     } else {
@@ -70,7 +101,7 @@ pub(super) fn get(params: HelpParams) -> Result<CallToolResult, ErrorData> {
         }
     }
     if params.change_types.is_some()
-        && !(params.tool == "adashi_design" && operation == Some("save"))
+        && !(tool_name == "adashi_design" && operation == Some("save"))
     {
         return Err(invalid(
             "changeTypes is only supported for tool=adashi_design, operation=save.".into(),
@@ -79,7 +110,7 @@ pub(super) fn get(params: HelpParams) -> Result<CallToolResult, ErrorData> {
     }
     if operation.is_none() && !available.is_empty() {
         return Ok(CallToolResult::structured(json!({
-            "tool":params.tool, "operations":available,
+            "tool":tool_name, "operations":available,
             "next":"Call adashi_help with tool and one operation for its exact schema, examples and workflow."
         })));
     }
@@ -88,7 +119,7 @@ pub(super) fn get(params: HelpParams) -> Result<CallToolResult, ErrorData> {
         .unwrap_or_else(|| json!({}));
     let mut schema = errors::contract(tool, arguments.as_object().unwrap());
     let mut change_examples = Vec::new();
-    if params.tool == "adashi_design" && operation == Some("save") {
+    if tool_name == "adashi_design" && operation == Some("save") {
         // The variant definition is generated from DesignChange, never a second handwritten schema.
         let variants = schema["$defs"]["DesignChange"]["oneOf"]
             .as_array_mut()
@@ -112,7 +143,7 @@ pub(super) fn get(params: HelpParams) -> Result<CallToolResult, ErrorData> {
         prune_definitions(&mut schema);
     }
     let operation = operation.unwrap_or("");
-    let mut example = example(&params.tool, operation);
+    let mut example = example(&tool_name, operation);
     if let Some(change) = change_examples.first() {
         example["operationId"] = json!("design-change-001");
         example["changeIntent"] = json!("Apply the requested formal design changes");
@@ -124,13 +155,14 @@ pub(super) fn get(params: HelpParams) -> Result<CallToolResult, ErrorData> {
             example["readTokens"] = json!([{"documentId":"<copy documentId from the complete read>","readToken":"<copy readToken from the same read>"}]);
         }
     }
+    let required = schema.get("required").cloned().unwrap_or_else(|| json!([]));
     let mut result = json!({
-        "tool":params.tool, "operation":params.operation,
-        "requiredParameters":schema["required"],
+        "tool":tool_name, "operation":params.operation,
+        "requiredParameters":required,
         "parameterSchema":schema,
         "exampleArguments":example,
         "exampleNote":"Examples are templates, not commands to execute. Replace project names, ids, content, versions and tokens with values for your intended action. Copy opaque ids/tokens from reads; do not invent them.",
-        "workflow":workflow(&params.tool, operation),
+        "workflow":workflow(&tool_name, operation),
         "cache":"Reuse this selected contract while it remains in active context. Fetch it again after losing it or reconnecting to a different server version. Help is never suppressed based on an earlier call."
     });
     if !change_examples.is_empty() {
@@ -141,14 +173,36 @@ pub(super) fn get(params: HelpParams) -> Result<CallToolResult, ErrorData> {
             "All change types."
         });
     }
-    if params.tool == "adashi_design" {
+    if tool_name == "adashi_design" {
         if let Some(schema) = markdown::response_schema(operation) { result["responseSchema"] = schema; }
     }
-    if params.tool == "adashi_rules" && operation == "get_rule_injections" {
+    if tool_name == "adashi_rules" && operation == "get_rule_injections" {
         result["agentWorkflow"] = json!(crate::projection::AGENT_WORKFLOW);
+        result["skills"] = crate::skills::catalog();
     }
     result["contentVersion"] = json!(context::content_version(&result.to_string()));
     Ok(CallToolResult::structured(result))
+}
+
+/// One on-demand skill, fetched without a project so it works before setup.
+fn skill_help(name: &str) -> Result<CallToolResult, ErrorData> {
+    let skill = crate::skills::get(name).ok_or_else(|| {
+        invalid(
+            format!("Unknown skill '{name}'. Choose one of availableSkills."),
+            json!({
+                "availableSkills":crate::skills::names(),
+                "skills":crate::skills::catalog(),
+            }),
+        )
+    })?;
+    Ok(CallToolResult::structured(json!({
+        "skill":skill.name,
+        "title":skill.title,
+        "when":skill.when,
+        "body":skill.body,
+        "contentVersion":context::content_version(skill.body),
+        "cache":"Read once when the work matches. Fetch it again after context loss or a server upgrade; skills are never suppressed based on an earlier call."
+    })))
 }
 
 fn variant_name(variant: &Value) -> &str {
@@ -229,6 +283,7 @@ fn example(tool: &str, operation: &str) -> Value {
         }
         ("adashi_qa", "get_job") => json!({"qaJobId":1}),
         ("adashi_qa", "get_run") => json!({"qaRunId":1}),
+        ("adashi_qa", "cancel_run") => json!({"qaRunId":1}),
         ("adashi_qa", "update_job") => {
             json!({"operationId":"qa-update-001","qaJobId":1,"expectedVersion":1,"name":"Updated test job"})
         }
@@ -341,13 +396,17 @@ fn workflow(tool: &str, operation: &str) -> Vec<&'static str> {
         "adashi_tasks" => notes.push("Task.number is the current desktop Task #, ordered by creation time then permanent id across ALL retained tasks before filtering/pagination. Numbers may change after Git updates or deletions. Resolve a user-supplied # with get taskNumber (optionally expectedRevision from the observed list); use the returned permanent taskId and version for every mutation and history/reference. Never pass a displayed number as taskId. create starts in todo. update may set active from any state, including reopening closed work. Returning to todo is forbidden. finish records active -> finished with a nonempty completionMemo; close records finished -> closed after review. A state may be re-set to itself. Lists default to todo/active/finished, limit 25 (1..100); states=[] selects nothing. Copy version from get/list. get returns full evidence; linked scopes are opt-in with includeDesignScopes and include complete Markdown documents/tokens. Design links use targetType element, relationship, uml, mockup or markdown and an existing target id."),
         "adashi_qa" => {
             notes.push("designSpecificationLinks supports targetType element, relationship, uml, mockup or markdown with an existing stable designExternalId. Markdown titles resolve from canonical storage; designExternalIds filters use those identities, never generated file paths.");
-            notes.push("create_job stores a definition; run_jobs executes it. name and command must be nonempty. workingDirectory defaults to the project folder; relative paths resolve under it. shell defaults to the platform shell. timeoutSeconds defaults 120, allowed 1..86400. enabled defaults true. Lists return metadata; get_job/get_run return full evidence. Job lists default limit 25 (1..100); preserve query when following a cursor. Copy expectedVersion from job.version.");
-            if matches!(operation,"run_jobs"|"list_jobs") { notes.push("query is an object, not a string. run_jobs requires it: {jobIds:[1]} selects matching enabled jobs; {} selects all enabled jobs. No matches is an error for execution. Check list_jobs before a broad run. Query filters combine with AND: jobIds is membership (an empty list matches nothing); states is any listed derived state (green, red, running, needs-rerun); tags, taskIds and designExternalIds must all be present on the job (empty lists impose no restriction). States and tags are case-insensitive. enabled filters definitions but run_jobs always excludes disabled jobs."); }
+            notes.push("create_job stores a definition; run_jobs executes it. name and command must be nonempty. kind and scope are required: kind is one of lint, unit, integration, e2e, smoke, build, release and scope states the ONE behavior the job verifies. Every job must link at least one design specification or task it verifies. timeoutSeconds defaults 120 and is capped by kind (lint 120, smoke 300, unit 600, integration 900, e2e 1800, build 1800, release 3600); never raise a timeout to make an oversized job fit, split it instead. Only kind=release may package or bundle (tauri build, assemble-release-bundle, installer/.msi/.dmg/.appimage); a test job that builds an installer is rejected. workingDirectory defaults to the project folder; relative paths resolve under it. shell defaults to the platform shell. enabled defaults true. Lists return metadata; get_job/get_run return full evidence. Job lists default limit 25 (1..100); preserve query when following a cursor. Copy expectedVersion from job.version.");
+            if matches!(operation,"run_jobs"|"list_jobs") { notes.push("query is an object, not a string. Query filters combine with AND: jobIds is membership (an empty list matches nothing); states is any listed derived state (green, red, running, needs-rerun); tags and taskIds/designExternalIds must all be present on the job (empty lists impose no restriction). States and tags are case-insensitive. enabled filters definitions but run_jobs always excludes disabled jobs."); }
+            if operation == "run_jobs" {
+                notes.push("run_jobs must name what to run: at least one of jobIds, states, tags, taskIds or designExternalIds. An empty query matching every enabled job is rejected unless allowBroadRun=true, and no run may exceed 12 jobs. Selected jobs whose latest evidence is already green are skipped unless force=true. maxDurationSeconds bounds the whole run (default 900, maximum 3600); a job may not outlive the remaining budget and unfinished jobs are recorded as skipped. A job with a live run cannot be reserved twice. Jobs that are running or interrupted can be stopped with cancel_run.");
+            }
         }
         "adashi_memory" => notes.push("get supports exact noteId/runId/taskId filters and a case-insensitive literal query. Historical notes are dated evidence; superseded notes are hidden unless includeSuperseded=true. Append only useful durable handovers, at most 1000 characters; runId defaults to operationId when omitted/null/blank. Retention is at most 20 notes and 12000 total characters; oldest notes are removed first. Only an authorized coordinator may replace the summary (at most 4000 characters) and supersede reviewed note ids, using memory.memoryVersion. update_rule changes optional project-specific instructions using memory.protocolVersion; an empty rule disables them."),
         "adashi_rules" => notes.push("intend is exactly general, design or implementation. hook is exactly run.start, task.start, task.end or run.end. Call every lifecycle hook and apply each nonempty injectionPrompt even when rules is empty; rules and sections are metadata. status=empty means no instructions. Startup includes project-specific rules/context; shared Adashi instructions belong in agents_template.md. memoryContext defaults summary; protocolOnly omits the summary. update requires a full rule body and the rule version from list."),
         "adashi_intents" => notes.push("publish creates/renews an expiring advisory marker, never a lock or write authority. agentRunId, resourceKind and resourceId must be nonempty; ttlSeconds is 1..86400. list returns live intents."),
         "adashi_grep" => notes.push("Searches design, tasks and memory, not QA or rules. Pattern is case-insensitive; whitespace-separated terms are AND; quoted phrases are exact substrings. in:, file:, type:, state: and limit: filter; unknown keys are literal text. Empty text returns a top-layer overview. Pair file: with a search term. Results are bounded snippets: drill into design:<externalId> with design get_scope, task:<id> with tasks get, memory:<noteId> with memory get/noteId before acting."),
+        "adashi_help" => notes.push("Omit tool and skill for the tools+skills catalog. Pass skill to read one on-demand skill; the always-on workflow indexes them, so read only the skill that matches the work. Pass tool (and optionally operation) for one operation's exact contract. changeTypes only narrows adashi_design save. Help opens no project and writes nothing."),
         _ => {}
     }
     notes
@@ -359,9 +418,10 @@ mod tests {
 
     fn read(tool: &str, operation: Option<&str>, changes: Option<Vec<&str>>) -> Value {
         get(HelpParams {
-            tool: tool.into(),
+            tool: Some(tool.into()),
             operation: operation.map(str::to_owned),
             change_types: changes.map(|v| v.into_iter().map(str::to_owned).collect()),
+            skill: None,
         })
         .unwrap()
         .structured_content
@@ -510,12 +570,60 @@ mod tests {
             ),
         ] {
             let error = get(HelpParams {
-                tool: tool.into(),
+                tool: Some(tool.into()),
                 operation: op.map(str::to_owned),
                 change_types: changes.map(|v| v.into_iter().map(str::to_owned).collect()),
+                skill: None,
             })
             .unwrap_err();
             assert!(error.data.unwrap().get(detail).is_some());
         }
+    }
+
+    #[test]
+    fn skills_are_listed_and_fetched_on_demand_without_a_project() {
+        let catalog = get(HelpParams {
+            tool: None,
+            operation: None,
+            change_types: None,
+            skill: None,
+        })
+        .unwrap()
+        .structured_content
+        .unwrap();
+        assert!(catalog["tools"].as_array().unwrap().contains(&json!("adashi_help")));
+        let names = catalog["skills"].as_array().unwrap();
+        assert_eq!(names.len(), crate::skills::SKILLS.len());
+
+        let skill = get(HelpParams {
+            tool: None,
+            operation: None,
+            change_types: None,
+            skill: Some("design-authoring".into()),
+        })
+        .unwrap()
+        .structured_content
+        .unwrap();
+        assert_eq!(skill["skill"], json!("design-authoring"));
+        assert!(skill["body"].as_str().unwrap().len() > 200);
+        assert!(skill.get("parameterSchema").is_none());
+
+        let error = get(HelpParams {
+            tool: None,
+            operation: None,
+            change_types: None,
+            skill: Some("wrong".into()),
+        })
+        .unwrap_err();
+        assert!(error.data.unwrap().get("availableSkills").is_some());
+
+        let both = get(HelpParams {
+            tool: Some("adashi_qa".into()),
+            operation: None,
+            change_types: None,
+            skill: Some("qa-jobs".into()),
+        })
+        .unwrap_err();
+        assert!(both.data.unwrap().get("availableSkills").is_some());
     }
 }

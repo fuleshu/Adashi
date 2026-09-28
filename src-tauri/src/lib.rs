@@ -18,6 +18,7 @@ mod rules;
 mod schema;
 mod seed;
 mod settings;
+mod skills;
 mod state;
 pub mod storage;
 mod tasks;

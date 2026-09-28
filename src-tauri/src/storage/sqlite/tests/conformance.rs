@@ -87,7 +87,7 @@ pub(crate) fn populate(store: &mut dyn ProjectStorage) {
         vec![
             Change::Qa(QaWrite::CreateJob {
                 input: input(
-                    json!({"name":"Check","command":"echo checked","tags":["adapter"],"taskIds":[task_id],"designSpecificationLinks":[{"targetType":"element","designExternalId":"app"}]}),
+                    json!({"name":"Check","kind":"unit","scope":"adapter conformance","command":"echo checked","tags":["adapter"],"taskIds":[task_id],"designSpecificationLinks":[{"targetType":"element","designExternalId":"app"}]}),
                 ),
             }),
             Change::Memory(MemoryWrite::Append {
@@ -464,6 +464,40 @@ fn qa_claims_are_exclusive_and_retention_preserves_active_runs() {
         )),
         Err(StorageError::Conflict(_))
     ));
+    // One live run per job: a second reservation is refused while the held run is active.
+    let held_job_definition = peer.snapshot().unwrap().qa_job(1).unwrap();
+    assert!(matches!(
+        peer.commit(mutation(
+            "second-reservation",
+            vec![Change::Qa(QaWrite::StartRun {
+                query: QaJobQuery::default(),
+                trigger_source: "test".into(),
+                jobs: vec![QaExecutionPlan {
+                    job_id: 1,
+                    expected_version: held_job_definition.version,
+                    command_snapshot: crate::qa_runner::command_snapshot(&held_job_definition)
+                        .unwrap(),
+                }],
+            })]
+        )),
+        Err(StorageError::Validation(_))
+    ));
+    // Finish the held job run but leave its run active: retention must keep that
+    // run while newer evidence accumulates for the same job.
+    commit(
+        &mut store,
+        "held-evidence",
+        vec![Change::Qa(QaWrite::CompleteJob {
+            job_run_id: held_job,
+            expected_version: 2,
+            evidence: QaEvidence {
+                outcome: QaJobOutcome::Passed,
+                exit_code: Some(0),
+                duration_ms: 3,
+                output: "Held".into(),
+            },
+        })],
+    );
     for i in 0..4 {
         let run = reserve(&mut peer, &format!("run-{i}"));
         let job = run.job_runs[0].id;
@@ -511,4 +545,54 @@ fn qa_claims_are_exclusive_and_retention_preserves_active_runs() {
         .unwrap()
         .iter()
         .any(|r| r.id == held.id));
+}
+
+#[test]
+fn qa_runner_requires_an_explicit_selection_and_skips_green_jobs() {
+    let (_root, request, mut store) = fixture();
+    populate(&mut store);
+    let folder = request.checkout_path.clone();
+    let request_for = |operation: &str, query: QaJobQuery, force: bool, allow_broad: bool| {
+        crate::qa_runner::RunRequest {
+            operation: operation.into(),
+            query,
+            trigger: "test".into(),
+            allow_broad_run: allow_broad,
+            force,
+            max_duration_seconds: Some(60),
+        }
+    };
+
+    // An empty query over every enabled job is not a selection.
+    assert!(matches!(
+        crate::qa_runner::run(
+            &mut store,
+            &folder,
+            request_for("broad", QaJobQuery::default(), false, false)
+        ),
+        Err(StorageError::Validation(_))
+    ));
+
+    let selected = QaJobQuery {
+        job_ids: Some(vec![1]),
+        ..Default::default()
+    };
+    let first =
+        crate::qa_runner::run(&mut store, &folder, request_for("first", selected.clone(), false, false))
+            .unwrap();
+    assert_eq!(first.status, "passed");
+
+    // Already-green evidence is not re-executed unless forced.
+    assert!(matches!(
+        crate::qa_runner::run(
+            &mut store,
+            &folder,
+            request_for("again", selected.clone(), false, false)
+        ),
+        Err(StorageError::Validation(_))
+    ));
+    let forced =
+        crate::qa_runner::run(&mut store, &folder, request_for("forced", selected, true, false))
+            .unwrap();
+    assert_eq!(forced.status, "passed");
 }

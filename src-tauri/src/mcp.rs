@@ -327,6 +327,10 @@ struct CreateQaJobParams {
     operation_id: String,
     name: String,
     description: Option<String>,
+    /// Required: lint, unit, integration, e2e, smoke, build or release.
+    kind: Option<String>,
+    /// Required: the one behavior this job verifies.
+    scope: Option<String>,
     command: String,
     working_directory: Option<String>,
     shell: Option<String>,
@@ -347,6 +351,8 @@ struct UpdateQaJobParams {
     qa_job_id: i64,
     name: Option<String>,
     description: Option<String>,
+    kind: Option<String>,
+    scope: Option<String>,
     command: Option<String>,
     working_directory: Option<String>,
     shell: Option<String>,
@@ -365,6 +371,12 @@ struct RunQaJobsParams {
     operation_id: String,
     query: QaJobQuery,
     trigger_source: Option<String>,
+    /// Set true only for a deliberate project-wide run of every enabled job.
+    allow_broad_run: Option<bool>,
+    /// Run selected jobs even when their latest evidence is already green.
+    force: Option<bool>,
+    /// Whole-run wall-clock budget in seconds; default 900, maximum 3600.
+    max_duration_seconds: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
@@ -762,6 +774,7 @@ enum QaOperation {
     ListRuns,
     GetJob,
     GetRun,
+    CancelRun,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, rmcp::schemars::JsonSchema)]
@@ -913,6 +926,10 @@ struct QaParams {
     /// create_job/update_job: name, command, etc.
     name: Option<String>,
     description: Option<String>,
+    /// create_job/update_job: required check class (lint, unit, integration, e2e, smoke, build, release).
+    kind: Option<String>,
+    /// create_job/update_job: required one-behavior scope.
+    scope: Option<String>,
     command: Option<String>,
     working_directory: Option<String>,
     shell: Option<String>,
@@ -923,6 +940,12 @@ struct QaParams {
     tags: Option<Vec<String>>,
     /// run_jobs: trigger source label.
     trigger_source: Option<String>,
+    /// run_jobs: permit a project-wide run of every enabled job.
+    allow_broad_run: Option<bool>,
+    /// run_jobs: rerun jobs whose latest evidence is already green.
+    force: Option<bool>,
+    /// run_jobs: whole-run wall-clock budget in seconds (default 900, max 3600).
+    max_duration_seconds: Option<i64>,
     /// list_jobs (default 25) / list_runs (default 20): page size, range 1..=100.
     limit: Option<i64>,
     /// list_jobs: opaque continuation cursor.
@@ -1581,12 +1604,14 @@ impl AdashiMcpServer {
                     input: NewQaJob {
                         name: params.name,
                         description: params.description,
+                        kind: params.kind,
+                        scope: params.scope,
                         command: params.command,
                         working_directory: params.working_directory,
                         shell: params.shell,
                         timeout_seconds: params.timeout_seconds,
                         enabled: params.enabled,
-                        created_by: Some("codex".to_string()),
+                        created_by: Some("agent".to_string()),
                         design_specification_links: params.design_specification_links,
                         task_ids: params.task_ids,
                         tags: params.tags,
@@ -1619,6 +1644,8 @@ impl AdashiMcpServer {
                         qa_job_id: params.qa_job_id,
                         name: params.name,
                         description: params.description,
+                        kind: params.kind,
+                        scope: params.scope,
                         command: params.command,
                         working_directory: params.working_directory,
                         shell: params.shell,
@@ -1672,9 +1699,14 @@ impl AdashiMcpServer {
         let run = crate::qa_runner::run(
             &mut store,
             &project.folder,
-            &params.operation_id,
-            params.query,
-            params.trigger_source.as_deref().unwrap_or("mcp"),
+            crate::qa_runner::RunRequest {
+                operation: params.operation_id,
+                query: params.query,
+                trigger: params.trigger_source.unwrap_or_else(|| "mcp".to_string()),
+                allow_broad_run: params.allow_broad_run.unwrap_or(false),
+                force: params.force.unwrap_or(false),
+                max_duration_seconds: params.max_duration_seconds,
+            },
         )
         .map_err(storage_error)?;
         let revision = store.snapshot().map_err(storage_error)?.metadata().revision;
@@ -1682,6 +1714,39 @@ impl AdashiMcpServer {
             project_id: project.id,
             project_name: project.name,
             revision,
+            run,
+        }))
+    }
+
+    fn cancel_qa_run(
+        &self,
+        Parameters(params): Parameters<QaRunIdParams>,
+    ) -> Result<Json<QaRunResult>, ErrorData> {
+        let (project, mut store) = self.open_project_storage(Some(params.project_name.as_str()))?;
+        {
+            let db = store.snapshot().map_err(storage_error)?;
+            let run = db.qa_run(params.qa_run_id).map_err(storage_error)?;
+            if run.status != "running" {
+                return Err(tool_error(format!(
+                    "qa.run_finished: run {} is already {}",
+                    run.id, run.status
+                )));
+            }
+        }
+        if !crate::qa_runner::request_cancel(params.qa_run_id) {
+            return Err(tool_error(format!(
+                "qa.run_not_active: run {} is not executing in this process; \
+                 a stale run is reclaimed automatically when its job is next reserved",
+                params.qa_run_id
+            )));
+        }
+        let db = store.snapshot().map_err(storage_error)?;
+        let revision = db.metadata();
+        let run = db.qa_run(params.qa_run_id).map_err(storage_error)?;
+        Ok(Json(QaRunResult {
+            project_id: project.id,
+            project_name: project.name,
+            revision: revision.revision,
             run,
         }))
     }
@@ -2034,7 +2099,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_help",
-        description = "Read exact requirements, schema, examples and workflow for one tool operation before using it. Omit operation to list operations; changeTypes narrows design-save help. No project or writes required.",
+        description = "Read exact requirements, schema, examples and workflow for one tool operation, or read one on-demand skill before matching work. Omit tool and skill for the catalog. No project or writes required.",
         annotations(read_only_hint = true, destructive_hint = false)
     )]
     fn help(
@@ -2275,7 +2340,7 @@ impl AdashiMcpServer {
 
     #[tool(
         name = "adashi_qa",
-        description = "Define QA jobs and execute selected jobs. Use adashi_help with tool and operation for exact requirements and examples before an unfamiliar call.",
+        description = "Define QA jobs and run selected jobs. Each job declares its kind and the one behavior it verifies; runs name their selection and stay inside a budget. Use adashi_help for exact requirements and examples before an unfamiliar call.",
         annotations(read_only_hint = false, destructive_hint = true)
     )]
     fn qa(&self, Parameters(params): Parameters<QaParams>) -> Result<CallToolResult, ErrorData> {
@@ -2305,6 +2370,8 @@ impl AdashiMcpServer {
                     operation_id,
                     name,
                     description: params.description,
+                    kind: params.kind,
+                    scope: params.scope,
                     command,
                     working_directory: params.working_directory,
                     shell: params.shell,
@@ -2327,6 +2394,8 @@ impl AdashiMcpServer {
                     qa_job_id,
                     name: params.name,
                     description: params.description,
+                    kind: params.kind,
+                    scope: params.scope,
                     command: params.command,
                     working_directory: params.working_directory,
                     shell: params.shell,
@@ -2358,6 +2427,9 @@ impl AdashiMcpServer {
                     operation_id,
                     query,
                     trigger_source: params.trigger_source,
+                    allow_broad_run: params.allow_broad_run,
+                    force: params.force,
+                    max_duration_seconds: params.max_duration_seconds,
                 }))?
                 .into_call_tool_result()
             }
@@ -2370,6 +2442,14 @@ impl AdashiMcpServer {
             QaOperation::GetRun => {
                 let qa_run_id = required(params.qa_run_id, "qaRunId")?;
                 self.get_qa_run(Parameters(QaRunIdParams {
+                    project_name: params.project_name,
+                    qa_run_id,
+                }))?
+                .into_call_tool_result()
+            }
+            QaOperation::CancelRun => {
+                let qa_run_id = required(params.qa_run_id, "qaRunId")?;
+                self.cancel_qa_run(Parameters(QaRunIdParams {
                     project_name: params.project_name,
                     qa_run_id,
                 }))?
@@ -2881,6 +2961,7 @@ mod tests {
                     "list_runs",
                     "get_job",
                     "get_run",
+                    "cancel_run",
                 ],
             ),
             (
@@ -3107,13 +3188,18 @@ mod tests {
             NewQaJob {
                 name: "Verbose suite".into(),
                 description: Some("prints a lot".into()),
+                kind: Some("unit".into()),
+                scope: Some("prints a lot of evidence".into()),
                 command: "run-tests".into(),
                 working_directory: None,
                 shell: None,
                 timeout_seconds: None,
                 enabled: Some(true),
                 created_by: None,
-                design_specification_links: None,
+                design_specification_links: Some(vec![QaDesignLinkInput {
+                    target_type: Some("element".into()),
+                    design_external_id: "test.component".into(),
+                }]),
                 task_ids: None,
                 tags: Some(vec!["suite".into()]),
             },

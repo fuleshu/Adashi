@@ -180,7 +180,7 @@ fn design_index(db: &dyn ReadSnapshot) -> Result<String, String> {
         )
     });
     let mut output = String::from("# Formal design index\n");
-    let footer = "\nIndex only: descriptions, relationships, artifacts, bindings and source require explicit retrieval. Markdown: get_scope by id or get_documents with markdown:<id>.";
+    let footer = "\nIndex only: descriptions, relationships, artifacts, bindings and source require explicit retrieval. Markdown: get_scope by id or get_documents with markdown:<id>. Before changing design, read the on-demand skill `design-authoring` (and `markdown-documents` for prose).";
     let rows = elements.into_iter().take(if markdown.is_empty() {32} else {24});
     let mut included = 0;
     for row in rows {

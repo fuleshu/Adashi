@@ -147,3 +147,61 @@ fn migration_normalizes_legacy_history_and_v2_rejects_shared_requests() {
         .to_string()
         .contains("request history belongs"));
 }
+
+/// Relational schema 16 added the QA enforcement contract. A schema-15 store has
+/// no kind/scope on its jobs and no lease on its runs; reading must supply the
+/// documented defaults without a migration write.
+#[test]
+fn relational_schema_15_qa_records_gain_the_enforcement_defaults() {
+    let job_identity = uuid::Uuid::new_v4().to_string();
+    let run_identity = uuid::Uuid::new_v4().to_string();
+    let mut files = Files::new();
+    files.insert(
+        "format.json".into(),
+        codec::bytes(&codec::Format {
+            schema_version: 1,
+            relational_schema: 15,
+        })
+        .unwrap(),
+    );
+    let records_to_upgrade = [
+        codec::Record {
+            schema_version: 1,
+            collection: "qa_jobs".into(),
+            identity: job_identity.clone(),
+            deleted: false,
+            data: BTreeMap::from([
+                ("id".into(), serde_json::json!(1)),
+                ("name".into(), serde_json::json!("Legacy job")),
+                ("command".into(), serde_json::json!("cargo test")),
+            ]),
+        },
+        codec::Record {
+            schema_version: 1,
+            collection: "qa_job_runs".into(),
+            identity: run_identity.clone(),
+            deleted: false,
+            data: BTreeMap::from([
+                ("id".into(), serde_json::json!(1)),
+                ("status".into(), serde_json::json!("passed")),
+            ]),
+        },
+    ];
+    for record in records_to_upgrade {
+        let path = format!("records/{}/{}.json", record.collection, record.identity);
+        files.insert(path, codec::bytes(&record).unwrap());
+    }
+
+    let records = engine::parse_records(&files).unwrap();
+    let job = records
+        .values()
+        .find(|record| record.collection == "qa_jobs")
+        .unwrap();
+    assert_eq!(job.data["kind"], serde_json::json!("unit"));
+    assert_eq!(job.data["scope"], serde_json::json!(""));
+    let run = records
+        .values()
+        .find(|record| record.collection == "qa_job_runs")
+        .unwrap();
+    assert!(run.data["lease_expires_at"].is_null());
+}

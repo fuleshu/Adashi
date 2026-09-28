@@ -3,7 +3,7 @@ use rusqlite::Connection;
 
 // Bump when adding a schema/data migration. Never replay migrations during reads:
 // even an ignored AUTOINCREMENT insert can change sqlite_sequence and the file.
-pub(crate) const SCHEMA_VERSION: i64 = 15;
+pub(crate) const SCHEMA_VERSION: i64 = 16;
 
 pub fn migrate(db: &mut Connection) -> rusqlite::Result<()> {
     db.pragma_update(None, "foreign_keys", true)?;
@@ -42,6 +42,7 @@ fn migrate_schema(db: &Connection) -> rusqlite::Result<()> {
     ensure_fixed_hook_prompts_table(db)?;
     ensure_task_system_tables(db)?;
     ensure_qa_system_tables(db)?;
+    ensure_qa_job_enforcement(db)?;
     ensure_ui_mockup_tables(db)?;
     ensure_mockup_design_link_targets(db)?;
     ensure_design_health_columns(db)?;
@@ -498,6 +499,8 @@ fn ensure_qa_system_tables(db: &Connection) -> rusqlite::Result<()> {
             number INTEGER NOT NULL DEFAULT 0,
             name TEXT NOT NULL,
             description TEXT NOT NULL DEFAULT '',
+            kind TEXT NOT NULL DEFAULT 'unit',
+            scope TEXT NOT NULL DEFAULT '',
             command TEXT NOT NULL,
             working_directory TEXT NOT NULL DEFAULT '',
             shell TEXT NOT NULL DEFAULT 'powershell',
@@ -552,7 +555,7 @@ fn ensure_qa_system_tables(db: &Connection) -> rusqlite::Result<()> {
             project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
             trigger_source TEXT NOT NULL DEFAULT 'user',
             query_snapshot TEXT NOT NULL DEFAULT '{}',
-            status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running', 'passed', 'failed')),
+            status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running', 'passed', 'failed', 'cancelled', 'interrupted')),
             started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             finished_at TEXT,
             summary TEXT NOT NULL DEFAULT ''
@@ -563,9 +566,10 @@ fn ensure_qa_system_tables(db: &Connection) -> rusqlite::Result<()> {
             qa_run_id INTEGER NOT NULL REFERENCES qa_runs(id) ON DELETE CASCADE,
             qa_job_id INTEGER NOT NULL REFERENCES qa_jobs(id) ON DELETE CASCADE,
             command_snapshot TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running', 'passed', 'failed', 'timed_out')),
+            status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running', 'passed', 'failed', 'timed_out', 'skipped', 'cancelled', 'interrupted')),
             exit_code INTEGER,
             started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            lease_expires_at TEXT,
             finished_at TEXT,
             duration_ms INTEGER,
             output TEXT NOT NULL DEFAULT ''
@@ -595,6 +599,100 @@ fn ensure_qa_system_tables(db: &Connection) -> rusqlite::Result<()> {
     db.execute(
         "INSERT OR IGNORE INTO schema_migrations(version) VALUES (9)",
         [],
+    )?;
+    Ok(())
+}
+
+/// Adds the QA enforcement contract to databases created before it existed:
+/// declared kind/scope, a worker lease and the cancelled/skipped/interrupted
+/// statuses. Legacy jobs keep a conservative `unit` kind until an agent updates
+/// them; the per-kind timeout ceiling is then enforced on the next write.
+fn ensure_qa_job_enforcement(db: &Connection) -> rusqlite::Result<()> {
+    let columns = table_columns(db, "qa_jobs")?;
+    if !columns.is_empty() {
+        if !columns.iter().any(|column| column == "kind") {
+            db.execute(
+                "ALTER TABLE qa_jobs ADD COLUMN kind TEXT NOT NULL DEFAULT 'unit'",
+                [],
+            )?;
+        }
+        if !columns.iter().any(|column| column == "scope") {
+            db.execute(
+                "ALTER TABLE qa_jobs ADD COLUMN scope TEXT NOT NULL DEFAULT ''",
+                [],
+            )?;
+        }
+    }
+
+    let run_sql: String = db.query_row(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='qa_job_runs'",
+        [],
+        |row| row.get(0),
+    )?;
+    let statuses_missing = !run_sql.contains("'skipped'") || !run_sql.contains("lease_expires_at");
+    let parent_sql: String = db.query_row(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='qa_runs'",
+        [],
+        |row| row.get(0),
+    )?;
+    let parent_missing = !parent_sql.contains("'cancelled'");
+    if !statuses_missing && !parent_missing {
+        return Ok(());
+    }
+
+    // Rebuild both tables together so the child's foreign key always points at
+    // the recreated parent. Foreign keys are disabled by migrate().
+    let run_high: i64 = db.query_row(
+        "SELECT COALESCE(MAX(seq),0) FROM sqlite_sequence WHERE name='qa_job_runs'",
+        [],
+        |row| row.get(0),
+    )?;
+    let parent_high: i64 = db.query_row(
+        "SELECT COALESCE(MAX(seq),0) FROM sqlite_sequence WHERE name='qa_runs'",
+        [],
+        |row| row.get(0),
+    )?;
+    db.execute_batch(
+        "ALTER TABLE qa_job_runs RENAME TO qa_job_runs_legacy;
+         ALTER TABLE qa_runs RENAME TO qa_runs_legacy;
+         CREATE TABLE qa_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            trigger_source TEXT NOT NULL DEFAULT 'user',
+            query_snapshot TEXT NOT NULL DEFAULT '{}',
+            status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running', 'passed', 'failed', 'cancelled', 'interrupted')),
+            started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            finished_at TEXT,
+            summary TEXT NOT NULL DEFAULT ''
+         );
+         CREATE TABLE qa_job_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            qa_run_id INTEGER NOT NULL REFERENCES qa_runs(id) ON DELETE CASCADE,
+            qa_job_id INTEGER NOT NULL REFERENCES qa_jobs(id) ON DELETE CASCADE,
+            command_snapshot TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running', 'passed', 'failed', 'timed_out', 'skipped', 'cancelled', 'interrupted')),
+            exit_code INTEGER,
+            started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            lease_expires_at TEXT,
+            finished_at TEXT,
+            duration_ms INTEGER,
+            output TEXT NOT NULL DEFAULT ''
+         );
+         INSERT INTO qa_runs(id, project_id, trigger_source, query_snapshot, status, started_at, finished_at, summary)
+            SELECT id, project_id, trigger_source, query_snapshot, status, started_at, finished_at, summary FROM qa_runs_legacy;
+         INSERT INTO qa_job_runs(id, qa_run_id, qa_job_id, command_snapshot, status, exit_code, started_at, lease_expires_at, finished_at, duration_ms, output)
+            SELECT id, qa_run_id, qa_job_id, command_snapshot, status, exit_code, started_at, NULL, finished_at, duration_ms, output FROM qa_job_runs_legacy;
+         DROP TABLE qa_job_runs_legacy;
+         DROP TABLE qa_runs_legacy;
+         CREATE INDEX IF NOT EXISTS idx_qa_job_runs_job_latest ON qa_job_runs(qa_job_id, id DESC);",
+    )?;
+    db.execute(
+        "UPDATE sqlite_sequence SET seq=MAX(seq,?1) WHERE name='qa_job_runs'",
+        [run_high],
+    )?;
+    db.execute(
+        "UPDATE sqlite_sequence SET seq=MAX(seq,?1) WHERE name='qa_runs'",
+        [parent_high],
     )?;
     Ok(())
 }

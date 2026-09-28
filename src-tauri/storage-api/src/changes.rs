@@ -146,6 +146,12 @@ pub enum QaJobOutcome {
     Passed,
     Failed,
     TimedOut,
+    /// Reserved but never executed, e.g. because the run budget was exhausted.
+    Skipped,
+    /// The caller cancelled the run while this job was reserved or running.
+    Cancelled,
+    /// The worker died or was replaced; a lease expired without evidence.
+    Interrupted,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

@@ -321,7 +321,7 @@ fn task_and_qa_links_resolve_titles_and_prevent_deletion() {
     let link = json!([{"targetType":"markdown","designExternalId":"spec"}]);
     store.commit(mutation("links",vec![
         Change::Task(TaskWrite::Create {input:serde_json::from_value(json!({"title":"Implement","designSpecificationLinks":link})).unwrap()}),
-        Change::Qa(QaWrite::CreateJob {input:serde_json::from_value(json!({"name":"Verify","command":"echo test","designSpecificationLinks":link})).unwrap()})
+        Change::Qa(QaWrite::CreateJob {input:serde_json::from_value(json!({"name":"Verify","kind":"unit","scope":"markdown verification","command":"echo test","designSpecificationLinks":link})).unwrap()})
     ])).unwrap();
     assert_eq!(
         store

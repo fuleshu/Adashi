@@ -1,6 +1,7 @@
 use super::*;
 use super::{design, fixed_hooks, health as design_health, memory, mockups, qa, rules, tasks};
 use adashi_storage_api::{self as api, *};
+use rusqlite::OptionalExtension;
 use api::{
     documents::*,
     qa::QaJob,
@@ -451,12 +452,20 @@ fn apply_qa(
                 .filter(|v| v.enabled)
                 .map(|v| (v.id, v))
                 .collect::<std::collections::BTreeMap<_, _>>();
-            if jobs.is_empty() || jobs.len() != selected.len() {
+            // The caller reserves a subset of the selection: jobs whose evidence is
+            // already green are skipped before reservation.
+            if jobs.is_empty() {
                 return Err(StorageError::Validation(
-                    "QA run must reserve every enabled job in the selection".into(),
+                    "No enabled QA jobs matched the run request".into(),
                 ));
             }
+            let mut reserved = std::collections::BTreeSet::new();
             for plan in jobs {
+                if !reserved.insert(plan.job_id) {
+                    return Err(StorageError::Validation(
+                        "Duplicate QA job in one run".into(),
+                    ));
+                }
                 let job = selected.get(&plan.job_id).ok_or_else(|| {
                     StorageError::Validation(
                         "QA execution plan does not match the selection".into(),
@@ -470,11 +479,56 @@ fn apply_qa(
                     ));
                 }
             }
+
+            // A worker that died without writing evidence must not wedge the job
+            // as running forever; reclaim expired leases before reserving again.
+            reap_stale_qa_runs(db, project)?;
+
+            // One live run per job. A second reservation would race the same build
+            // directories and interleave evidence for one job.
+            for plan in jobs {
+                let active: Option<i64> = db
+                    .query_row(
+                        "SELECT j.qa_run_id
+                         FROM qa_job_runs j JOIN qa_runs r ON r.id = j.qa_run_id
+                         WHERE r.project_id = ?1 AND j.qa_job_id = ?2 AND j.status = 'running'
+                           AND (j.lease_expires_at IS NULL OR j.lease_expires_at > CURRENT_TIMESTAMP)
+                         ORDER BY j.id DESC
+                         LIMIT 1",
+                        params![project, plan.job_id],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(StorageError::backend)?;
+                if let Some(active_run) = active {
+                    return Err(StorageError::Validation(format!(
+                        "QA job {} already has an active run ({active_run}); \
+                         wait for it to finish or cancel it before running the job again",
+                        plan.job_id
+                    )));
+                }
+            }
+
             db.execute("INSERT INTO qa_runs(project_id,trigger_source,query_snapshot,status) VALUES(?1,?2,?3,'running')",params![project,trigger_source,serde_json::to_string(query).map_err(StorageError::backend)?]).map_err(StorageError::backend)?;
             let run = db.last_insert_rowid();
             bump(db, project, "qa.run", run)?;
+            // The reservation lease covers a job waiting in the run queue; ClaimJob
+            // replaces it with the job's own timeout once execution starts.
+            let reservation_lease = api::qa::QA_RUN_MAX_BUDGET_SECONDS
+                + api::qa::QA_JOB_MAX_TIMEOUT_SECONDS
+                + api::qa::QA_JOB_LEASE_SLACK_SECONDS;
             for plan in jobs {
-                db.execute("INSERT INTO qa_job_runs(qa_run_id,qa_job_id,command_snapshot,status,output) VALUES(?1,?2,?3,'running','')",params![run,plan.job_id,plan.command_snapshot]).map_err(StorageError::backend)?;
+                db.execute(
+                    "INSERT INTO qa_job_runs(qa_run_id,qa_job_id,command_snapshot,status,output,lease_expires_at)
+                     VALUES(?1,?2,?3,'running','',datetime('now', ?4))",
+                    params![
+                        run,
+                        plan.job_id,
+                        plan.command_snapshot,
+                        format!("+{reservation_lease} seconds")
+                    ],
+                )
+                .map_err(StorageError::backend)?;
                 bump(db, project, "qa.job-run", db.last_insert_rowid())?;
             }
             Ok(ChangeOutcome::QaRun(
@@ -492,6 +546,28 @@ fn apply_qa(
                 ));
             }
             bump(db, project, "qa.job-run", job_run_id)?;
+            // Execution starts now: replace the queue-wide reservation lease with
+            // this job's own timeout so a dead worker is detectable promptly.
+            let timeout: i64 = db
+                .query_row(
+                    "SELECT q.timeout_seconds FROM qa_job_runs j
+                     JOIN qa_jobs q ON q.id = j.qa_job_id
+                     WHERE j.id = ?1",
+                    params![job_run_id],
+                    |row| row.get(0),
+                )
+                .map_err(StorageError::backend)?;
+            db.execute(
+                "UPDATE qa_job_runs SET lease_expires_at = datetime('now', ?2) WHERE id = ?1",
+                params![
+                    job_run_id,
+                    format!(
+                        "+{} seconds",
+                        timeout + api::qa::QA_JOB_LEASE_SLACK_SECONDS
+                    )
+                ],
+            )
+            .map_err(StorageError::backend)?;
             let job = qa::load_run(db, project, run)
                 .map_err(domain_error)?
                 .job_runs
@@ -515,13 +591,16 @@ fn apply_qa(
                 QaJobOutcome::Passed => "passed",
                 QaJobOutcome::Failed => "failed",
                 QaJobOutcome::TimedOut => "timed_out",
+                QaJobOutcome::Skipped => "skipped",
+                QaJobOutcome::Cancelled => "cancelled",
+                QaJobOutcome::Interrupted => "interrupted",
             };
             if status == "passed" && evidence.exit_code != Some(0) {
                 return Err(StorageError::Validation(
                     "Passed QA evidence requires exit code 0".into(),
                 ));
             }
-            db.execute("UPDATE qa_job_runs SET status=?1,exit_code=?2,finished_at=CURRENT_TIMESTAMP,duration_ms=?3,output=?4 WHERE id=?5",params![status,evidence.exit_code,evidence.duration_ms,evidence.output,job_run_id]).map_err(StorageError::backend)?;
+            db.execute("UPDATE qa_job_runs SET status=?1,exit_code=?2,finished_at=CURRENT_TIMESTAMP,duration_ms=?3,output=?4,lease_expires_at=NULL WHERE id=?5",params![status,evidence.exit_code,evidence.duration_ms,evidence.output,job_run_id]).map_err(StorageError::backend)?;
             bump(db, project, "qa.job-run", job_run_id)?;
             let result = qa::load_run(db, project, run)
                 .map_err(domain_error)?
@@ -543,19 +622,26 @@ fn apply_qa(
                     "QA run still has unfinished jobs".into(),
                 ));
             }
-            let passed = run.job_runs.iter().filter(|v| v.status == "passed").count();
-            let timed_out = run
-                .job_runs
-                .iter()
-                .filter(|v| v.status == "timed_out")
-                .count();
-            let failed = run.job_runs.len() - passed - timed_out;
-            let status = if failed == 0 && timed_out == 0 {
-                "passed"
-            } else {
+            let count = |status: &str| run.job_runs.iter().filter(|v| v.status == status).count();
+            let passed = count("passed");
+            let timed_out = count("timed_out");
+            let skipped = count("skipped");
+            let cancelled = count("cancelled");
+            let interrupted = count("interrupted");
+            let failed = run.job_runs.len() - passed - timed_out - skipped - cancelled - interrupted;
+            let status = if failed > 0 || timed_out > 0 {
                 "failed"
+            } else if cancelled > 0 {
+                "cancelled"
+            } else if interrupted > 0 {
+                "interrupted"
+            } else {
+                "passed"
             };
-            let summary = format!("{passed} passed, {failed} failed, {timed_out} timed out");
+            let summary = format!(
+                "{passed} passed, {failed} failed, {timed_out} timed out, \
+                 {skipped} skipped, {cancelled} cancelled, {interrupted} interrupted"
+            );
             db.execute(
                 "UPDATE qa_runs SET status=?1,finished_at=CURRENT_TIMESTAMP,summary=?2 WHERE id=?3",
                 params![status, summary, run_id],
@@ -569,6 +655,70 @@ fn apply_qa(
             Ok(ChangeOutcome::QaRun(result))
         }
     }
+}
+
+/// Reclaim QA work whose worker died without writing evidence. A running job run
+/// past its lease becomes `interrupted`, and its run closes once no job is left
+/// running. Called at reservation time, inside the same transaction.
+fn reap_stale_qa_runs(db: &Connection, project: i64) -> StorageResult<()> {
+    let stale = {
+        let mut statement = db
+            .prepare(
+                "SELECT j.id, j.qa_run_id
+                 FROM qa_job_runs j JOIN qa_runs r ON r.id = j.qa_run_id
+                 WHERE r.project_id = ?1 AND r.status = 'running' AND j.status = 'running'
+                   AND (j.lease_expires_at IS NULL OR j.lease_expires_at <= CURRENT_TIMESTAMP)",
+            )
+            .map_err(StorageError::backend)?;
+        let rows = statement
+            .query_map([project], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))
+            .map_err(StorageError::backend)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(StorageError::backend)?
+    };
+    if stale.is_empty() {
+        return Ok(());
+    }
+    let note = "[Adashi] worker lease expired before evidence was written; run interrupted";
+    for (job_run_id, _) in &stale {
+        db.execute(
+            "UPDATE qa_job_runs
+             SET status = 'interrupted',
+                 finished_at = CURRENT_TIMESTAMP,
+                 duration_ms = COALESCE(duration_ms, CAST((julianday(CURRENT_TIMESTAMP) - julianday(started_at)) * 86400000 AS INTEGER)),
+                 output = CASE WHEN output = '' THEN ?2 ELSE output || char(10) || ?2 END,
+                 lease_expires_at = NULL
+             WHERE id = ?1 AND status = 'running'",
+            params![job_run_id, note],
+        )
+        .map_err(StorageError::backend)?;
+        bump(db, project, "qa.job-run", *job_run_id)?;
+    }
+    let run_ids = stale
+        .iter()
+        .map(|(_, run_id)| *run_id)
+        .collect::<std::collections::BTreeSet<_>>();
+    for run_id in run_ids {
+        let remaining: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM qa_job_runs WHERE qa_run_id = ?1 AND status = 'running'",
+                [run_id],
+                |row| row.get(0),
+            )
+            .map_err(StorageError::backend)?;
+        if remaining == 0 {
+            db.execute(
+                "UPDATE qa_runs
+                 SET status = 'interrupted', finished_at = CURRENT_TIMESTAMP,
+                     summary = 'run interrupted: worker lease expired'
+                 WHERE id = ?1 AND status = 'running'",
+                [run_id],
+            )
+            .map_err(StorageError::backend)?;
+            bump(db, project, "qa.run", run_id)?;
+        }
+    }
+    Ok(())
 }
 
 fn replace_legacy(db: &Connection, project: i64, content: &LegacyContent) -> StorageResult<()> {

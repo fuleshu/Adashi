@@ -10,7 +10,7 @@ pub(super) fn parse_records(files: &Files) -> StorageResult<BTreeMap<String, cod
         "format.json",
     )?;
     if ![1, 2, 3].contains(&format.schema_version)
-        || ![14, sqlite::schema::SCHEMA_VERSION].contains(&format.relational_schema)
+        || ![14, 15, sqlite::schema::SCHEMA_VERSION].contains(&format.relational_schema)
     {
         return Err(invalid(
             "format.json",
@@ -44,6 +44,32 @@ pub(super) fn parse_records(files: &Files) -> StorageResult<BTreeMap<String, cod
         }
         if records.insert(r.identity.clone(), r).is_some() {
             return Err(invalid(path, "duplicate record identity"));
+        }
+    }
+    // Relational schema 16 added the QA enforcement contract. Older records carry
+    // no value for the new columns, so supply the documented defaults on read; the
+    // next write persists them and stamps the current relational schema.
+    if format.relational_schema < 16 {
+        for record in records.values_mut().filter(|record| !record.deleted) {
+            match record.collection.as_str() {
+                "qa_jobs" => {
+                    record
+                        .data
+                        .entry("kind".into())
+                        .or_insert_with(|| Value::String("unit".into()));
+                    record
+                        .data
+                        .entry("scope".into())
+                        .or_insert_with(|| Value::String(String::new()));
+                }
+                "qa_job_runs" => {
+                    record
+                        .data
+                        .entry("lease_expires_at".into())
+                        .or_insert(Value::Null);
+                }
+                _ => {}
+            }
         }
     }
     Ok(records)

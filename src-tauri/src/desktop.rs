@@ -735,6 +735,8 @@ struct CreateQaJobRequest {
     operation_id: String,
     name: String,
     description: Option<String>,
+    kind: Option<String>,
+    scope: Option<String>,
     command: String,
     working_directory: Option<String>,
     shell: Option<String>,
@@ -754,6 +756,8 @@ struct UpdateQaJobRequest {
     qa_job_id: i64,
     name: Option<String>,
     description: Option<String>,
+    kind: Option<String>,
+    scope: Option<String>,
     command: Option<String>,
     working_directory: Option<String>,
     shell: Option<String>,
@@ -771,6 +775,9 @@ struct RunQaJobsRequest {
     operation_id: String,
     query: QaJobQuery,
     trigger_source: Option<String>,
+    allow_broad_run: Option<bool>,
+    force: Option<bool>,
+    max_duration_seconds: Option<i64>,
 }
 
 
@@ -1009,6 +1016,8 @@ fn create_qa_job(
     mutate_dashboard(project,input.operation_id,vec![Change::Qa(QaWrite::CreateJob { input:NewQaJob {
                 name: input.name,
                 description: input.description,
+                kind: input.kind,
+                scope: input.scope,
                 command: input.command,
                 working_directory: input.working_directory,
                 shell: input.shell,
@@ -1031,6 +1040,8 @@ fn update_qa_job(
                 qa_job_id: input.qa_job_id,
                 name: input.name,
                 description: input.description,
+                kind: input.kind,
+                scope: input.scope,
                 command: input.command,
                 working_directory: input.working_directory,
                 shell: input.shell,
@@ -1061,7 +1072,37 @@ fn run_qa_jobs(
 ) -> Result<DashboardPayload, String> {
     let project=resolve_project(&state,input.project_id.as_deref())?;
     let mut store=open_project_store(&project).map_err(|e|e.to_string())?;
-    crate::qa_runner::run(&mut store,&project.folder,&input.operation_id,input.query,input.trigger_source.as_deref().unwrap_or("dashboard")).map_err(|e|e.to_string())?;
+    crate::qa_runner::run(&mut store,&project.folder,crate::qa_runner::RunRequest{
+        operation:input.operation_id,
+        query:input.query,
+        trigger:input.trigger_source.unwrap_or_else(||"dashboard".to_string()),
+        allow_broad_run:input.allow_broad_run.unwrap_or(false),
+        force:input.force.unwrap_or(false),
+        max_duration_seconds:input.max_duration_seconds,
+    }).map_err(|e|e.to_string())?;
+    load_dashboard_payload(project,&mut store,&state)
+}
+
+/// Signals a live QA run owned by this process. A stale run (no live worker) is
+/// reclaimed automatically the next time one of its jobs is reserved.
+#[tauri::command]
+fn cancel_qa_run(
+    project_id: Option<String>,
+    qa_run_id: i64,
+    state: State<'_, AppState>,
+) -> Result<DashboardPayload, String> {
+    let project=resolve_project(&state,project_id.as_deref())?;
+    let mut store=open_project_store(&project).map_err(|e|e.to_string())?;
+    {
+        let db=store.snapshot().map_err(|e|e.to_string())?;
+        let run=db.qa_run(qa_run_id).map_err(|e|e.to_string())?;
+        if run.status!="running" {
+            return Err(format!("QA run {qa_run_id} is already {}",run.status));
+        }
+    }
+    if !crate::qa_runner::request_cancel(qa_run_id) {
+        return Err(format!("QA run {qa_run_id} is not executing in this process; it will be reclaimed as interrupted when one of its jobs is next reserved"));
+    }
     load_dashboard_payload(project,&mut store,&state)
 }
 
@@ -1137,7 +1178,8 @@ pub fn run() {
             update_qa_job,
             update_rule,
             update_task,
-            run_qa_jobs
+            run_qa_jobs,
+            cancel_qa_run
         ])
         .run(tauri::generate_context!())
         .expect("error while running Adashi");

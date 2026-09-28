@@ -45,8 +45,13 @@ fn all_domain_creation_ids_are_randomized_in_text_and_stable_after_reopen() {
     sqlite::tests::conformance::populate(&mut text);
     for store in [&mut source as &mut dyn ProjectStorage, &mut text] {
         for operation in ["qa-first", "qa-second"] {
-            let job = store.snapshot().unwrap().qa_jobs(&api::qa::QaJobQuery::default()).unwrap().remove(0);
-            store
+            let job = store
+                .snapshot()
+                .unwrap()
+                .qa_jobs(&api::qa::QaJobQuery::default())
+                .unwrap()
+                .remove(0);
+            let result = store
                 .commit(Mutation {
                     operation_id: operation.into(),
                     changes: vec![Change::Qa(api::QaWrite::StartRun {
@@ -57,6 +62,54 @@ fn all_domain_creation_ids_are_randomized_in_text_and_stable_after_reopen() {
                             expected_version: job.version,
                             command_snapshot: crate::qa_runner::command_snapshot(&job).unwrap(),
                         }],
+                    })],
+                })
+                .unwrap();
+            let api::ChangeOutcome::QaRun(run) = result.outcomes.into_iter().next().unwrap()
+            else {
+                panic!("qa run outcome");
+            };
+            let job_run = run.job_runs.first().unwrap().clone();
+            // A job cannot be reserved twice while its run is live, so close the
+            // evidence before the next run of the same job.
+            let versions = store
+                .snapshot()
+                .unwrap()
+                .resource_versions(&[api::ResourceKey {
+                    kind: "qa.job-run".into(),
+                    id: job_run.id.to_string(),
+                }])
+                .unwrap();
+            store
+                .commit(Mutation {
+                    operation_id: format!("{operation}-evidence"),
+                    changes: vec![Change::Qa(api::QaWrite::CompleteJob {
+                        job_run_id: job_run.id,
+                        expected_version: versions[0].version,
+                        evidence: api::QaEvidence {
+                            outcome: api::QaJobOutcome::Passed,
+                            exit_code: Some(0),
+                            duration_ms: 1,
+                            output: "ok".into(),
+                        },
+                    })],
+                })
+                .unwrap();
+            let run_version = store
+                .snapshot()
+                .unwrap()
+                .resource_versions(&[api::ResourceKey {
+                    kind: "qa.run".into(),
+                    id: run.id.to_string(),
+                }])
+                .unwrap()[0]
+                .version;
+            store
+                .commit(Mutation {
+                    operation_id: format!("{operation}-complete"),
+                    changes: vec![Change::Qa(api::QaWrite::CompleteRun {
+                        run_id: run.id,
+                        expected_version: run_version,
                     })],
                 })
                 .unwrap();

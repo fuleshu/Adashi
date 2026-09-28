@@ -15,7 +15,6 @@ use std::thread;
 #[cfg(test)]
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const DEFAULT_TIMEOUT_SECONDS: i64 = 120;
 #[cfg(windows)]
 const DEFAULT_SHELL: &str = "powershell";
 #[cfg(not(windows))]
@@ -217,22 +216,40 @@ fn load_design_link_ids(db: &Connection, qa_job_id: i64) -> Result<Vec<String>, 
 pub fn create_job(db: &Connection, project_id: i64, input: NewQaJob) -> Result<QaJob, String> {
     let name = required_trimmed(&input.name, "QA job name")?;
     let command = required_trimmed(&input.command, "QA command")?;
-    let timeout_seconds =
-        validate_timeout(input.timeout_seconds.unwrap_or(DEFAULT_TIMEOUT_SECONDS))?;
+    let kind = validate_qa_identity(
+        input.kind.as_deref().unwrap_or(""),
+        input.scope.as_deref().unwrap_or(""),
+    )?;
+    let scope = input.scope.as_deref().unwrap_or("").trim().to_string();
+    let timeout_seconds = validate_qa_timeout(
+        kind,
+        input
+            .timeout_seconds
+            .unwrap_or(QA_JOB_DEFAULT_TIMEOUT_SECONDS),
+    )?;
+    validate_qa_packaging(kind, command)?;
+    let design_specification_links = input.design_specification_links.unwrap_or_default();
+    let task_ids = input.task_ids.unwrap_or_default();
+    let enabled = input.enabled.unwrap_or(true);
+    if enabled {
+        validate_qa_verify_target(design_specification_links.len(), task_ids.len())?;
+    }
     let shell = normalize_shell(input.shell.as_deref());
     let number = next_job_number(db, project_id)?;
 
     db.execute(
         "INSERT INTO qa_jobs(
-            project_id, number, name, description, command, working_directory,
-            shell, timeout_seconds, enabled, created_by
+            project_id, number, name, description, kind, scope, command,
+            working_directory, shell, timeout_seconds, enabled, created_by
          )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             project_id,
             number,
             name,
             input.description.unwrap_or_default().trim(),
+            kind,
+            scope,
             command,
             input.working_directory.unwrap_or_default().trim(),
             shell,
@@ -247,17 +264,8 @@ pub fn create_job(db: &Connection, project_id: i64, input: NewQaJob) -> Result<Q
     .map_err(|err| err.to_string())?;
 
     let qa_job_id = db.last_insert_rowid();
-    replace_design_links(
-        db,
-        qa_job_id,
-        input.design_specification_links.unwrap_or_default(),
-    )?;
-    replace_task_links(
-        db,
-        project_id,
-        qa_job_id,
-        input.task_ids.unwrap_or_default(),
-    )?;
+    replace_design_links(db, qa_job_id, design_specification_links)?;
+    replace_task_links(db, project_id, qa_job_id, task_ids)?;
     replace_tags(db, qa_job_id, input.tags.unwrap_or_default())?;
     load_job(db, project_id, qa_job_id)
 }
@@ -274,8 +282,26 @@ pub fn update_job(db: &Connection, project_id: i64, input: UpdateQaJob) -> Resul
         return Err("QA command is required".to_string());
     }
 
+    let scope_input = input.scope.unwrap_or(current.scope);
+    let kind_input = input.kind.unwrap_or(current.kind);
+    let kind = validate_qa_identity(&kind_input, &scope_input)?;
+    let scope = scope_input.trim().to_string();
     let timeout_seconds =
-        validate_timeout(input.timeout_seconds.unwrap_or(current.timeout_seconds))?;
+        validate_qa_timeout(kind, input.timeout_seconds.unwrap_or(current.timeout_seconds))?;
+    validate_qa_packaging(kind, &command)?;
+    let enabled = input.enabled.unwrap_or(current.enabled);
+    let design_count = input
+        .design_specification_links
+        .as_ref()
+        .map_or(current.design_specification_links.len(), Vec::len);
+    let task_count = input
+        .task_ids
+        .as_ref()
+        .map_or(current.task_links.len(), Vec::len);
+    if enabled {
+        validate_qa_verify_target(design_count, task_count)?;
+    }
+
     let shell = normalize_shell(Some(input.shell.as_deref().unwrap_or(&current.shell)));
     let description = input
         .description
@@ -293,16 +319,20 @@ pub fn update_job(db: &Connection, project_id: i64, input: UpdateQaJob) -> Resul
             "UPDATE qa_jobs
              SET name = ?1,
                  description = ?2,
-                 command = ?3,
-                 working_directory = ?4,
-                 shell = ?5,
-                 timeout_seconds = ?6,
-                 enabled = ?7,
+                 kind = ?3,
+                 scope = ?4,
+                 command = ?5,
+                 working_directory = ?6,
+                 shell = ?7,
+                 timeout_seconds = ?8,
+                 enabled = ?9,
                  updated_at = CURRENT_TIMESTAMP
-             WHERE id = ?8 AND project_id = ?9",
+             WHERE id = ?10 AND project_id = ?11",
             params![
                 name,
                 description,
+                kind,
+                scope,
                 command,
                 working_directory,
                 shell,
@@ -559,6 +589,8 @@ fn hydrate_job(db: &Connection, project_id: i64, row: QaJobRow) -> Result<QaJob,
         number: row.number,
         name: row.name,
         description: row.description,
+        kind: row.kind,
+        scope: row.scope,
         command: row.command,
         working_directory: row.working_directory,
         shell: row.shell,
@@ -636,7 +668,6 @@ fn derive_state(
         _ => Ok("needs-rerun".to_string()),
     }
 }
-
 /// Single source of truth for QA job filtering, shared by full jobs and bounded summaries.
 #[allow(clippy::too_many_arguments)]
 fn matches_query(
@@ -866,6 +897,8 @@ fn resolve_working_directory(project_folder: &str, working_directory: &str) -> P
 pub(crate) fn command_snapshot(job: &QaJob) -> Result<String, String> {
     serde_json::to_string(&json!({
         "name": job.name,
+        "kind": job.kind,
+        "scope": job.scope,
         "command": job.command,
         "workingDirectory": job.working_directory,
         "shell": job.shell,
@@ -881,7 +914,7 @@ pub(crate) fn command_snapshot(job: &QaJob) -> Result<String, String> {
 fn load_job_rows(db: &Connection, project_id: i64) -> Result<Vec<QaJobRow>, String> {
     let mut statement = db
         .prepare(
-            "SELECT id, number, name, description, command, working_directory, shell,
+            "SELECT id, number, name, description, kind, scope, command, working_directory, shell,
                     timeout_seconds, enabled, created_by, created_at, updated_at
              FROM qa_jobs
              WHERE project_id = ?1
@@ -898,7 +931,7 @@ fn load_job_rows(db: &Connection, project_id: i64) -> Result<Vec<QaJobRow>, Stri
 
 fn load_job_row(db: &Connection, project_id: i64, qa_job_id: i64) -> Result<QaJobRow, String> {
     db.query_row(
-        "SELECT id, number, name, description, command, working_directory, shell,
+        "SELECT id, number, name, description, kind, scope, command, working_directory, shell,
                 timeout_seconds, enabled, created_by, created_at, updated_at
          FROM qa_jobs
          WHERE id = ?1 AND project_id = ?2",
@@ -914,14 +947,16 @@ fn read_job_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<QaJobRow> {
         number: row.get(1)?,
         name: row.get(2)?,
         description: row.get(3)?,
-        command: row.get(4)?,
-        working_directory: row.get(5)?,
-        shell: row.get(6)?,
-        timeout_seconds: row.get(7)?,
-        enabled: row.get::<_, i64>(8)? != 0,
-        created_by: row.get(9)?,
-        created_at: row.get(10)?,
-        updated_at: row.get(11)?,
+        kind: row.get(4)?,
+        scope: row.get(5)?,
+        command: row.get(6)?,
+        working_directory: row.get(7)?,
+        shell: row.get(8)?,
+        timeout_seconds: row.get(9)?,
+        enabled: row.get::<_, i64>(10)? != 0,
+        created_by: row.get(11)?,
+        created_at: row.get(12)?,
+        updated_at: row.get(13)?,
     })
 }
 
@@ -1269,14 +1304,6 @@ fn validate_design_target_type(target_type: &str) -> Result<(), String> {
     }
 }
 
-fn validate_timeout(timeout_seconds: i64) -> Result<i64, String> {
-    if (1..=86_400).contains(&timeout_seconds) {
-        Ok(timeout_seconds)
-    } else {
-        Err("QA timeout must be between 1 and 86400 seconds".to_string())
-    }
-}
-
 fn normalize_shell(shell: Option<&str>) -> String {
     let shell = shell.unwrap_or(DEFAULT_SHELL).trim();
     if shell.is_empty() {
@@ -1331,6 +1358,8 @@ struct QaJobRow {
     number: i64,
     name: String,
     description: String,
+    kind: String,
+    scope: String,
     command: String,
     working_directory: String,
     shell: String,
@@ -1354,6 +1383,126 @@ struct QaRunRow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_db() -> Connection {
+        let mut db = Connection::open_in_memory().unwrap();
+        crate::storage::sqlite::schema::migrate(&mut db).unwrap();
+        db.execute(
+            "INSERT INTO projects(name, slug, repository_path) VALUES('p', 'p', '/tmp/p')",
+            [],
+        )
+        .unwrap();
+        db
+    }
+
+    fn job(kind: &str, scope: &str, command: &str, enabled: bool) -> NewQaJob {
+        NewQaJob {
+            name: "Check".into(),
+            description: None,
+            kind: Some(kind.into()),
+            scope: Some(scope.into()),
+            command: command.into(),
+            working_directory: None,
+            shell: None,
+            timeout_seconds: None,
+            enabled: Some(enabled),
+            created_by: None,
+            design_specification_links: Some(vec![QaDesignLinkInput {
+                target_type: Some("element".into()),
+                design_external_id: "app".into(),
+            }]),
+            task_ids: None,
+            tags: None,
+        }
+    }
+
+    #[test]
+    fn packaging_is_rejected_outside_release() {
+        let db = test_db();
+        let error = create_job(&db, 1, job("e2e", "app boots", "tauri build", true)).unwrap_err();
+        assert!(error.contains("may not package"), "{error}");
+        let error = create_job(
+            &db,
+            1,
+            job("integration", "bundle roles", "scripts/assemble-release-bundle.sh out", true),
+        )
+        .unwrap_err();
+        assert!(error.contains("may not package"), "{error}");
+    }
+
+    #[test]
+    fn release_may_package_and_a_debug_app_build_is_allowed() {
+        let db = test_db();
+        create_job(&db, 1, job("release", "installer artifacts", "tauri build", true)).unwrap();
+        create_job(
+            &db,
+            1,
+            job("e2e", "native app launches", "tauri build --no-bundle", true),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn timeout_above_the_kind_ceiling_is_rejected() {
+        let db = test_db();
+        let mut input = job("unit", "focused test", "cargo test", true);
+        input.timeout_seconds = Some(3_600);
+        let error = create_job(&db, 1, input).unwrap_err();
+        assert!(error.contains("at most 600"), "{error}");
+    }
+
+    #[test]
+    fn kind_and_scope_are_required() {
+        let db = test_db();
+        let mut missing_kind = job("unit", "focused test", "cargo test", true);
+        missing_kind.kind = None;
+        assert!(create_job(&db, 1, missing_kind).unwrap_err().contains("kind"));
+        let mut missing_scope = job("unit", "focused test", "cargo test", true);
+        missing_scope.scope = Some("   ".into());
+        assert!(create_job(&db, 1, missing_scope)
+            .unwrap_err()
+            .contains("scope"));
+    }
+
+    #[test]
+    fn an_enabled_job_needs_a_verify_target_but_a_draft_may_omit_one() {
+        let db = test_db();
+        let mut enabled = job("unit", "focused test", "cargo test", true);
+        enabled.design_specification_links = None;
+        let error = create_job(&db, 1, enabled).unwrap_err();
+        assert!(error.contains("design specification or task"), "{error}");
+
+        let mut draft = job("unit", "focused test", "cargo test", false);
+        draft.design_specification_links = None;
+        create_job(&db, 1, draft).unwrap();
+    }
+
+    #[test]
+    fn update_rejects_stripping_every_target_from_an_enabled_job() {
+        let db = test_db();
+        let created = create_job(&db, 1, job("unit", "focused test", "cargo test", true)).unwrap();
+        let error = update_job(
+            &db,
+            1,
+            UpdateQaJob {
+                qa_job_id: created.id,
+                name: None,
+                description: None,
+                kind: None,
+                scope: None,
+                command: None,
+                working_directory: None,
+                shell: None,
+                timeout_seconds: None,
+                enabled: None,
+                design_specification_links: Some(vec![]),
+                task_ids: Some(vec![]),
+                tags: None,
+            },
+        )
+        .unwrap_err();
+        assert!(error.contains("design specification or task"), "{error}");
+    }
 
     #[cfg(windows)]
     #[test]

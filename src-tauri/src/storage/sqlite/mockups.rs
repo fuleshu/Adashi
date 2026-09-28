@@ -1095,6 +1095,8 @@ mod tests {
             crate::storage::sqlite::qa::NewQaJob {
                 name: "Visual contract".into(),
                 description: None,
+                kind: Some("e2e".into()),
+                scope: Some("visual mockup contract".into()),
                 command: "echo ok".into(),
                 working_directory: None,
                 shell: None,

@@ -42,6 +42,7 @@ fn operation_schema(tool: &str, operation: &str) -> Option<Value> {
         ("adashi_qa", "list_runs") => schema::<ListQaRunsParams>(),
         ("adashi_qa", "get_job") => schema::<QaJobIdParams>(),
         ("adashi_qa", "get_run") => schema::<QaRunIdParams>(),
+        ("adashi_qa", "cancel_run") => schema::<QaRunIdParams>(),
         ("adashi_memory", "get") => schema::<GetMemoryParams>(),
         ("adashi_memory", "append") => {
             let mut value = schema::<AppendMemoryNoteParams>();
@@ -238,10 +239,10 @@ pub(super) fn example(tool: &str, operation: &str) -> Option<Value> {
             json!({"projectName":"Your project","operation":operation,"operationId":"task-finish-001","taskId":1,"expectedVersion":2,"completionMemo":"Implementation and verification evidence"})
         }
         ("adashi_qa", "create_job") => {
-            json!({"projectName":"Your project","operation":operation,"operationId":"qa-create-001","name":"Workspace tests","command":"cargo test --workspace"})
+            json!({"projectName":"Your project","operation":operation,"operationId":"qa-create-001","name":"Workspace tests","kind":"unit","scope":"The workspace test suite passes","command":"cargo test --workspace","designSpecificationLinks":[{"targetType":"element","designExternalId":"element-id"}]})
         }
         ("adashi_qa", "run_jobs") => {
-            json!({"projectName":"Your project","operation":operation,"operationId":"qa-run-001","query":{"jobIds":[1]}})
+            json!({"projectName":"Your project","operation":operation,"operationId":"qa-run-001","query":{"jobIds":[1]},"maxDurationSeconds":900})
         }
         _ => return None,
     })

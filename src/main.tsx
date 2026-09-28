@@ -28,6 +28,7 @@ import {
   ScrollText,
   Settings,
   ServerCog,
+  Square,
   Trash2,
   Type,
   Wand2,
@@ -271,7 +272,7 @@ type QaJobRun = {
   qaRunId: number;
   qaJobId: number;
   commandSnapshot: string;
-  status: "running" | "passed" | "failed" | "timed_out";
+  status: "running" | "passed" | "failed" | "timed_out" | "skipped" | "cancelled" | "interrupted";
   exitCode?: number | null;
   startedAt: string;
   finishedAt?: string | null;
@@ -283,11 +284,25 @@ type QaRun = {
   id: number;
   triggerSource: string;
   querySnapshot: string;
-  status: "running" | "passed" | "failed";
+  status: "running" | "passed" | "failed" | "cancelled" | "interrupted";
   startedAt: string;
   finishedAt?: string | null;
   summary: string;
   jobRuns: QaJobRun[];
+};
+
+type QaJobKind = "lint" | "unit" | "integration" | "e2e" | "smoke" | "build" | "release";
+
+const QA_JOB_KINDS: QaJobKind[] = ["lint", "unit", "integration", "e2e", "smoke", "build", "release"];
+
+const QA_KIND_TIMEOUT_CEILING: Record<QaJobKind, number> = {
+  lint: 120,
+  smoke: 300,
+  unit: 600,
+  integration: 900,
+  e2e: 1800,
+  build: 1800,
+  release: 3600,
 };
 
 type QaJob = {
@@ -296,6 +311,8 @@ type QaJob = {
   number: number;
   name: string;
   description: string;
+  kind: QaJobKind;
+  scope: string;
   command: string;
   workingDirectory: string;
   shell: string;
@@ -4373,17 +4390,22 @@ function QaView({
   }, [selectedJob, selectedJobRun]);
 
   function addJob() {
+    // A runnable job must declare kind, scope and a verify target. A new job is a
+    // disabled draft so the fields can be filled in before it is allowed to run.
+    setShowDisabled(true);
     invoke<DashboardPayload>("create_qa_job", {
       input: {
         projectId,
         operationId: newOperationId("qa-create"),
         name: "New QA Job",
         description: "",
+        kind: "unit",
+        scope: "Describe the single behavior this job verifies",
         command: "cargo check --manifest-path src-tauri/Cargo.toml",
         workingDirectory: "",
         shell: DEFAULT_QA_SHELL,
         timeoutSeconds: 120,
-        enabled: true,
+        enabled: false,
         designSpecificationLinks: [],
         taskIds: [],
         tags: ["local"],
@@ -4403,7 +4425,7 @@ function QaView({
   function updateJob(
     job: QaJob,
     changes: Partial<
-      Pick<QaJob, "name" | "description" | "command" | "workingDirectory" | "shell" | "timeoutSeconds" | "enabled">
+      Pick<QaJob, "name" | "description" | "kind" | "scope" | "command" | "workingDirectory" | "shell" | "timeoutSeconds" | "enabled">
     > & {
       designSpecificationLinks?: Array<Pick<QaJobDesignLink, "targetType" | "designExternalId">>;
       taskIds?: number[];
@@ -4440,7 +4462,7 @@ function QaView({
       .catch((reason) => onError(formatMutationError(reason)));
   }
 
-  function runQuery(query: QaJobQuery) {
+  function runQuery(query: QaJobQuery, options?: { force?: boolean }) {
     setRunning(true);
     invoke<DashboardPayload>("run_qa_jobs", {
       input: {
@@ -4448,6 +4470,8 @@ function QaView({
         operationId: newOperationId("qa-run"),
         query,
         triggerSource: "dashboard",
+        force: options?.force ?? false,
+        maxDurationSeconds: 900,
       },
       })
       .then((updatedPayload) => {
@@ -4460,8 +4484,13 @@ function QaView({
       .finally(() => setRunning(false));
   }
 
-  function addDesignLink(job: QaJob, option: TaskDesignLinkOption) {
-    if (job.designSpecificationLinks.some((link) => link.designExternalId === option.designExternalId)) {
+  function cancelRun(qaRunId: number) {
+    invoke<DashboardPayload>("cancel_qa_run", { projectId, qaRunId })
+      .then((updatedPayload) => onChange(updatedPayload))
+      .catch((reason) => onError(formatMutationError(reason)));
+  }
+
+  function addDesignLink(job: QaJob, option: TaskDesignLinkOption) {    if (job.designSpecificationLinks.some((link) => link.designExternalId === option.designExternalId)) {
       return;
     }
 
@@ -4591,9 +4620,18 @@ function QaView({
                 <h3>{selectedJob.name}</h3>
               </div>
               <div className="task-detail-actions">
-                <button disabled={running} onClick={() => runQuery({ jobIds: [selectedJob.id] })} title="Run QA job" type="button">
+                <button disabled={running} onClick={() => runQuery({ jobIds: [selectedJob.id] }, { force: true })} title="Run QA job" type="button">
                   <PlayCircle size={17} />
                 </button>
+                {selectedJob.derivedState === "running" && selectedJob.latestRun ? (
+                  <button
+                    onClick={() => cancelRun(selectedJob.latestRun!.qaRunId)}
+                    title="Cancel the active QA run"
+                    type="button"
+                  >
+                    <Square size={17} />
+                  </button>
+                ) : null}
                 <button
                   aria-label={`Delete QA job #${selectedJob.number}`}
                   className="danger-icon-button"
@@ -4617,6 +4655,33 @@ function QaView({
                 />
               </label>
               <label>
+                <span>Kind</span>
+                <select
+                  value={selectedJob.kind}
+                  onChange={(event) => {
+                    const kind = event.target.value as QaJobKind;
+                    // Keep the timeout inside the new kind's ceiling.
+                    const timeoutSeconds = Math.min(selectedJob.timeoutSeconds, QA_KIND_TIMEOUT_CEILING[kind]);
+                    updateJob(selectedJob, { kind, timeoutSeconds });
+                  }}
+                >
+                  {QA_JOB_KINDS.map((kind) => (
+                    <option key={kind} value={kind}>
+                      {kind}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="task-description-label">
+                <span>Scope</span>
+                <VersionedField
+                  key={selectedJob.id}
+                  value={selectedJob.scope}
+                  version={selectedJob.version}
+                  onSave={(value, version) => savedField(updateJob({ ...selectedJob, version }, { scope: value }), record => record.scope)}
+                />
+              </label>
+              <label>
                 <span>Shell</span>
                 <select
                   value={selectedJob.shell}
@@ -4631,11 +4696,11 @@ function QaView({
               </label>
               <label>
                 <span>Timeout</span>
-                <VersionedField type="number" min={1}
+                <VersionedField type="number" min={1} max={QA_KIND_TIMEOUT_CEILING[selectedJob.kind]}
                   key={selectedJob.id}
                   value={String(selectedJob.timeoutSeconds)}
                   version={selectedJob.version}
-                  onSave={(value, version) => savedField(updateJob({ ...selectedJob, version }, { timeoutSeconds: Number(value) || 120 }), record => String(record.timeoutSeconds))}
+                  onSave={(value, version) => savedField(updateJob({ ...selectedJob, version }, { timeoutSeconds: Math.min(Number(value) || 120, QA_KIND_TIMEOUT_CEILING[selectedJob.kind]) }), record => String(record.timeoutSeconds))}
                 />
               </label>
               <label className="qa-enabled-toggle">
