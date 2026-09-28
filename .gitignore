@@ -20,6 +20,10 @@ src-tauri/.cargo/
 *.sqlite
 *.sqlite3
 
+# Local desktop settings and agent-tool state (machine-specific, never shared)
+/Adashi/
+.qwen/
+
 # Logs
 *.log
 npm-debug.log*
