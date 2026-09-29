@@ -6,6 +6,7 @@
 //! projection, marked as generated and overwritten on regeneration.
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -27,8 +28,22 @@ pub fn markdown_directory(settings: &crate::settings::AppSettings, project: &str
 /// Managed-block markers. Text outside them is never rewritten.
 pub const BLOCK_BEGIN: &str = "<!-- adashi:architecture:begin -->";
 pub const BLOCK_END: &str = "<!-- adashi:architecture:end -->";
-/// Carries the design revision a block was rendered from, for freshness and drift checks.
+/// Per-block content fingerprint carried inside a generated block, for freshness and drift
+/// checks.
+///
+/// This is deliberately *not* the project/store revision. The store revision moves on any
+/// record write — memory notes, tasks, QA, and machine-local checkout state — which would
+/// rewrite every projection file on unrelated changes and create constant Git conflicts.
+/// The marker is a deterministic hash of the block's own rendered content, so an unchanged
+/// design model produces identical bytes across runs and across clones, and only a block
+/// whose content actually changed is rewritten.
 const REVISION_PREFIX: &str = "<!-- adashi:generated revision=";
+/// Placeholder stamped while rendering, before each block's own fingerprint is known.
+///
+/// Sized to the widest fingerprint (`numeric_digest` caps at `MAX_SAFE`, 16 digits), so
+/// budget accounting reserves the final marker's full width and a stamped block never
+/// exceeds the budget the renderer measured.
+const REVISION_PLACEHOLDER: i64 = 9_007_199_254_740_991;
 
 /// Byte budgets. Nested instruction files compete for a harness budget that deletes on overflow,
 /// so over-budget content is dropped deterministically and reported, never silently clipped.
@@ -134,7 +149,7 @@ struct Binding {
     target: String,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct DesignSnapshot {
     elements: Vec<Element>,
     relationships: Vec<Relationship>,
@@ -273,6 +288,59 @@ fn push_section(body: &mut Vec<String>, title: &str, lines: &[String], budget: u
 
 fn revision_marker(revision: i64) -> String {
     format!("{REVISION_PREFIX}{revision} -->")
+}
+
+/// Positive JavaScript-safe integer fingerprint, matching the text store's revision mapping.
+fn numeric_digest(hash: &str) -> i64 {
+    const MAX_SAFE: u64 = 9_007_199_254_740_991;
+    ((u64::from_str_radix(&hash[..14], 16).unwrap_or(0) & MAX_SAFE).max(1)) as i64
+}
+
+/// Byte range of the digits in the first revision marker of `block`, when present.
+fn revision_digits(block: &str) -> Option<(usize, usize)> {
+    let start = block.find(REVISION_PREFIX)? + REVISION_PREFIX.len();
+    let digits = block[start..]
+        .chars()
+        .take_while(|character| character.is_ascii_digit())
+        .count();
+    Some((start, start + digits))
+}
+
+/// Content fingerprint of one rendered block, ignoring the digits of its own revision marker.
+///
+/// Identical payloads therefore stamp identical markers, which is what keeps regeneration
+/// byte-stable and Git-clean. Only the block's own content influences its marker, so a design
+/// change confined to one folder does not rewrite unrelated folder files.
+fn block_fingerprint(block: &str) -> i64 {
+    let mut hash = Sha256::new();
+    match revision_digits(block) {
+        Some((start, end)) => {
+            hash.update(&block.as_bytes()[..start]);
+            hash.update(&block.as_bytes()[end..]);
+        }
+        None => hash.update(block.as_bytes()),
+    }
+    numeric_digest(&format!("{:x}", hash.finalize()))
+}
+
+/// Stamps the block's own content fingerprint into its revision marker.
+fn set_revision_marker(block: &str, revision: i64) -> String {
+    let Some((start, end)) = revision_digits(block) else {
+        return block.to_string();
+    };
+    let mut stamped = String::with_capacity(block.len() + 20);
+    stamped.push_str(&block[..start]);
+    stamped.push_str(&revision.to_string());
+    stamped.push_str(&block[end..]);
+    stamped
+}
+
+/// Replaces every block's placeholder marker with a fingerprint of that block's own content.
+fn stamp_block_fingerprints(blocks: &mut BTreeMap<String, String>) {
+    for block in blocks.values_mut() {
+        let revision = block_fingerprint(block);
+        *block = set_revision_marker(block, revision);
+    }
 }
 
 fn generated_notice() -> &'static str {
@@ -633,16 +701,12 @@ fn extract_block(content: &str) -> Option<(usize, usize)> {
     Some((start, end))
 }
 
-fn block_revision(content: &str) -> Option<i64> {
+/// Reads the revision marker embedded in an existing managed block.
+fn embedded_revision(content: &str) -> Option<i64> {
     let (start, end) = extract_block(content)?;
     let block = &content[start..end];
-    let marker = block.find(REVISION_PREFIX)? + REVISION_PREFIX.len();
-    let rest = &block[marker..];
-    let digits = rest
-        .chars()
-        .take_while(|character| character.is_ascii_digit())
-        .collect::<String>();
-    digits.parse().ok()
+    let (digits_start, digits_end) = revision_digits(block)?;
+    block[digits_start..digits_end].parse().ok()
 }
 
 /// Splices `block` into existing content, replacing an existing managed block when present.
@@ -755,7 +819,7 @@ fn write_block(
 
     let existing = fs::read_to_string(&path).unwrap_or_default();
     let repaired = match extract_block(&existing) {
-        Some((start, end)) => existing[start..end] != *block && block_revision(&existing).is_some(),
+        Some((start, end)) => existing[start..end] != *block && embedded_revision(&existing).is_some(),
         None => false,
     };
 
@@ -802,9 +866,12 @@ pub fn regenerate_configured(db:&dyn adashi_storage_api::ReadSnapshot,project_fo
     }
 
     let snapshot = load_snapshot(db)?;
-    let revision = db.metadata().revision;
-    let mut blocks = expected_blocks(&snapshot, project_folder, revision)?;
-    plan.enrich(&mut blocks,revision);
+    // Render with a placeholder, then stamp each block with a fingerprint of its own content.
+    // This keeps output byte-stable across re-renders and clones, independent of the store
+    // revision, and rewrites only the blocks whose content actually changed.
+    let mut blocks = expected_blocks(&snapshot, project_folder, REVISION_PLACEHOLDER)?;
+    plan.enrich(&mut blocks, REVISION_PLACEHOLDER);
+    stamp_block_fingerprints(&mut blocks);
     ownership::publish(project_folder,&plan,&mut report)?;
 
     let mut expected_paths = BTreeSet::new();
@@ -864,20 +931,23 @@ pub fn status(
 }
 
 pub fn status_configured(db:&dyn adashi_storage_api::ReadSnapshot,project_folder:&Path,file_name:&str,enabled:bool,directory:&str)->Result<ProjectionStatus,String> {
+    // Reported for the dashboard; the block freshness below uses each block's own content
+    // fingerprint, which does not move with unrelated store writes or machine-local state.
     let revision = db.metadata().revision;
     let mut files = Vec::new();
     let mut error = None;
 
     if enabled {
         let snapshot = load_snapshot(db)?;
-        let mut blocks = expected_blocks(&snapshot, project_folder, revision)?;
+        let mut blocks = expected_blocks(&snapshot, project_folder, REVISION_PLACEHOLDER)?;
         match markdown::Plan::load(db,project_folder,directory,true) {
             Ok(plan) => {
-                plan.enrich(&mut blocks,revision);
+                plan.enrich(&mut blocks,REVISION_PLACEHOLDER);
                 match ownership::status(project_folder,&plan) {Ok(status)=>files.extend(status),Err(e)=>error=Some(e)}
             },
             Err(e)=>error=Some(e),
         }
+        stamp_block_fingerprints(&mut blocks);
         for (folder, expected) in &blocks {
             let mut path = project_folder.to_path_buf();
             if !folder.is_empty() {
@@ -902,8 +972,11 @@ pub fn status_configured(db:&dyn adashi_storage_api::ReadSnapshot,project_folder
                 Ok(content) => match extract_block(&content) {
                     None => "missing",
                     Some((start, end)) if content[start..end] == *expected => "current",
-                    Some(_) => match block_revision(&content) {
-                        Some(block) if block == revision => "drifted",
+                    // The marker matches this block's own content fingerprint, so the text
+                    // differs because it was edited outside Adashi rather than because the
+                    // design model moved.
+                    Some(_) => match (embedded_revision(&content), embedded_revision(expected)) {
+                        (Some(block), Some(fresh)) if block == fresh => "drifted",
                         _ => "stale",
                     },
                 },
@@ -1025,6 +1098,79 @@ mod tests {
             render_root_block(&snapshot(), 3),
             render_root_block(&snapshot(), 3)
         );
+    }
+
+    #[test]
+    fn block_fingerprint_tracks_content_not_the_stamped_number() {
+        let block = render_root_block(&snapshot(), REVISION_PLACEHOLDER);
+        let stamped_a = set_revision_marker(&block, 1);
+        let stamped_b = set_revision_marker(&block, 2);
+        // The stamped number is excluded from the fingerprint, so re-stamping is idempotent.
+        assert_eq!(block_fingerprint(&stamped_a), block_fingerprint(&stamped_b));
+        assert_eq!(embedded_revision(&stamped_a), Some(1));
+
+        let mut changed = snapshot();
+        changed.elements[0].description = "A different purpose.".into();
+        let changed_block = render_root_block(&changed, REVISION_PLACEHOLDER);
+        // A real content change moves the fingerprint.
+        assert_ne!(block_fingerprint(&block), block_fingerprint(&changed_block));
+
+        let mut blocks = BTreeMap::from([
+            ("".to_string(), stamped_a.clone()),
+            ("src".to_string(), changed_block.clone()),
+        ]);
+        let expected = blocks.clone();
+        stamp_block_fingerprints(&mut blocks);
+        // Stamping is deterministic, so a second regeneration produces identical bytes.
+        let mut again = expected;
+        stamp_block_fingerprints(&mut again);
+        assert_eq!(blocks, again);
+    }
+
+    /// A design change that touches one element must leave unrelated folder blocks byte-for-byte
+    /// identical, so regeneration does not dirty files that did not change.
+    #[test]
+    fn a_design_change_rewrites_only_the_blocks_it_touches() {
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("adashi-projection-isolation-{suffix}"));
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir_all(root.join("lib")).unwrap();
+
+        let mut snapshot = snapshot();
+        snapshot.bindings = vec![
+            Binding {
+                design_external_id: "5".into(),
+                target_type: "file".into(),
+                target: "src/mcp.rs".into(),
+            },
+            Binding {
+                design_external_id: "6".into(),
+                target_type: "file".into(),
+                target: "lib/store.rs".into(),
+            },
+        ];
+        let mut before = expected_blocks(&snapshot, &root, REVISION_PLACEHOLDER).unwrap();
+        stamp_block_fingerprints(&mut before);
+
+        let mut changed = snapshot.clone();
+        changed
+            .elements
+            .iter_mut()
+            .find(|element| element.external_id == "6")
+            .unwrap()
+            .description = "A changed responsibility.".into();
+        let mut after = expected_blocks(&changed, &root, REVISION_PLACEHOLDER).unwrap();
+        stamp_block_fingerprints(&mut after);
+
+        // The root and the folder that owns the element change; the other folder does not.
+        assert_ne!(before[""], after[""]);
+        assert_ne!(before["lib"], after["lib"]);
+        assert_eq!(before["src"], after["src"]);
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -1299,6 +1445,30 @@ mod tests {
         .unwrap();
         assert!(report.repaired.is_empty());
         assert_eq!(fs::read_to_string(&root_file).unwrap(), before);
+
+        // An unrelated store write (a memory note, a task update, or another machine's
+        // registration) moves the project revision. It must not rewrite the design projection:
+        // each generated marker is a fingerprint of that block's own content, not of the store.
+        let folder_before = fs::read_to_string(&folder_file).unwrap();
+        let store_before = crate::storage::sqlite::test_snapshot(&db, project_row_id)
+            .metadata()
+            .revision;
+        db.execute("UPDATE project_state SET revision=revision+1", [])
+            .unwrap();
+        let bumped = crate::storage::sqlite::test_snapshot(&db, project_row_id)
+            .metadata()
+            .revision;
+        assert_eq!(bumped, store_before + 1);
+        let report = regenerate(
+            crate::storage::sqlite::test_snapshot(&db, project_row_id).as_ref(),
+            &project_folder,
+            "AGENTS.md",
+            true,
+        )
+        .unwrap();
+        assert!(report.repaired.is_empty(), "unrelated revision bump repaired files");
+        assert_eq!(fs::read_to_string(&root_file).unwrap(), before);
+        assert_eq!(fs::read_to_string(&folder_file).unwrap(), folder_before);
 
         // A hand edit inside the managed block is detected and restored.
         let edited = before.replace("Passive stdio server.", "Someone edited this.");
