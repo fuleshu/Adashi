@@ -12,9 +12,12 @@ export async function verifyMarkdownEditor({page,call,until,passed,fixture,proje
   const save=()=>panel.getByRole("button",{name:"Save document",exact:true}).click();
   const saved=()=>until(async()=>await panel.getByRole("status").innerText()==="Saved" &&
     !(await panel.getByRole("textbox",{name:"Document title",exact:true}).isDisabled()),"save response applied and editor enabled");
-  await page.getByRole("button",{name:/^Documents \(/}).click();
+  await page.locator(".design-level-tabs").getByRole("tab",{name:"Documents",exact:true}).click();
   await page.getByRole("button",{name:"New document",exact:true}).click();
   await panel.getByRole("textbox",{name:"Document title",exact:true}).fill("Edited native design");
+  // A document opens on its rendered preview; the toolbar only edits after leaving preview.
+  await until(()=>panel.locator(".editor-preview").isVisible(),"document opens on its rendered preview");
+  await panel.getByTitle(/^Preview/).click();
   const original="# Native edit\n\nGrüße 日本語\n```rust\nlet exact = true;\n```\n";
   await edit(original);
   await panel.locator(".CodeMirror").evaluate(el=>el.CodeMirror.setSelection({line:2,ch:0},{line:2,ch:5}));
@@ -62,7 +65,7 @@ export async function verifyMarkdownEditor({page,call,until,passed,fixture,proje
   await save();
   await panel.getByText("Save failed; draft retained",{exact:true}).waitFor();
   assert.equal(await body(),local);
-  await page.getByRole("button",{name:"Documents",exact:true}).click();
+  await page.locator(".document-breadcrumbs").getByRole("button",{name:"Documents",exact:true}).click();
   await page.getByRole("navigation",{name:"Design documents"}).getByRole("button",{name:"Edited native design",exact:true}).click();
   assert.equal(await body(),local,"unmount preserves draft and original guard");
   await panel.getByRole("button",{name:"Reload document",exact:true}).click();
@@ -87,7 +90,7 @@ export async function verifyMarkdownEditor({page,call,until,passed,fixture,proje
   await edit("Draft through project and backend changes");
   await page.locator(".project-switcher select").selectOption("independent");
   await page.locator(".project-switcher select").selectOption("fixture");
-  await page.getByRole("button",{name:/^Documents \(/}).click();
+  await page.locator(".design-level-tabs").getByRole("tab",{name:"Documents",exact:true}).click();
   await page.getByRole("navigation",{name:"Design documents"}).getByRole("button",{name:"Edited native design",exact:true}).click();
   assert.equal(await body(),"Draft through project and backend changes");
   const target=backend==="sqlite"?"text":"sqlite";

@@ -6,6 +6,7 @@
     "exit_code": 1,
     "finished_at": "2026-09-25 10:40:57",
     "id": 14,
+    "lease_expires_at": null,
     "output": {
       "lines": [
         "Source changed after acceptance; rerun the suite\r\n",

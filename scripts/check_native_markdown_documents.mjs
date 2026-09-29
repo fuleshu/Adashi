@@ -7,7 +7,7 @@ export async function verifyMarkdownDocuments({ page, call, until, passed, fixtu
   const invoke = (command, args) => page.evaluate(({command,args}) => window.__TAURI_INTERNALS__.invoke(command,args), {command,args});
   const get = () => invoke("get_markdown_document", {projectId:"fixture",externalId:"desktop-spec"});
   const save = (document, readToken = null) => invoke("save_markdown_document", {input:{projectId:"fixture",operationId:randomUUID(),document,readToken}});
-  await page.getByRole("button", {name:/^Documents \(0\)$/}).click();
+  await page.locator(".design-level-tabs").getByRole("tab", { name: "Documents", exact: true }).click();
   await page.getByText("No Markdown designs yet.", {exact:true}).waitFor();
   const body = "# Desktop specification\n\nGrüße 日本語\n```rust\nlet exact = true;\n```\n";
   const document = {externalId:"desktop-spec",title:"Desktop specification",body,designLinks:[]};

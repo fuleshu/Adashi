@@ -12,6 +12,7 @@ export function MarkdownEditor({
   maxHeight = "620px",
   height = "560px",
   disabled = false,
+  startInPreview = false,
 }: {
   value: string;
   onBlur: (value: string) => void;
@@ -21,6 +22,8 @@ export function MarkdownEditor({
   maxHeight?: string;
   height?: string;
   disabled?: boolean;
+  /** Open on the rendered preview; the toolbar Preview button toggles back to the source. */
+  startInPreview?: boolean;
 }) {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const editorRef = React.useRef<EasyMDE | null>(null);
@@ -51,7 +54,9 @@ export function MarkdownEditor({
       initialValue: value,
       lineNumbers: false,
       lineWrapping: true,
-      maxHeight,
+      // maxHeight is deliberately not forwarded: EasyMDE copies it onto the scroller as an inline
+      // height, which clipped text below a fixed-height host with no way to scroll to it. The host
+      // height plus the scroller CSS own the box, so overflowing text scrolls inside it instead.
       minHeight,
       nativeSpellcheck: true,
       placeholder,
@@ -91,7 +96,11 @@ export function MarkdownEditor({
     editor.codemirror.getInputField().setAttribute("title", "Edit Markdown content; use the formatting toolbar or Preview");
     editorRef.current = editor;
 
-    window.requestAnimationFrame(() => editor.codemirror.refresh());
+    window.requestAnimationFrame(() => {
+      // The toolbar Preview button already reflects the active state that togglePreview sets.
+      if (startInPreview) EasyMDE.togglePreview(editor);
+      editor.codemirror.refresh();
+    });
 
     return () => {
       editor.codemirror.off("blur", commit);

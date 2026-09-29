@@ -12,7 +12,7 @@ export async function verifyLargeMarkdown({page,call,until,passed,fixture,projec
   await call("adashi_design",{operation:"save",operationId:randomUUID(),changeIntent:"Large native acceptance",changes});
   await invoke("set_project_architecture_projection",{projectId:"fixture",enabled:true,fileName:"AGENTS.md",markdownDirectory:"docs/adashi"});
   await page.getByRole("button",{name:"Design",exact:true}).click();
-  await page.getByRole("button",{name:/^Documents \(/}).click();
+  await page.locator(".design-level-tabs").getByRole("tab",{name:"Documents",exact:true}).click();
   const start=Date.now();
   await page.getByRole("navigation",{name:"Design documents"}).getByRole("button",{name:"Large native design",exact:true}).click();
   const editor=page.getByRole("region",{name:"Edit design document",exact:true});
@@ -20,6 +20,8 @@ export async function verifyLargeMarkdown({page,call,until,passed,fixture,projec
   const openMs=Date.now()-start;
   assert.equal(await editor.locator(".CodeMirror").evaluate(el=>el.CodeMirror.getValue()),body);
   assert.ok(openMs<10000,`Large document open took ${openMs}ms`);
+  // The document opens on its rendered preview; editing the tail needs the source view.
+  await editor.getByTitle(/^Preview/).click();
   const appendStart=Date.now();
   await editor.locator(".CodeMirror").evaluate(el=>{const cm=el.CodeMirror;cm.setCursor(cm.lineCount()-1,0);cm.focus();});
   await page.keyboard.type("Native tail edit");

@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-09-29 07:02:33",
+    "design_external_id": "doc.markdown-adoption",
+    "id": 33153021542,
+    "sort_order": 1,
+    "target_type": "markdown",
+    "task_id": {
+      "ref": "f09b6846-7154-4ab7-bbc4-416624de3410"
+    }
+  },
+  "deleted": false,
+  "identity": "c45cb443-4c46-47a3-9bc3-338f1c7ba143",
+  "schemaVersion": 1
+}

@@ -7,11 +7,13 @@
     "description": "Builds the standalone stdio MCP server binary so client-owned MCP launches cannot drift behind library changes.",
     "enabled": 1,
     "id": 4,
+    "kind": "unit",
     "name": "MCP binary build",
     "number": 4,
     "project_id": {
       "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
     },
+    "scope": "",
     "shell": "powershell",
     "timeout_seconds": 180,
     "updated_at": "2026-07-08 11:40:42",

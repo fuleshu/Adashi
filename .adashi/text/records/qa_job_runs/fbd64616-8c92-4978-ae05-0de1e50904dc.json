@@ -6,6 +6,7 @@
     "exit_code": 0,
     "finished_at": "2026-09-25 10:54:27",
     "id": 17,
+    "lease_expires_at": null,
     "output": {
       "lines": [
         "Verified Core acceptance completed 2026-09-25T10:54:07.2550681Z\r\n",

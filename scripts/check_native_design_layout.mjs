@@ -7,8 +7,10 @@ import { randomUUID } from "node:crypto";
 export async function verifyDesignLayout({ page, call, until, passed, fixture }) {
   const measurements = [];
   async function check(label) {
-    assert.ok((await page.locator(".design-index-panel > .design-list").boundingBox()).height >= 120,
-      `${label}: design tree must retain a usable scroll area`);
+    // The index shows the tree plus its unconnected artifacts, or a flat listing of one kind.
+    const listing = page.locator(".design-index-panel > .design-index-body, .design-index-panel > .design-list").first();
+    assert.ok((await listing.boundingBox()).height >= 120,
+      `${label}: design index must retain a usable scroll area`);
     const geometry = await page.locator(".design-main").evaluate(main => {
       const rect = selector => {
         const { top, bottom, width, height } = main.querySelector(selector).getBoundingClientRect();
@@ -34,15 +36,19 @@ export async function verifyDesignLayout({ page, call, until, passed, fixture })
     { op: "upsert_markdown", externalId: "layout-document", title: "Layout document", body: "# Layout document\n\nThe document panel remains usable.\n",
       designLinks: [{ targetType: "element", designExternalId: root.externalId }] },
   ] });
-  await page.locator(".design-index-panel").getByRole("button", { name: /^Documents \(1\)$/ }).waitFor();
+  await page.locator(".design-level-tabs").getByRole("tab", { name: "Documents", exact: true }).click();
+  await page.getByRole("navigation", { name: "Design documents" }).getByRole("button", { name: "Layout document", exact: true }).waitFor();
+  await page.locator(".design-level-tabs").getByRole("tab", { name: "Tree View", exact: true }).click();
   await page.locator(`[data-design-entity-id="${root.externalId}"]`).click();
   await page.locator(".document-artifacts").getByRole("button", { name: "Layout document", exact: true }).waitFor();
   for (const viewport of [{ width: 1120, height: 900 }, { width: 1920, height: 1080 }, { width: 1440, height: 940 }]) {
     await page.setViewportSize(viewport);
-    await page.locator(".design-level-tabs").getByRole("button", { name: "System Context", exact: true }).click();
+    // Tree View lists the whole tree; the shown element decides the C4 level of the diagram.
+    await page.locator(".design-level-tabs").getByRole("tab", { name: "Tree View", exact: true }).click();
+    await page.locator(`[data-design-entity-id="${root.externalId}"]`).click();
     await page.frameLocator('iframe[title="Structurizr C4 diagram"]').locator("svg").waitFor({ state: "attached" });
     await check(`C4 linked ${viewport.width}`);
-    await page.locator(".design-level-tabs").getByRole("button", { name: "UML Artifacts", exact: true }).click();
+    await page.locator(".design-level-tabs").getByRole("tab", { name: "UML Artifacts", exact: true }).click();
     await page.locator(".mermaid-content svg").waitFor({ state: "visible" });
     await check(`UML linked ${viewport.width}`);
     await page.locator(".design-viewer-panel").scrollIntoViewIfNeeded();
@@ -59,10 +65,13 @@ export async function verifyDesignLayout({ page, call, until, passed, fixture })
   await check("UML after source resize");
   await page.locator(".document-artifacts").getByRole("button", { name: "Layout document", exact: true }).click();
   await page.getByRole("region", { name: "Edit design document", exact: true }).waitFor();
-  assert.equal(await page.locator(".design-main").isVisible(), false);
-  assert.ok((await page.locator(".documents-workspace").boundingBox()).height > 400);
+  await page.locator(".document-workspace").waitFor();
+  assert.ok((await page.locator(".document-workspace").boundingBox()).height > 400);
+  // The document is integrated into the design panel: index and inspector stay visible.
+  assert.equal(await page.locator(".design-index-panel").isVisible(), true);
+  assert.equal(await page.locator(".design-inspector-panel").isVisible(), true);
   await page.screenshot({ path: path.join(fixture, "layout-documents.png"), fullPage: true });
-  await page.getByRole("button", { name: "Architecture", exact: true }).click();
+  await page.locator(".document-breadcrumbs").getByRole("button", { name: "Documents", exact: true }).click();
   await check("return from Documents");
   await fs.writeFile(path.join(fixture, "layout-measurements.json"), JSON.stringify(measurements, null, 2));
   passed("native C4/UML geometry with/without Markdown links, compact/wide window sizes, source resizing and Documents navigation");

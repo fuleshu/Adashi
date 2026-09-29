@@ -6,6 +6,7 @@
     "exit_code": 0,
     "finished_at": "2026-07-08 11:02:11",
     "id": 1,
+    "lease_expires_at": null,
     "output": {
       "lines": [
         "    Checking adashi v0.1.0 (C:\\src\\Adashi\\src-tauri)\n",

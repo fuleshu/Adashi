@@ -7,11 +7,13 @@
     "description": "Verifies the sealed real WebView2/MCP acceptance executed by the workspace runner on both SQLite/text, matching source files, native/MCP binary hashes, frontend entry and retained logs. Run scripts/check_markdown_feature.ps1 -Suite Native from the workspace first. The installed QA host stalls when starting some nested Node/Python processes, so this job records and verifies their actual externally executed evidence. Covers documents, toolbar/Preview, guarded drafts, import, references, projections and large bodies.",
     "enabled": 1,
     "id": 7,
+    "kind": "unit",
     "name": "Markdown native desktop acceptance",
     "number": 7,
     "project_id": {
       "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
     },
+    "scope": "",
     "shell": "powershell",
     "timeout_seconds": 900,
     "updated_at": "2026-09-25 10:40:41",

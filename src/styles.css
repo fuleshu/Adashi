@@ -461,13 +461,36 @@ button {
 .design-index-panel {
   display: grid;
   gap: 12px;
-  /* Five rows: Documents, C4 level tabs, search, the design-state control, then the tree or the state
-     listing. Only the last row flexes; giving a control row a flexible track is what stretched
-     it into the tree's space and clipped its labels. */
-  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  /* Four rows: the index mode buttons, search, the design-state control, then the mode listing.
+     Only the last row flexes; giving a control row a flexible track is what stretched it into the
+     listing's space and clipped its labels. */
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
   padding: 14px;
+}
+
+/* The one scrolling region of the index panel: the tree plus its unconnected artefacts, or a flat
+   listing of one artefact kind. */
+.design-index-body {
+  align-content: start;
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.design-list.embedded {
+  overflow: visible;
+}
+
+.design-list-section-heading {
+  color: #617170;
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 0;
+  margin: 0;
+  text-transform: uppercase;
 }
 
 .design-level-tabs {
@@ -610,6 +633,32 @@ button {
 .inspector-file-list.broken li {
   color: #a33a3a;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* Markdown designs connected to the entity shown in the inspector. */
+.inspector-document-list {
+  display: grid;
+  gap: 6px;
+}
+
+.inspector-document-link {
+  align-items: center;
+  background: #fbfaf6;
+  border: 1px solid #ddd8cd;
+  border-radius: 7px;
+  color: #244947;
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 12px;
+  gap: 8px;
+  padding: 7px 9px;
+  text-align: left;
+}
+
+.inspector-document-link:hover {
+  background: #e6f1ed;
+  border-color: #9fbfb7;
 }
 
 .inspector-note {
@@ -758,6 +807,15 @@ button {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+}
+
+/* An open Markdown document takes the diagram's place; the index and inspector stay visible. */
+.design-main.document-open {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.design-main.document-open > :not(.document-workspace) {
+  display: none;
 }
 
 /* Keep optional document links and breadcrumbs in one intrinsic header row;
@@ -2991,8 +3049,13 @@ button {
   min-height: 0;
 }
 
+/* The scroller owns the editor box. EasyMDE would otherwise pin it to the caller's maxHeight, which
+   clipped text below the host with no scrollbar able to reach it; a scrollbar now appears only when
+   the text is longer than the box. */
 .markdown-editor-host .CodeMirror-scroll {
+  height: 100% !important;
   min-height: 0 !important;
+  overflow: auto !important;
 }
 
 .markdown-editor-host .CodeMirror-lines {
@@ -3021,6 +3084,14 @@ button {
 
 .markdown-editor-host .editor-preview,
 .markdown-editor-host .editor-preview-side {
+  background: #ffffff;
+  color: #1f2933;
+  line-height: 1.55;
+  padding: 16px;
+}
+
+/* EasyMDE's own preview element is .editor-preview-full, positioned over the CodeMirror area. */
+.markdown-editor-host .editor-preview-full {
   background: #ffffff;
   color: #1f2933;
   line-height: 1.55;
@@ -3250,7 +3321,7 @@ code {
   }
 
   .design-browser > .design-index-panel {
-    grid-template-rows: auto auto auto auto minmax(160px, 240px);
+    grid-template-rows: auto auto auto minmax(160px, 240px);
   }
 
   .design-browser > .design-main {

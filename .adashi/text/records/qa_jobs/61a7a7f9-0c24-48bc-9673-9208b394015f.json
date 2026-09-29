@@ -7,11 +7,13 @@
     "description": "Verify successful Core acceptance executed by the workspace runner: common storage contracts, full Rust regression, actual SQLite/text MCP, write-free reads, adapter parity and independent Git clones. Before execution build with npm run build and cargo build --manifest-path src-tauri/Cargo.toml --bins, then run scripts/check_markdown_feature.ps1 -Suite Core -SkipBuild. The installed QA host stalls nested Node/Python startup, so this job checks the resulting complete source path/hash set, binary hashes and retained log hashes; it does not claim to re-execute the suite. Isolated target fixtures only. Server SQL remains unavailable and unvalidated. See docs/markdown-validation.md.",
     "enabled": 1,
     "id": 6,
+    "kind": "unit",
     "name": "Markdown storage, MCP and Git acceptance",
     "number": 6,
     "project_id": {
       "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
     },
+    "scope": "",
     "shell": "powershell",
     "timeout_seconds": 1800,
     "updated_at": "2026-09-25 10:45:18",

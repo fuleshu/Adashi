@@ -7,11 +7,13 @@
     "description": "Runs the Rust test suite that currently covers the MCP-adjacent Rust backend, including design-save regression tests compiled through the same crate as the MCP server.",
     "enabled": 1,
     "id": 3,
+    "kind": "unit",
     "name": "MCP Rust unit tests",
     "number": 3,
     "project_id": {
       "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
     },
+    "scope": "",
     "shell": "powershell",
     "timeout_seconds": 180,
     "updated_at": "2026-07-08 11:40:39",

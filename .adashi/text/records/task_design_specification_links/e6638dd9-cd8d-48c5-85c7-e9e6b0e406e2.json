@@ -1,0 +1,16 @@
+{
+  "collection": "task_design_specification_links",
+  "data": {
+    "created_at": "2026-09-29 07:02:33",
+    "design_external_id": "ui-design-browser",
+    "id": 33153021541,
+    "sort_order": 0,
+    "target_type": "element",
+    "task_id": {
+      "ref": "f09b6846-7154-4ab7-bbc4-416624de3410"
+    }
+  },
+  "deleted": false,
+  "identity": "e6638dd9-cd8d-48c5-85c7-e9e6b0e406e2",
+  "schemaVersion": 1
+}

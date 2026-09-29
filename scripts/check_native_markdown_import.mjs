@@ -11,7 +11,7 @@ export async function verifyMarkdownImport({page,call,until,passed,fixture,proje
   await fs.writeFile(source,body,"utf8");
   const sourceBefore=await fs.readFile(source);
   await page.getByRole("button",{name:"Design",exact:true}).click();
-  await page.getByRole("button",{name:/^Documents \(/}).click();
+  await page.locator(".design-level-tabs").getByRole("tab",{name:"Documents",exact:true}).click();
   await page.getByRole("button",{name:"Import document",exact:true}).click();
   const importPanel=page.getByRole("region",{name:"Import Markdown design",exact:true});
   await importPanel.getByRole("textbox",{name:"Markdown source path",exact:true}).fill(source);

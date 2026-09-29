@@ -6,6 +6,7 @@
     "exit_code": 0,
     "finished_at": "2026-07-08 11:41:04",
     "id": 7,
+    "lease_expires_at": null,
     "output": {
       "lines": [
         "MCP stdio initialize smoke passed\r\n",

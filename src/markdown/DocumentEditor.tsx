@@ -65,7 +65,7 @@ export function DocumentEditor({ projectId, externalId, snapshot, options, onSav
     {draft?.importSource && <p>Import source: {draft.importSource.sourcePath}. Review the content and associations, then save. The original file stays unchanged.</p>}
     <fieldset disabled={busy} className="document-body-field">
       <legend>Content</legend>
-      <MarkdownEditor value={document.body} disabled={busy} onChange={body => edit({body})} onBlur={() => {}} placeholder="Write the design in Markdown…" minHeight="220px" maxHeight="700px" height="380px" />
+      <MarkdownEditor value={document.body} disabled={busy} onChange={body => edit({body})} onBlur={() => {}} placeholder="Write the design in Markdown…" startInPreview minHeight="280px" height="clamp(320px, 55vh, 720px)" />
     </fieldset>
     <section aria-label="Edit associations"><h4>Associations</h4>
       <ol>{document.designLinks.map((link, index) => <li key={`${link.targetType}:${link.designExternalId}`}>
