@@ -1,5 +1,6 @@
 import React from "react";
 import { DocumentsIndex, DocumentInspector, DocumentWorkspace } from "./markdown/DocumentsBrowser";
+import { useDocumentSession } from "./markdown/DocumentEditor";
 import type { MarkdownSummary, DesignAssociation, Backlink } from "./markdown/types";
 import { VersionedField, DraftConflict, useVersionedDraft, savedField, type SaveDraft } from "./VersionedField";
 import ReactDOM from "react-dom/client";
@@ -1227,12 +1228,20 @@ function DesignBrowser({
   const [indexMode, setIndexMode] = React.useState<DesignIndexMode>("tree");
   const [selectedDocument, setSelectedDocument] = React.useState<string | null>(null);
   const [documentsImporting, setDocumentsImporting] = React.useState(false);
-  // Bumped by the document editor so the inspector column re-reads the document it is showing.
-  const [documentRefresh, setDocumentRefresh] = React.useState(0);
+  const [documentNotice, setDocumentNotice] = React.useState<string | null>(null);
+  // Bumped when a document's associations change, so the tree and breadcrumb follow its links.
+  const [documentLinkVersion, setDocumentLinkVersion] = React.useState(0);
   // Opening a document never steals the index listing: the tree stays where the user left it, and
   // the Documents listing is an explicit choice. Jumps from outside the design view pick it.
-  const openDocument = (id: string | null) => {setSelectedDocument(id);setDocumentsImporting(false);};
+  const openDocument = (id: string | null) => {setSelectedDocument(id);setDocumentsImporting(false);setDocumentNotice(null);};
   const closeDocument = () => {setSelectedDocument(null);setDocumentsImporting(false);};
+  const documentSession = useDocumentSession({
+    projectId: payload.projectId,
+    externalId: selectedDocument,
+    changeCursor: payload.changeCursor,
+    onDeleted: (message) => { setSelectedDocument(null); setDocumentsImporting(false); setDocumentNotice(message ?? null); },
+    onDraftChange: () => setDocumentLinkVersion((current) => current + 1),
+  });
   const [query, setQuery] = React.useState("");
   const [isResizingSource, setIsResizingSource] = React.useState(false);
   const [sourcePanelHeight, setSourcePanelHeight] = React.useState(200);
@@ -1592,6 +1601,41 @@ function DesignBrowser({
         ? `Level 2: ${activeBranchElement?.name ?? "Components"}`
         : `Level 3: ${activeBranchElement?.name ?? "UML Artifacts"}`;
 
+  // A document is shown where it is linked: the breadcrumb and the tree follow its first element
+  // association (or whichever of its associations is already shown), including later edits.
+  React.useEffect(() => {
+    if (!selectedDocument) {
+      return;
+    }
+
+    const targets: string[] = [];
+
+    for (const link of documentSession.document?.designLinks ?? []) {
+      if (link.targetType === "element" && elementExternalIds.has(link.designExternalId)) {
+        targets.push(link.designExternalId);
+      } else if (link.targetType === "relationship") {
+        const relationship = payload.designRelationships.find((candidate) => candidate.externalId === link.designExternalId);
+        if (relationship) targets.push(relationship.sourceExternalId);
+      } else if (link.targetType === "uml") {
+        const diagram = payload.diagrams.find((candidate) => candidate.key === link.designExternalId);
+        if (diagram?.attachedToExternalId) targets.push(diagram.attachedToExternalId);
+      } else if (link.targetType === "mockup") {
+        const mockup = payload.mockups.find((candidate) => candidate.externalId === link.designExternalId);
+        if (mockup?.attachedToExternalId) targets.push(mockup.attachedToExternalId);
+      }
+    }
+
+    const target = targets.find((externalId) => externalId === selectedEntity?.externalId) ?? targets[0];
+
+    if (!target || target === selectedEntity?.externalId) {
+      return;
+    }
+
+    onSelect({ type: "element", externalId: target });
+    const element = payload.designElements.find((candidate) => candidate.externalId === target);
+    if (element) onLevelChange(hasChildElements(element, payload.designElements) ? "components" : "features");
+  }, [documentLinkVersion, documentSession.document, selectedDocument]);
+
   return (
     <section id="design" className="design-browser">
       <aside className="design-index-panel">
@@ -1789,15 +1833,11 @@ function DesignBrowser({
         <div className={documentPanelOpen ? "viewer-panel design-viewer-panel document-open" : "viewer-panel design-viewer-panel"}>
           {documentPanelOpen ? (
             <DocumentWorkspace
-              changeCursor={payload.changeCursor}
               importing={documentsImporting}
-              onDraftChange={() => setDocumentRefresh((current) => current + 1)}
+              notice={documentNotice}
               onImportClose={() => setDocumentsImporting(false)}
               onSelect={openDocument}
-              options={designOptions}
-              projectId={payload.projectId}
-              refreshToken={documentRefresh}
-              selectedId={selectedDocument}
+              session={documentSession}
             />
           ) : (
           <>
@@ -2030,15 +2070,12 @@ function DesignBrowser({
         onJumpToFeatures={() => selectLevel("features")}
         onOpenDocument={openDocument}
       /></div>
-      {documentPanelOpen ? (
+      {documentPanelOpen && !documentsImporting ? (
         <DocumentInspector
-          changeCursor={payload.changeCursor}
           onBacklink={onBacklink}
           onNavigate={onNavigate}
           options={designOptions}
-          projectId={payload.projectId}
-          refreshToken={documentRefresh}
-          selectedId={selectedDocument}
+          session={documentSession}
         />
       ) : null}
     </section>

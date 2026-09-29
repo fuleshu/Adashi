@@ -661,6 +661,83 @@ button {
   border-color: #9fbfb7;
 }
 
+/* The open document's associations: shown and edited in one place, the inspector column. */
+.document-associations {
+  gap: 8px;
+}
+
+.document-association-list {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.document-association-list li {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.document-association-target {
+  background: transparent;
+  border: 0;
+  color: #2f6f6d;
+  cursor: pointer;
+  flex: 1 1 auto;
+  font: inherit;
+  font-size: 12px;
+  padding: 0;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.document-association-target:hover {
+  color: #163434;
+}
+
+.document-association-list button:not(.document-association-target),
+.document-association-add button {
+  background: #f4f8f6;
+  border: 1px solid #c7d6d1;
+  border-radius: 6px;
+  color: #244947;
+  cursor: pointer;
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 8px;
+}
+
+.document-association-list button:not(.document-association-target):hover,
+.document-association-add button:hover {
+  background: #e6f1ed;
+}
+
+.document-association-list button:disabled,
+.document-association-add button:disabled {
+  cursor: default;
+  opacity: .5;
+}
+
+.document-association-add {
+  display: grid;
+  gap: 6px;
+}
+
+.document-association-add select {
+  border: 1px solid #c6cec9;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+  min-width: 0;
+  padding: 6px;
+  width: 100%;
+}
+
 .inspector-note {
   color: #617170;
   font-size: 12px;

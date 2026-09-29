@@ -8,12 +8,7 @@
 .document-body-field{border:0;padding:0;margin:12px 0;min-width:0}
 /* The editor scrolls inside its own box; the document panel scrolls everything around it. */
 .document-body-field .markdown-editor-host{resize:vertical;overflow:hidden;max-height:none}
-.document-editor section{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
-.document-editor section h4{width:100%;margin:0}
-.document-editor ol{width:100%;margin:0;padding-left:24px}
-.document-editor li button{margin-left:8px}
 .document-editor pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}
-.document-editor select{max-width:100%;min-width:180px}
 .document-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
 .document-workspace button{background:#2f6f6d;color:#fff;border:0;border-radius:7px;padding:8px 12px;cursor:pointer;font:inherit;font-size:14px}
 .document-workspace button:hover{background:#255957}

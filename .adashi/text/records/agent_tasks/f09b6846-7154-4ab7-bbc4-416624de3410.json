@@ -1,21 +1,17 @@
 {
   "collection": "agent_tasks",
   "data": {
-    "changed_files": "[\"src/main.tsx\",\"src/styles.css\",\"src/markdown/DocumentsBrowser.tsx\",\"src/markdown/DocumentEditor.tsx\",\"src/markdown/documents.css\",\"scripts/check_native_design_layout.mjs\",\"scripts/check_native_markdown_documents.mjs\",\"scripts/check_native_markdown_editor.mjs\",\"scripts/check_native_markdown_import.mjs\"]",
-    "completed_at": "2026-09-29 08:24:30",
+    "changed_files": "[\"src/main.tsx\",\"src/markdown/DocumentEditor.tsx\",\"src/markdown/DocumentsBrowser.tsx\",\"src/markdown/documents.css\",\"src/styles.css\",\"scripts/check_native_markdown_editor.mjs\"]",
+    "completed_at": "2026-09-29 08:46:50",
     "completion_memo": {
       "lines": [
-        "Review follow-up on the design index and Markdown integration (second round, commit 14506a9).\n",
+        "Third round on the design index and Markdown integration (commit pending push).\n",
         "\n",
-        "Tree (src/main.tsx DesignTree/DesignTreeItem): the always-expanded mode is gone. Only the branch of the element shown in the viewer opens by itself, other branches keep the state the user gave them, and the tree starts collapsed. Selecting an element in the diagram or the tree reveals and scrolls to its own branch.\n",
+        "Tree and breadcrumb follow the document: opening a document now also shows where it is linked. A new effect in DesignBrowser resolves the document's ordered associations to a C4 element (element link, or the source element of a relationship, or the owner of a linked UML artifact or mockup), preferring whichever target is already shown, and selects it. The header breadcrumb therefore reads the document's real path (System Context > ... > the linked element) and the tree highlights and opens exactly that branch, including after association edits (documentLinkVersion).\n",
         "\n",
-        "Document view: the document now renders inside the design viewer panel (.viewer-panel.document-open) instead of taking over the main column, so the header keeps the tree breadcrumb (System Context > ... > element) and the panel keeps the same background, border and heading as every other view. The document's own breadcrumb is gone. Opening a document no longer switches the index listing, so the tree stays where the user left it; task/QA jumps still open the Documents list.\n",
+        "One clean side panel: the document session moved out of the editor into useDocumentSession (DocumentEditor.tsx), shared by both columns, so the document area and the side panel can no longer disagree about the document. The content column now holds only the panel heading, the title, the Markdown body and the save/discard/delete actions plus status, conflict and save-error reporting. The side panel holds everything about the document's links: the ordered Associations list (each entry opens its design entity, with move-earlier and Detach) and the Choose design/Associate controls, followed by Referenced by. The duplicate \"Related designs\" section is gone. The draft stays in the session module map, so switching documents cannot leak another document's draft, prompt or status.\n",
         "\n",
-        "Right panel (DocumentsBrowser.tsx DocumentInspector): while a document is open the inspector column shows that document instead of another entity, with the same inspector markup as the element and relationship panels (eyebrow, h3, identity note, Related designs, Referenced by). The editor area no longer repeats those links; the editable Associations stay in the document form. The element and relationship inspectors keep their Documents section. A documentRefresh counter re-reads the inspector after association edits, saves and discards only, so typing a body character does not re-read the document.\n",
-        "\n",
-        "UI mockups: a new \"UI Mockup\" index mode lists every mockup flat (title, status, attachment). UML Artifacts now lists UML diagrams only.\n",
-        "\n",
-        "Acceptance: npx tsc --noEmit clean; QA job 249560800 run 5686118898 (build, npm run build) passed on 2026-09-29; node --check on the edited scripts. The five native scripts follow the new contract again (index mode tabs, Design documents list, .document-workspace, document inspector heading, design breadcrumb to leave the document, document list buttons carry an explicit aria-label). Not verified here: the native Playwright/WebView2 suites cannot run on this Linux host and the GUI was not visually inspected."
+        "Acceptance: npx tsc --noEmit clean; QA job 249560800 run 9887711878 (build, npm run build) passed on 2026-09-29; the native editor script now drives the association combobox, Associate and Detach inside the document inspector and still passes node --check. Not verified here: Playwright/WebView2 cannot run on this Linux host and the GUI was not visually inspected."
       ]
     },
     "confirmation_commit_id": null,
@@ -46,7 +42,7 @@
     },
     "state": "finished",
     "title": "Integrate Markdown documents into the design panel and rework design tree navigation",
-    "updated_at": "2026-09-29 08:24:30"
+    "updated_at": "2026-09-29 08:46:50"
   },
   "deleted": false,
   "identity": "f09b6846-7154-4ab7-bbc4-416624de3410",

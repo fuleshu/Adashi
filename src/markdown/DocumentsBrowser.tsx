@@ -1,14 +1,13 @@
 /** Project documents have their own selection; architecture navigation never invents a parent.
  *
- * The list is the "Documents" index mode. The open document renders inside the design viewer panel,
- * so the tree breadcrumb above it and the inspector beside it stay the ones every view uses, and the
- * document's links and backlinks appear in the inspector column instead of under the editor.
+ * The list is the "Documents" index mode. The open document renders inside the design viewer panel
+ * with the tree breadcrumb on top, and everything about that document's links lives in the inspector
+ * column beside it, so the content area stays content and the side panel stays links and backlinks.
  */
 import React from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { Link2, ScrollText } from "lucide-react";
-import type { Backlink, DesignAssociation, DesignOption, DocumentView, MarkdownSummary } from "./types";
-import { DocumentEditor } from "./DocumentEditor";
+import { ScrollText } from "lucide-react";
+import type { Backlink, DesignAssociation, DesignOption, MarkdownSummary } from "./types";
+import { DocumentAssociations, DocumentEditor, type DocumentSession } from "./DocumentEditor";
 import { ImportPanel } from "./ImportPanel";
 import { projectDrafts, readDraft, writeDraft } from "./drafts";
 import "./documents.css";
@@ -22,26 +21,6 @@ function listedDocuments(projectId: string, documents: MarkdownSummary[]) {
       .filter((draft) => !documents.some((summary) => summary.externalId === draft.document.externalId))
       .map((draft) => ({ ...draft.document, readToken: "" })),
   ];
-}
-
-/** One complete read of the selected document; a draft-only document has no saved snapshot yet. */
-function useDocumentView(projectId: string, selectedId: string | null, changeCursor: string, refreshToken: number) {
-  const [view, setView] = React.useState<DocumentView | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
-  const generation = React.useRef(0);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    const current = ++generation.current;
-    if (!selectedId || readDraft(projectId, selectedId)?.base === null) { setView(null); return; }
-    setView((existing) => existing?.document.documentId === `markdown:${selectedId}` ? existing : null);
-    invoke<DocumentView>("get_markdown_document", { projectId, externalId: selectedId })
-      .then((value) => { if (!cancelled && current === generation.current) { setView(value); setError(null); } })
-      .catch((reason) => { if (!cancelled && current === generation.current) setError(String(reason)); });
-    return () => { cancelled = true; };
-  }, [projectId, selectedId, changeCursor, refreshToken]);
-
-  return { view, error, setView, setError, generation };
 }
 
 /** The "Documents" mode of the design index: create, import and pick one design document. The
@@ -93,16 +72,11 @@ export function DocumentsIndex({ projectId, documents, query, selectedId, onSele
   </nav>;
 }
 
-/** The open document, rendered in the design viewer panel while a document is selected. */
-export function DocumentWorkspace({ projectId, changeCursor, options, selectedId, importing, refreshToken, onImportClose, onSelect, onDraftChange }: {
-  projectId: string; changeCursor: string; options: DesignOption[];
-  selectedId: string | null; importing: boolean; refreshToken: number;
-  onImportClose: () => void; onSelect: (id: string | null) => void; onDraftChange: () => void;
+/** The open document, in the design viewer panel below the tree breadcrumb. */
+export function DocumentWorkspace({ session, importing, notice, onImportClose, onSelect }: {
+  session: DocumentSession; importing: boolean; notice: string | null;
+  onImportClose: () => void; onSelect: (id: string | null) => void;
 }) {
-  const { view, error, setView, setError, generation } = useDocumentView(projectId, selectedId, changeCursor, refreshToken);
-  const selectedRef = React.useRef(selectedId);
-  selectedRef.current = selectedId;
-
   if (importing) {
     return <article className="document-workspace" aria-label="Import Markdown design">
       <div className="panel-heading">
@@ -112,120 +86,78 @@ export function DocumentWorkspace({ projectId, changeCursor, options, selectedId
         </div>
       </div>
       <div className="document-workspace-body">
-        <ImportPanel projectId={projectId} onSelect={onSelect} onClose={onImportClose} />
+        <ImportPanel projectId={session.projectId} onSelect={onSelect} onClose={onImportClose} />
       </div>
     </article>;
   }
-
-  const currentView = view?.document.documentId === `markdown:${selectedId}` ? view : null;
-  const document = currentView?.document.document;
-  const draft = selectedId ? readDraft(projectId, selectedId) : undefined;
-  const isNew = Boolean(selectedId && draft?.base === null);
 
   return <article className="document-workspace" aria-label="Design document">
     <div className="panel-heading">
       <div>
         <p className="eyebrow">Markdown Design Document</p>
-        <h3>{document?.title ?? draft?.document.title ?? (selectedId ? selectedId : "No document selected")}</h3>
+        <h3>{session.document?.title ?? session.externalId ?? "No document selected"}</h3>
       </div>
       <div className="status-strip compact">
-        <span>{selectedId ? `markdown:${selectedId}` : "markdown"}</span>
+        <span>{session.externalId ? `markdown:${session.externalId}` : "markdown"}</span>
       </div>
     </div>
     <div className="document-workspace-body">
-      {error && <p role="alert">{error}</p>}
-      {!selectedId ? <p>Select a document in the Documents list.</p> : !currentView && !isNew ? <p>Loading document…</p> : (
-        <DocumentEditor
-          key={`${projectId}:${selectedId}`}
-          projectId={projectId}
-          externalId={selectedId}
-          snapshot={isNew ? null : currentView?.document ?? null}
-          options={options}
-          onDraftChange={onDraftChange}
-          onDeleted={(message) => { if (message) setError(message); if (selectedRef.current === selectedId) onSelect(null); }}
-          onSaved={(snapshot) => {
-            if (selectedRef.current === snapshot.document?.externalId) {
-              generation.current++;
-              setView((current) => ({ document: snapshot, backlinks: current?.backlinks ?? [] }));
-            }
-          }}
-        />
-      )}
+      {session.readError && <p role="alert">{session.readError}</p>}
+      {!session.externalId ? <p>{notice ?? "Select a document in the Documents list."}</p>
+        : !session.document && !session.isNew ? <p>Loading document…</p>
+        : <DocumentEditor key={`${session.projectId}:${session.externalId}`} session={session} />}
     </div>
   </article>;
 }
 
-/** The document's own inspector: where it points, and what points back at it. */
-export function DocumentInspector({ changeCursor, options, projectId, refreshToken, selectedId, onBacklink, onNavigate }: {
-  changeCursor: string; options: DesignOption[]; projectId: string; refreshToken: number;
-  selectedId: string | null; onBacklink: (link: Backlink) => void; onNavigate: (link: DesignAssociation) => void;
+/** Everything about the open document that is not its prose: its associations and its backlinks. */
+export function DocumentInspector({ session, options, onBacklink, onNavigate }: {
+  session: DocumentSession; options: DesignOption[];
+  onBacklink: (link: Backlink) => void; onNavigate: (link: DesignAssociation) => void;
 }) {
-  const { view, error } = useDocumentView(projectId, selectedId, changeCursor, refreshToken);
-  const draft = selectedId ? readDraft(projectId, selectedId) : undefined;
-  const currentView = view?.document.documentId === `markdown:${selectedId}` ? view : null;
-  const document = currentView?.document.document ?? null;
-  const title = document?.title ?? draft?.document.title ?? (selectedId ? selectedId : "No document selected");
-  const links = document?.designLinks ?? draft?.document.designLinks ?? [];
-  const backlinks = currentView?.backlinks ?? [];
+  const backlinks = session.currentView?.backlinks ?? [];
 
   return <aside className="design-inspector-panel" aria-label="Document inspector">
     <div className="inspector-heading">
       <div>
         <p className="eyebrow">Design Document</p>
-        <h3>{title}</h3>
+        <h3>{session.document?.title ?? session.externalId ?? "No document selected"}</h3>
       </div>
       <span>Markdown</span>
     </div>
 
     <p className="inspector-note">
-      {selectedId ? `markdown:${selectedId}` : "Select a document in the Documents list."}
+      {session.externalId ? `markdown:${session.externalId}` : "Select a document in the Documents list."}
     </p>
 
-    <section className="inspector-section">
-      <h4>Related designs</h4>
-      {links.length === 0 ? (
-        <p className="inspector-note">Not connected to any design entity yet. Connect one in the document's Associations.</p>
-      ) : (
-        <div className="inspector-document-list">
-          {links.map((link, index) => (
-            <button
-              className="inspector-document-link"
-              key={`${link.targetType}:${link.designExternalId}`}
-              onClick={() => onNavigate(link)}
-              title="Open the related design entity"
-              type="button"
-            >
-              <Link2 size={14} />
-              <span>{index + 1}. {options.find((option) => option.targetType === link.targetType && option.designExternalId === link.designExternalId)?.title ?? link.designExternalId}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </section>
+    {session.document ? (
+      <>
+        <DocumentAssociations onNavigate={onNavigate} options={options} session={session} />
+        <section className="inspector-section">
+          <h4>Referenced by</h4>
+          {backlinks.length === 0 ? (
+            <p className="inspector-note">Nothing references this document yet.</p>
+          ) : (
+            <div className="inspector-document-list">
+              {backlinks.map((link) => (
+                <button
+                  className="inspector-document-link"
+                  disabled={link.sourceKind === "binding" && !link.sourceId.startsWith("file:")}
+                  key={`${link.sourceKind}:${link.sourceId}`}
+                  onClick={() => onBacklink(link)}
+                  title={`Open ${link.sourceKind}`}
+                  type="button"
+                >
+                  <ScrollText size={14} />
+                  <span>{link.sourceKind}: {link.title}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      </>
+    ) : null}
 
-    <section className="inspector-section">
-      <h4>Referenced by</h4>
-      {backlinks.length === 0 ? (
-        <p className="inspector-note">Nothing references this document yet.</p>
-      ) : (
-        <div className="inspector-document-list">
-          {backlinks.map((link) => (
-            <button
-              className="inspector-document-link"
-              disabled={link.sourceKind === "binding" && !link.sourceId.startsWith("file:")}
-              key={`${link.sourceKind}:${link.sourceId}`}
-              onClick={() => onBacklink(link)}
-              title={`Open ${link.sourceKind}`}
-              type="button"
-            >
-              <ScrollText size={14} />
-              <span>{link.sourceKind}: {link.title}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </section>
-
-    {error ? <p role="alert">{error}</p> : null}
+    {session.readError ? <p role="alert">{session.readError}</p> : null}
   </aside>;
 }

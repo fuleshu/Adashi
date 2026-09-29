@@ -77,12 +77,14 @@ export async function verifyMarkdownEditor({page,call,until,passed,fixture,proje
   await panel.getByTitle(/^Preview/).click();
   await panel.getByRole("button",{name:"Discard changes",exact:true}).click();
   assert.ok((await body()).endsWith("Remote edit\n"));
-  await panel.getByRole("combobox",{name:"Associate design",exact:true}).selectOption({label:"markdown: Renamed desktop specification"});
-  await panel.getByRole("button",{name:"Associate",exact:true}).click();
+  // Associations belong to the document inspector; the editor region holds only content and actions.
+  const inspector=page.getByRole("complementary",{name:"Document inspector",exact:true});
+  await inspector.getByRole("combobox",{name:"Associate design",exact:true}).selectOption({label:"markdown: Renamed desktop specification"});
+  await inspector.getByRole("button",{name:"Associate",exact:true}).click();
   await save();
   await until(async()=>(await read()).document.designLinks.length===1,"association saved");
   await saved();
-  await panel.getByRole("button",{name:"Detach desktop-spec",exact:true}).click();
+  await inspector.getByRole("button",{name:"Detach desktop-spec",exact:true}).click();
   await save();
   await until(async()=>(await read()).document.designLinks.length===0,"association detached");
   await saved();
