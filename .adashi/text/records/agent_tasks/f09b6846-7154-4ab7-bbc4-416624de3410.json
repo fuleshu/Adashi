@@ -1,9 +1,21 @@
 {
   "collection": "agent_tasks",
   "data": {
-    "changed_files": "[]",
-    "completed_at": null,
-    "completion_memo": "",
+    "changed_files": "[\"src/main.tsx\",\"src/styles.css\",\"src/markdown/DocumentsBrowser.tsx\",\"src/markdown/DocumentEditor.tsx\",\"src/markdown/MarkdownEditor.tsx\",\"src/markdown/documents.css\",\"scripts/check_native_design_layout.mjs\",\"scripts/check_native_markdown_documents.mjs\",\"scripts/check_native_markdown_editor.mjs\",\"scripts/check_native_markdown_import.mjs\",\"scripts/check_native_markdown_large.mjs\"]",
+    "completed_at": "2026-09-29 07:17:08",
+    "completion_memo": {
+      "lines": [
+        "Design index rework (src/main.tsx DesignBrowser + styles.css): the level tabs became four index modes. Tree View renders the whole C4 tree always expanded (DesignTree expandAll) with the shown element selected and scrolled into view, followed by a flat \"Unconnected artifacts\" list of Mermaid diagrams, mockups and Markdown documents that are attached or linked nowhere in the tree. Components lists every Container/Component, UML Artifacts lists every Mermaid diagram and mockup, Documents lists every document with New/Import. The shared index search filters whichever listing is shown, and the state filters still replace the listing.\n",
+        "\n",
+        "Markdown integration: DocumentsBrowser.tsx was split into DocumentsIndex (the index mode, now a nav labelled \"Design documents\") and DocumentWorkspace (the open document). The document renders inside the design panel column (.design-main.document-open) while the index panel and inspector stay visible, so it no longer replaces the workspace. Documents stay reachable from the shown entity through the existing viewer-header link chips and a new \"Documents\" inspector section for elements and relationships.\n",
+        "\n",
+        "Editor fixes (MarkdownEditor.tsx, DocumentEditor.tsx): a document opens on its rendered EasyMDE preview (EasyMDE.togglePreview after mount) and the editor box scrolls. The clip bug was EasyMDE copying maxHeight onto .CodeMirror-scroll as an inline height inside a fixed-height host; maxHeight is no longer forwarded and .CodeMirror-scroll is forced to 100% height with overflow:auto, so a scrollbar appears only when the text is longer than the box, and the document workspace scrolls for everything around the editor.\n",
+        "\n",
+        "Acceptance updates: the five native Playwright scripts that encoded the old UI contract (design layout, markdown documents/editor/import/large) now use the index mode tabs, the \"Design documents\" list, .document-workspace and the document breadcrumb, and the editor scripts leave the new preview default before editing.\n",
+        "\n",
+        "Verified: npx tsc --noEmit clean; QA job 249560800 run 2133724378 (build, npm run build) passed; node --check on the edited scripts. Not verified here: the native Playwright/WebView2 suites cannot run on this Linux host, and the GUI was not visually inspected. Committed and pushed as f940a50 on main."
+      ]
+    },
     "confirmation_commit_id": null,
     "confirmed_at": null,
     "created_at": "2026-09-29 07:02:33",
@@ -30,9 +42,9 @@
     "project_id": {
       "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
     },
-    "state": "active",
+    "state": "finished",
     "title": "Integrate Markdown documents into the design panel and rework design tree navigation",
-    "updated_at": "2026-09-29 07:02:37"
+    "updated_at": "2026-09-29 07:17:08"
   },
   "deleted": false,
   "identity": "f09b6846-7154-4ab7-bbc4-416624de3410",
