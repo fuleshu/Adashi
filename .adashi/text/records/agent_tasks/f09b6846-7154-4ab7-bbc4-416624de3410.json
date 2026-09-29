@@ -1,19 +1,21 @@
 {
   "collection": "agent_tasks",
   "data": {
-    "changed_files": "[\"src/main.tsx\",\"src/styles.css\",\"src/markdown/DocumentsBrowser.tsx\",\"src/markdown/DocumentEditor.tsx\",\"src/markdown/MarkdownEditor.tsx\",\"src/markdown/documents.css\",\"scripts/check_native_design_layout.mjs\",\"scripts/check_native_markdown_documents.mjs\",\"scripts/check_native_markdown_editor.mjs\",\"scripts/check_native_markdown_import.mjs\",\"scripts/check_native_markdown_large.mjs\"]",
-    "completed_at": null,
+    "changed_files": "[\"src/main.tsx\",\"src/styles.css\",\"src/markdown/DocumentsBrowser.tsx\",\"src/markdown/DocumentEditor.tsx\",\"src/markdown/documents.css\",\"scripts/check_native_design_layout.mjs\",\"scripts/check_native_markdown_documents.mjs\",\"scripts/check_native_markdown_editor.mjs\",\"scripts/check_native_markdown_import.mjs\"]",
+    "completed_at": "2026-09-29 08:24:30",
     "completion_memo": {
       "lines": [
-        "Design index rework (src/main.tsx DesignBrowser + styles.css): the level tabs became four index modes. Tree View renders the whole C4 tree always expanded (DesignTree expandAll) with the shown element selected and scrolled into view, followed by a flat \"Unconnected artifacts\" list of Mermaid diagrams, mockups and Markdown documents that are attached or linked nowhere in the tree. Components lists every Container/Component, UML Artifacts lists every Mermaid diagram and mockup, Documents lists every document with New/Import. The shared index search filters whichever listing is shown, and the state filters still replace the listing.\n",
+        "Review follow-up on the design index and Markdown integration (second round, commit 14506a9).\n",
         "\n",
-        "Markdown integration: DocumentsBrowser.tsx was split into DocumentsIndex (the index mode, now a nav labelled \"Design documents\") and DocumentWorkspace (the open document). The document renders inside the design panel column (.design-main.document-open) while the index panel and inspector stay visible, so it no longer replaces the workspace. Documents stay reachable from the shown entity through the existing viewer-header link chips and a new \"Documents\" inspector section for elements and relationships.\n",
+        "Tree (src/main.tsx DesignTree/DesignTreeItem): the always-expanded mode is gone. Only the branch of the element shown in the viewer opens by itself, other branches keep the state the user gave them, and the tree starts collapsed. Selecting an element in the diagram or the tree reveals and scrolls to its own branch.\n",
         "\n",
-        "Editor fixes (MarkdownEditor.tsx, DocumentEditor.tsx): a document opens on its rendered EasyMDE preview (EasyMDE.togglePreview after mount) and the editor box scrolls. The clip bug was EasyMDE copying maxHeight onto .CodeMirror-scroll as an inline height inside a fixed-height host; maxHeight is no longer forwarded and .CodeMirror-scroll is forced to 100% height with overflow:auto, so a scrollbar appears only when the text is longer than the box, and the document workspace scrolls for everything around the editor.\n",
+        "Document view: the document now renders inside the design viewer panel (.viewer-panel.document-open) instead of taking over the main column, so the header keeps the tree breadcrumb (System Context > ... > element) and the panel keeps the same background, border and heading as every other view. The document's own breadcrumb is gone. Opening a document no longer switches the index listing, so the tree stays where the user left it; task/QA jumps still open the Documents list.\n",
         "\n",
-        "Acceptance updates: the five native Playwright scripts that encoded the old UI contract (design layout, markdown documents/editor/import/large) now use the index mode tabs, the \"Design documents\" list, .document-workspace and the document breadcrumb, and the editor scripts leave the new preview default before editing.\n",
+        "Right panel (DocumentsBrowser.tsx DocumentInspector): while a document is open the inspector column shows that document instead of another entity, with the same inspector markup as the element and relationship panels (eyebrow, h3, identity note, Related designs, Referenced by). The editor area no longer repeats those links; the editable Associations stay in the document form. The element and relationship inspectors keep their Documents section. A documentRefresh counter re-reads the inspector after association edits, saves and discards only, so typing a body character does not re-read the document.\n",
         "\n",
-        "Verified: npx tsc --noEmit clean; QA job 249560800 run 2133724378 (build, npm run build) passed; node --check on the edited scripts. Not verified here: the native Playwright/WebView2 suites cannot run on this Linux host, and the GUI was not visually inspected. Committed and pushed as f940a50 on main."
+        "UI mockups: a new \"UI Mockup\" index mode lists every mockup flat (title, status, attachment). UML Artifacts now lists UML diagrams only.\n",
+        "\n",
+        "Acceptance: npx tsc --noEmit clean; QA job 249560800 run 5686118898 (build, npm run build) passed on 2026-09-29; node --check on the edited scripts. The five native scripts follow the new contract again (index mode tabs, Design documents list, .document-workspace, document inspector heading, design breadcrumb to leave the document, document list buttons carry an explicit aria-label). Not verified here: the native Playwright/WebView2 suites cannot run on this Linux host and the GUI was not visually inspected."
       ]
     },
     "confirmation_commit_id": null,
@@ -42,9 +44,9 @@
     "project_id": {
       "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
     },
-    "state": "active",
+    "state": "finished",
     "title": "Integrate Markdown documents into the design panel and rework design tree navigation",
-    "updated_at": "2026-09-29 08:22:59"
+    "updated_at": "2026-09-29 08:24:30"
   },
   "deleted": false,
   "identity": "f09b6846-7154-4ab7-bbc4-416624de3410",
