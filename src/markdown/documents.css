@@ -1,26 +1,24 @@
-/* The open document renders inside the design panel; the document list is a design-index mode. */
-.document-workspace{background:var(--panel-bg,#fff);border:1px solid #d7dedb;border-radius:8px;padding:16px;min-width:0;min-height:0;overflow:auto}
-.document-workspace h2{font-size:24px}
-.document-workspace section{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
-.document-workspace h4{width:100%;margin:8px 0}
-.document-workspace button{background:#2f6f6d;color:#fff;border:0;border-radius:7px;padding:8px 12px;cursor:pointer;font:inherit;font-size:14px}
-.document-workspace button:hover{background:#255957}
-.document-workspace button:disabled{opacity:.5;cursor:default}
-.document-workspace input,.document-workspace select{border:1px solid #c6cec9;border-radius:6px;padding:8px;font:inherit;font-size:14px}
-.document-breadcrumbs{font-size:14px;overflow-wrap:anywhere}
-.document-breadcrumbs button{background:transparent;color:#2f6f6d;font-size:14px;padding:4px 6px}
-.document-breadcrumbs button:hover{background:#e6f1ed;color:#163434}
+/* The open document renders inside the design viewer panel, which owns the card background and the
+   heading; the document's links and backlinks live in the inspector column. */
+.document-workspace{display:grid;grid-template-rows:auto minmax(0,1fr);min-height:0;min-width:0}
+.document-workspace-body{min-height:0;overflow:auto;padding:16px}
 .document-workspace .document-editor{display:block}
 .document-editor>label{display:grid;gap:6px}
 .document-editor input{padding:8px;width:100%;box-sizing:border-box}
 .document-body-field{border:0;padding:0;margin:12px 0;min-width:0}
-/* The editor scrolls inside its own box; the document panel scrolls for everything around it. */
+/* The editor scrolls inside its own box; the document panel scrolls everything around it. */
 .document-body-field .markdown-editor-host{resize:vertical;overflow:hidden;max-height:none}
-.document-editor ol{width:100%;padding-left:24px}
+.document-editor section{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.document-editor section h4{width:100%;margin:0}
+.document-editor ol{width:100%;margin:0;padding-left:24px}
 .document-editor li button{margin-left:8px}
 .document-editor pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}
 .document-editor select{max-width:100%;min-width:180px}
 .document-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.document-workspace button{background:#2f6f6d;color:#fff;border:0;border-radius:7px;padding:8px 12px;cursor:pointer;font:inherit;font-size:14px}
+.document-workspace button:hover{background:#255957}
+.document-workspace button:disabled{opacity:.5;cursor:default}
+.document-workspace input,.document-workspace select{border:1px solid #c6cec9;border-radius:6px;padding:8px;font:inherit;font-size:14px}
 
 /* The "Documents" mode of the design index. */
 .documents-index{align-content:start}
@@ -28,7 +26,6 @@
 .documents-index-actions button{background:#2f6f6d;color:#fff;border:0;border-radius:7px;padding:8px 12px;cursor:pointer;font:inherit;font-size:13px}
 .documents-index-actions button:hover{background:#255957}
 .documents-index .design-tree-heading strong{font-size:13px}
-.documents-index-note{color:#617170;font-size:12px}
 
 /* Linked Markdown documents shown next to the UML artifacts of the shown element. */
 .document-artifacts{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}

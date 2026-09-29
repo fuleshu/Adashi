@@ -1,5 +1,5 @@
 import React from "react";
-import { DocumentsIndex, DocumentWorkspace } from "./markdown/DocumentsBrowser";
+import { DocumentsIndex, DocumentInspector, DocumentWorkspace } from "./markdown/DocumentsBrowser";
 import type { MarkdownSummary, DesignAssociation, Backlink } from "./markdown/types";
 import { VersionedField, DraftConflict, useVersionedDraft, savedField, type SaveDraft } from "./VersionedField";
 import ReactDOM from "react-dom/client";
@@ -45,7 +45,7 @@ import { StorageSettings } from "./StorageSettings";
 type DiagramKind = "mermaid" | "structurizr";
 type DesignLevel = "context" | "components" | "features";
 /** What the design index panel lists: the C4 tree or one flat artefact kind. */
-type DesignIndexMode = "tree" | "components" | "uml" | "documents";
+type DesignIndexMode = "tree" | "components" | "uml" | "mockups" | "documents";
 type DesignEntityType = "element" | "relationship";
 type DesignProjectionMode = "branch" | "dependencies";
 
@@ -1227,7 +1227,11 @@ function DesignBrowser({
   const [indexMode, setIndexMode] = React.useState<DesignIndexMode>("tree");
   const [selectedDocument, setSelectedDocument] = React.useState<string | null>(null);
   const [documentsImporting, setDocumentsImporting] = React.useState(false);
-  const openDocument = (id: string | null) => {setSelectedDocument(id);setIndexMode("documents");setDocumentsImporting(false);};
+  // Bumped by the document editor so the inspector column re-reads the document it is showing.
+  const [documentRefresh, setDocumentRefresh] = React.useState(0);
+  // Opening a document never steals the index listing: the tree stays where the user left it, and
+  // the Documents listing is an explicit choice. Jumps from outside the design view pick it.
+  const openDocument = (id: string | null) => {setSelectedDocument(id);setDocumentsImporting(false);};
   const closeDocument = () => {setSelectedDocument(null);setDocumentsImporting(false);};
   const [query, setQuery] = React.useState("");
   const [isResizingSource, setIsResizingSource] = React.useState(false);
@@ -1431,30 +1435,28 @@ function DesignBrowser({
       detail: element.technology,
       open: () => selectTreeElement(element),
     }));
-  const umlIndexEntries: DesignIndexEntry[] = [
-    ...umlIndexArtifacts
-      .filter((diagram) => !normalizedIndexQuery || matchesQuery(diagram.title, diagram.artifactLabel, diagram.key, elementName(diagram.attachedToExternalId)))
-      .map((diagram) => ({
-        key: diagram.key,
-        title: diagram.title,
-        label: diagram.artifactLabel || "UML",
-        detail: diagram.attachedToExternalId
-          ? `attached to ${elementName(diagram.attachedToExternalId) ?? diagram.attachedToExternalId}`
-          : "not attached",
-        open: () => openArtifact(diagram.key, diagram.attachedToExternalId ?? null),
-      })),
-    ...payload.mockups
-      .filter((mockup) => !normalizedIndexQuery || matchesQuery(mockup.title, mockup.externalId, elementName(mockup.attachedToExternalId)))
-      .map((mockup) => ({
-        key: mockup.externalId,
-        title: mockup.title,
-        label: "Mockup",
-        detail: mockup.attachedToExternalId
-          ? `attached to ${elementName(mockup.attachedToExternalId) ?? mockup.attachedToExternalId}`
-          : "not attached",
-        open: () => openArtifact(mockup.externalId, mockup.attachedToExternalId || null),
-      })),
-  ];
+  const umlIndexEntries: DesignIndexEntry[] = umlIndexArtifacts
+    .filter((diagram) => !normalizedIndexQuery || matchesQuery(diagram.title, diagram.artifactLabel, diagram.key, elementName(diagram.attachedToExternalId)))
+    .map((diagram) => ({
+      key: diagram.key,
+      title: diagram.title,
+      label: diagram.artifactLabel || "UML",
+      detail: diagram.attachedToExternalId
+        ? `attached to ${elementName(diagram.attachedToExternalId) ?? diagram.attachedToExternalId}`
+        : "not attached",
+      open: () => openArtifact(diagram.key, diagram.attachedToExternalId ?? null),
+    }));
+  const mockupIndexEntries: DesignIndexEntry[] = payload.mockups
+    .filter((mockup) => !normalizedIndexQuery || matchesQuery(mockup.title, mockup.externalId, mockup.status, elementName(mockup.attachedToExternalId)))
+    .map((mockup) => ({
+      key: mockup.externalId,
+      title: mockup.title,
+      label: `UI Mockup · ${mockup.status}`,
+      detail: mockup.attachedToExternalId
+        ? `attached to ${elementName(mockup.attachedToExternalId) ?? mockup.attachedToExternalId}`
+        : "not attached",
+      open: () => openArtifact(mockup.externalId, mockup.attachedToExternalId || null),
+    }));
 
   function elementName(externalId: string | null | undefined) {
     if (!externalId) {
@@ -1485,6 +1487,7 @@ function DesignBrowser({
     setQuery("");
 
     if (requestedArtifactKey?.startsWith("markdown:")) {
+      setIndexMode("documents");
       openDocument(requestedArtifactKey.slice("markdown:".length));
       return;
     }
@@ -1551,7 +1554,7 @@ function DesignBrowser({
 
     if (mode === "components") {
       selectLevel("components");
-    } else if (mode === "uml") {
+    } else if (mode === "uml" || mode === "mockups") {
       selectLevel("features");
     } else {
       closeDocument();
@@ -1574,6 +1577,14 @@ function DesignBrowser({
 
   const breadcrumbElements = buildBreadcrumb(activeBranchElement, payload.designElements);
   const documentPanelOpen = Boolean(selectedDocument) || documentsImporting;
+  // Every design entity a Markdown association can point at, resolved to a readable title.
+  const designOptions = [
+    ...payload.designElements.map(d => ({targetType:"element" as const,designExternalId:d.externalId,title:d.name})),
+    ...payload.designRelationships.map(d => ({targetType:"relationship" as const,designExternalId:d.externalId,title:d.description || d.externalId})),
+    ...payload.diagrams.map(d => ({targetType:"uml" as const,designExternalId:d.key,title:d.title})),
+    ...payload.mockups.map(d => ({targetType:"mockup" as const,designExternalId:d.externalId,title:d.title})),
+    ...payload.markdownDocuments.map(d => ({targetType:"markdown" as const,designExternalId:d.externalId,title:d.title})),
+  ];
   const viewerTitle =
     activeLevel === "context"
       ? "Level 1: System Context"
@@ -1697,7 +1708,6 @@ function DesignBrowser({
               branchElement={activeBranchElement}
               elements={payload.designElements}
               embedded
-              expandAll
               healthByElement={healthByElement}
               query={query}
               relationships={payload.designRelationships}
@@ -1731,6 +1741,13 @@ function DesignBrowser({
             entries={umlIndexEntries}
             heading="UML Artifacts"
           />
+        ) : indexMode === "mockups" ? (
+          <DesignArtifactIndex
+            detail={`${mockupIndexEntries.length}`}
+            emptyLabel="No UI mockups yet."
+            entries={mockupIndexEntries}
+            heading="UI Mockup"
+          />
         ) : (
           <DocumentsIndex
             documents={payload.markdownDocuments}
@@ -1744,29 +1761,10 @@ function DesignBrowser({
       </aside>
 
       <section
-        className={`design-main${isResizingSource ? " resizing-source" : ""}${documentPanelOpen ? " document-open" : ""}`}
+        className={`design-main${isResizingSource ? " resizing-source" : ""}`}
         ref={designMainRef}
         style={{ "--design-source-height": `${sourcePanelHeight}px` } as React.CSSProperties}
       >
-        {documentPanelOpen ? (
-          <DocumentWorkspace
-            changeCursor={payload.changeCursor}
-            importing={documentsImporting}
-            onBacklink={onBacklink}
-            onImportClose={() => setDocumentsImporting(false)}
-            onNavigate={onNavigate}
-            onSelect={openDocument}
-            options={[
-              ...payload.designElements.map(d => ({targetType:"element" as const,designExternalId:d.externalId,title:d.name})),
-              ...payload.designRelationships.map(d => ({targetType:"relationship" as const,designExternalId:d.externalId,title:d.description || d.externalId})),
-              ...payload.diagrams.map(d => ({targetType:"uml" as const,designExternalId:d.key,title:d.title})),
-              ...payload.mockups.map(d => ({targetType:"mockup" as const,designExternalId:d.externalId,title:d.title})),
-              ...payload.markdownDocuments.map(d => ({targetType:"markdown" as const,designExternalId:d.externalId,title:d.title})),
-            ]}
-            projectId={payload.projectId}
-            selectedId={selectedDocument}
-          />
-        ) : null}
         <header className="design-main-header">
           <div className="document-artifacts" aria-label="Linked Markdown designs">
             {payload.markdownDocuments.filter(d => d.designLinks.some(link => link.designExternalId === artifactTarget?.externalId)).map(d => <button type="button" key={d.externalId} title="Open Markdown specification" onClick={() => openDocument(d.externalId)}>{d.title}</button>)}
@@ -1788,7 +1786,21 @@ function DesignBrowser({
           </div>
         </header>
 
-        <div className="viewer-panel design-viewer-panel">
+        <div className={documentPanelOpen ? "viewer-panel design-viewer-panel document-open" : "viewer-panel design-viewer-panel"}>
+          {documentPanelOpen ? (
+            <DocumentWorkspace
+              changeCursor={payload.changeCursor}
+              importing={documentsImporting}
+              onDraftChange={() => setDocumentRefresh((current) => current + 1)}
+              onImportClose={() => setDocumentsImporting(false)}
+              onSelect={openDocument}
+              options={designOptions}
+              projectId={payload.projectId}
+              refreshToken={documentRefresh}
+              selectedId={selectedDocument}
+            />
+          ) : (
+          <>
           <div className="panel-heading">
             <div>
               <p className="eyebrow">
@@ -1958,6 +1970,8 @@ function DesignBrowser({
               }}
             />
           )}
+          </>
+          )}
         </div>
 
         <button
@@ -2001,7 +2015,7 @@ function DesignBrowser({
         />
       </section>
 
-      <div style={{display:"contents"}}><DesignInspector
+      <div style={{display: documentPanelOpen ? "none" : "contents"}}><DesignInspector
         designHealthByElement={healthByElement}
         elements={payload.designElements}
         markdownDocuments={payload.markdownDocuments}
@@ -2016,6 +2030,17 @@ function DesignBrowser({
         onJumpToFeatures={() => selectLevel("features")}
         onOpenDocument={openDocument}
       /></div>
+      {documentPanelOpen ? (
+        <DocumentInspector
+          changeCursor={payload.changeCursor}
+          onBacklink={onBacklink}
+          onNavigate={onNavigate}
+          options={designOptions}
+          projectId={payload.projectId}
+          refreshToken={documentRefresh}
+          selectedId={selectedDocument}
+        />
+      ) : null}
     </section>
   );
 }
@@ -2026,9 +2051,10 @@ type DesignTreeNode = {
 };
 
 const DESIGN_INDEX_MODES: { id: DesignIndexMode; label: string; title: string; icon: React.ElementType }[] = [
-  { id: "tree", label: "Tree View", title: "The whole C4 tree, always expanded, plus the artefacts that are not attached to it", icon: Network },
+  { id: "tree", label: "Tree View", title: "The C4 tree, with the branch of the shown element open, plus the artifacts that are not attached to it", icon: Network },
   { id: "components", label: "Components", title: "A flat list of every Container and Component", icon: Braces },
-  { id: "uml", label: "UML Artifacts", title: "A flat list of every UML artifact and mockup", icon: GitBranch },
+  { id: "uml", label: "UML Artifacts", title: "A flat list of every UML artifact", icon: GitBranch },
+  { id: "mockups", label: "UI Mockup", title: "A flat list of every UI mockup", icon: Wand2 },
   { id: "documents", label: "Documents", title: "A flat list of every Markdown design document", icon: ScrollText },
 ];
 
@@ -2043,7 +2069,6 @@ function DesignTree({
   branchElement,
   elements,
   embedded = false,
-  expandAll = false,
   healthByElement,
   query,
   relationships,
@@ -2058,8 +2083,6 @@ function DesignTree({
   elements: DesignElement[];
   /** Render inside a caller-owned scroll container instead of scrolling on its own. */
   embedded?: boolean;
-  /** Show every branch expanded; the tree is then a map, not a collapsible control. */
-  expandAll?: boolean;
   healthByElement: Map<string, DesignHealthElement>;
   query: string;
   relationships: DesignRelationship[];
@@ -2167,7 +2190,6 @@ function DesignTree({
           selectedEntity={selectedEntity}
           activeBranchExternalId={branchElement?.externalId ?? null}
           expandedIds={expandedIds}
-          expandAll={expandAll}
           healthByElement={healthByElement}
           onToggleBranch={toggleBranch}
           onSelectElement={onSelectElement}
@@ -2224,7 +2246,6 @@ function DesignTreeItem({
   selectedEntity,
   activeBranchExternalId,
   expandedIds,
-  expandAll,
   healthByElement,
   onToggleBranch,
   onSelectElement,
@@ -2234,7 +2255,6 @@ function DesignTreeItem({
   selectedEntity: { type: DesignEntityType; externalId: string } | null;
   activeBranchExternalId: string | null;
   expandedIds: Set<string>;
-  expandAll: boolean;
   healthByElement: Map<string, DesignHealthElement>;
   onToggleBranch: (externalId: string) => void;
   onSelectElement: (element: DesignElement) => void;
@@ -2248,7 +2268,8 @@ function DesignTreeItem({
   const visibleChildren = node.children.filter((child) => treeNodeMatches(child, normalizedQuery));
   const hasChildren = visibleChildren.length > 0;
   const isSearching = normalizedQuery.length > 0;
-  const isExpanded = expandAll || isSearching || expandedIds.has(node.element.externalId);
+  // Only the branch of the shown element opens by itself; every other branch keeps its own state.
+  const isExpanded = isSearching || expandedIds.has(node.element.externalId);
 
   if (!matches && visibleChildren.length === 0) {
     return null;
@@ -2258,21 +2279,15 @@ function DesignTreeItem({
     <div className="design-tree-node">
       <div className="design-tree-row">
         {hasChildren ? (
-          expandAll ? (
-            <span className="design-tree-toggle-placeholder" aria-hidden="true">
-              <ChevronRight className="expanded" size={16} />
-            </span>
-          ) : (
-            <button
-              aria-expanded={isExpanded}
-              aria-label={`${isExpanded ? "Collapse" : "Expand"} ${node.element.name}`}
-              className="design-tree-toggle"
-              onClick={() => onToggleBranch(node.element.externalId)}
-              type="button"
-            >
-              <ChevronRight className={isExpanded ? "expanded" : ""} size={16} />
-            </button>
-          )
+          <button
+            aria-expanded={isExpanded}
+            aria-label={`${isExpanded ? "Collapse" : "Expand"} ${node.element.name}`}
+            className="design-tree-toggle"
+            onClick={() => onToggleBranch(node.element.externalId)}
+            type="button"
+          >
+            <ChevronRight className={isExpanded ? "expanded" : ""} size={16} />
+          </button>
         ) : (
           <span className="design-tree-toggle-placeholder" />
         )}
@@ -2302,7 +2317,6 @@ function DesignTreeItem({
             <DesignTreeItem
               activeBranchExternalId={activeBranchExternalId}
               expandedIds={expandedIds}
-              expandAll={expandAll}
               key={child.element.externalId}
               node={child}
               normalizedQuery={normalizedQuery}

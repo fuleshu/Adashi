@@ -67,11 +67,12 @@ export async function verifyDesignLayout({ page, call, until, passed, fixture })
   await page.getByRole("region", { name: "Edit design document", exact: true }).waitFor();
   await page.locator(".document-workspace").waitFor();
   assert.ok((await page.locator(".document-workspace").boundingBox()).height > 400);
-  // The document is integrated into the design panel: index and inspector stay visible.
+  // A document keeps the tree breadcrumb on top, the index on the left and its own inspector on the right.
+  assert.equal(await page.locator(".design-breadcrumbs").isVisible(), true);
   assert.equal(await page.locator(".design-index-panel").isVisible(), true);
-  assert.equal(await page.locator(".design-inspector-panel").isVisible(), true);
+  await page.locator(".design-inspector-panel").getByRole("heading", { name: "Layout document", exact: true }).waitFor();
   await page.screenshot({ path: path.join(fixture, "layout-documents.png"), fullPage: true });
-  await page.locator(".document-breadcrumbs").getByRole("button", { name: "Documents", exact: true }).click();
+  await page.locator(".design-breadcrumbs").getByRole("button", { name: "System Context", exact: true }).click();
   await check("return from Documents");
   await fs.writeFile(path.join(fixture, "layout-measurements.json"), JSON.stringify(measurements, null, 2));
   passed("native C4/UML geometry with/without Markdown links, compact/wide window sizes, source resizing and Documents navigation");

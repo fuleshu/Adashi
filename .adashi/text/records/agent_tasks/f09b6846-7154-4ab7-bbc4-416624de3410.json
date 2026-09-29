@@ -2,7 +2,7 @@
   "collection": "agent_tasks",
   "data": {
     "changed_files": "[\"src/main.tsx\",\"src/styles.css\",\"src/markdown/DocumentsBrowser.tsx\",\"src/markdown/DocumentEditor.tsx\",\"src/markdown/MarkdownEditor.tsx\",\"src/markdown/documents.css\",\"scripts/check_native_design_layout.mjs\",\"scripts/check_native_markdown_documents.mjs\",\"scripts/check_native_markdown_editor.mjs\",\"scripts/check_native_markdown_import.mjs\",\"scripts/check_native_markdown_large.mjs\"]",
-    "completed_at": "2026-09-29 07:17:08",
+    "completed_at": null,
     "completion_memo": {
       "lines": [
         "Design index rework (src/main.tsx DesignBrowser + styles.css): the level tabs became four index modes. Tree View renders the whole C4 tree always expanded (DesignTree expandAll) with the shown element selected and scrolled into view, followed by a flat \"Unconnected artifacts\" list of Mermaid diagrams, mockups and Markdown documents that are attached or linked nowhere in the tree. Components lists every Container/Component, UML Artifacts lists every Mermaid diagram and mockup, Documents lists every document with New/Import. The shared index search filters whichever listing is shown, and the state filters still replace the listing.\n",
@@ -42,9 +42,9 @@
     "project_id": {
       "ref": "6d7c2cc7-a9d2-8bf7-9936-20eb655751d5"
     },
-    "state": "finished",
+    "state": "active",
     "title": "Integrate Markdown documents into the design panel and rework design tree navigation",
-    "updated_at": "2026-09-29 07:17:08"
+    "updated_at": "2026-09-29 08:22:59"
   },
   "deleted": false,
   "identity": "f09b6846-7154-4ab7-bbc4-416624de3410",

@@ -809,13 +809,10 @@ button {
   overflow: hidden;
 }
 
-/* An open Markdown document takes the diagram's place; the index and inspector stay visible. */
-.design-main.document-open {
+/* An open Markdown document takes the diagram's place inside the viewer panel; the header, index
+   and inspector columns keep the layout every other view uses. */
+.viewer-panel.document-open {
   grid-template-rows: minmax(0, 1fr);
-}
-
-.design-main.document-open > :not(.document-workspace) {
-  display: none;
 }
 
 /* Keep optional document links and breadcrumbs in one intrinsic header row;

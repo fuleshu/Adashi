@@ -16,10 +16,14 @@ export function DocumentEditor({ projectId, externalId, snapshot, options, onSav
   const [association, setAssociation] = React.useState("");
   const document = draft?.document ?? snapshot?.document;
   const conflict = Boolean(draft?.base && snapshot && draft.base.readToken !== snapshot.readToken);
+  /** Session-local draft edits stay local; only what the parent must re-read notifies it. */
   function edit(change: Partial<MarkdownDocument>) {
     if (!document) return;
     const next: DocumentDraft = { ...draft, base: draft ? draft.base : snapshot, document: { ...document, ...change }, error: undefined };
-    writeDraft(projectId, next); setDraft(next); setStatus("Unsaved changes"); onDraftChange();
+    writeDraft(projectId, next); setDraft(next); setStatus("Unsaved changes");
+    // The document inspector shows the associations, so a link change must reach it; typing a body
+    // character must not, because that would re-read the whole document on every keystroke.
+    if (change.designLinks !== undefined) onDraftChange();
   }
   function discard() {
     discardDraft(projectId, externalId); setDraft(undefined); setStatus("Reloaded"); onDraftChange();

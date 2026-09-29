@@ -61,7 +61,7 @@ export async function verifyMarkdownImport({page,call,until,passed,fixture,proje
   await page.getByRole("button",{name:"Tasks",exact:true}).click();
   await page.getByRole("button",{name:new RegExp(`Task #${task.number} Implement adopted design`)}).click();
   await page.getByRole("button",{name:"Open Adopted specification in Design",exact:true}).click();
-  await page.getByRole("heading",{name:"Adopted specification",exact:true}).waitFor();
+  await page.getByRole("heading",{name:"Adopted specification",exact:true}).first().waitFor();
   await page.getByRole("button",{name:"qa.job: Verify adopted design",exact:true}).waitFor();
   assert.deepEqual(await fs.readFile(source),sourceBefore);
   const otherSource=path.join(project,"second-import.md");

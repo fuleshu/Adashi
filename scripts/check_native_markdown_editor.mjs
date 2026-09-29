@@ -65,7 +65,7 @@ export async function verifyMarkdownEditor({page,call,until,passed,fixture,proje
   await save();
   await panel.getByText("Save failed; draft retained",{exact:true}).waitFor();
   assert.equal(await body(),local);
-  await page.locator(".document-breadcrumbs").getByRole("button",{name:"Documents",exact:true}).click();
+  await page.locator(".design-breadcrumbs").getByRole("button",{name:"System Context",exact:true}).click();
   await page.getByRole("navigation",{name:"Design documents"}).getByRole("button",{name:"Edited native design",exact:true}).click();
   assert.equal(await body(),local,"unmount preserves draft and original guard");
   await panel.getByRole("button",{name:"Reload document",exact:true}).click();
